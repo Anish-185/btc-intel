@@ -28,6 +28,10 @@ class RawTransaction(BaseModel):
     output_amounts: list[float]
     fee: float = Field(ge=0)
     script_type: str = ""
+    # The NTRO schema carries these; we keep them as a fallback for when the
+    # local GeoIP databases are unavailable. geoip.py records which won.
+    asn: int | None = None
+    geo_country: str | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> RawTransaction:

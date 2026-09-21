@@ -140,6 +140,24 @@ engines:
     split: [0.6, 0.2, 0.2]      # chronological, never random
     entity_aggregation: max     # max | mean, when rolling edge scores up
 
+  correlation:
+    output_path: data/processed/ip_correlation.parquet
+
+    # Which relay records count as evidence that an IP broadcast a transaction.
+    # Our data holds one row per observed gossip hop, and a forwarding node is
+    # not the sender. "earliest_hop" keeps only the first-seen hop per txid,
+    # the closest available proxy for the origin until engines/correlation
+    # gains proper origin estimation (Phase 5e). "all_hops" counts every
+    # observation and leans on the shared-IP penalty to suppress relays.
+    evidence: earliest_hop      # earliest_hop | all_hops
+
+    saturation_k: 4             # raw_confidence = 1 - exp(-observations / k)
+    high_risk_asn_factor: 0.2   # VPN / hosting / Tor-adjacent ASN
+    shared_ip:
+      free_entities: 3          # an IP tied to this many clusters is not penalised
+      min_factor: 0.02          # floor, so a link is weakened but never erased
+    min_score: 0.02             # below this the link is not worth writing
+
 risk_weights:
   rules: 0.35
   anomaly: 0.25

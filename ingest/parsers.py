@@ -16,7 +16,9 @@ import config
 
 FIELDS = ["timestamp", "src_ip", "dst_ip", "src_port", "dst_port", "txid",
           "input_addresses", "output_addresses", "input_amounts", "output_amounts",
-          "fee", "script_type"]
+          "fee", "script_type",
+          # optional in a dump; used as the GeoIP fallback (see geoip.enrich)
+          "asn", "geo_country"]
 
 LIST_FIELDS = {"input_addresses", "output_addresses", "input_amounts", "output_amounts"}
 NUMERIC_LISTS = {"input_amounts", "output_amounts"}

@@ -17,8 +17,9 @@ import config
 
 log = logging.getLogger(__name__)
 
-COLUMNS = ["geo_country", "asn", "asn_org", "high_risk_asn"]
-EMPTY = {"geo_country": None, "asn": None, "asn_org": None, "high_risk_asn": False}
+COLUMNS = ["geo_country", "asn", "asn_org", "high_risk_asn", "asn_source"]
+EMPTY = {"geo_country": None, "asn": None, "asn_org": None, "high_risk_asn": False,
+         "asn_source": "none"}
 
 
 @lru_cache(maxsize=1)
@@ -61,6 +62,7 @@ class GeoIp:
             out["asn"] = asn
             out["asn_org"] = asn_rec.get("autonomous_system_organization")
             out["high_risk_asn"] = is_high_risk_asn(asn) if asn is not None else False
+            out["asn_source"] = "geoip" if asn is not None else "none"
         self._cache[ip] = out
         return out
 
@@ -88,9 +90,38 @@ def _get(reader, ip: str):
 
 
 def enrich(df, geo: GeoIp | None = None, column: str = "src_ip", cfg: dict | None = None):
-    """Add geo_country / asn / asn_org / high_risk_asn for each row's src_ip."""
+    """Add geo_country / asn / asn_org / high_risk_asn for each row's src_ip.
+
+    A local .mmdb lookup wins. Where none is available, the dataset's own asn /
+    geo_country columns are used instead — real dumps carry them, and without
+    this fallback every ASN-aware stage downstream sees nothing but nulls.
+    `asn_source` records which one answered, because in a forensics tool the
+    provenance of a claim matters as much as the claim.
+    """
     geo = geo or GeoIp(cfg)
-    lookups = [geo.lookup(str(ip)) for ip in df[column]] if len(df) else []
+    source_asn = list(df["asn"]) if "asn" in df.columns else [None] * len(df)
+    source_country = list(df["geo_country"]) if "geo_country" in df.columns else [None] * len(df)
+
+    lookups = []
+    for i, ip in enumerate(df[column] if len(df) else []):
+        row = dict(geo.lookup(str(ip)))
+        if row["asn"] is None and _present(source_asn[i]):
+            row["asn"] = int(source_asn[i])
+            row["high_risk_asn"] = is_high_risk_asn(row["asn"])
+            row["asn_source"] = "dataset"
+        if row["geo_country"] is None and _present(source_country[i]):
+            row["geo_country"] = str(source_country[i])
+        lookups.append(row)
     for col in COLUMNS:
         df[col] = [row[col] for row in lookups] if lookups else []
     return df
+
+
+def _present(value) -> bool:
+    if value is None:
+        return False
+    try:
+        import math
+        return not (isinstance(value, float) and math.isnan(value))
+    except TypeError:
+        return True

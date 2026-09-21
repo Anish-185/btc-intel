@@ -155,6 +155,29 @@ def test_enrichment_adds_country_and_asn_columns():
     assert list(out["high_risk_asn"]) == [False, False, True]   # DigitalOcean is hosting
 
 
+def test_dataset_asn_is_used_when_no_mmdb_is_available(tmp_path):
+    """Real dumps carry asn / geo_country; without this fallback every
+    ASN-aware stage downstream sees nothing but nulls."""
+    cfg = json.loads(json.dumps(CFG))
+    cfg["geoip"]["country_db"] = str(tmp_path / "nope.mmdb")
+    cfg["geoip"]["asn_db"] = str(tmp_path / "also-nope.mmdb")
+    run(FIXTURES / "sample.csv", tmp_path / "t.parquet", tmp_path / "q.parquet", "csv",
+        geo=GeoIp(cfg), cfg=cfg)
+    df = pd.read_parquet(tmp_path / "t.parquet")
+    assert list(df["asn"]) == [9829, 55836, 7922]
+    assert list(df["asn_source"]) == ["dataset"] * 3
+    assert list(df["geo_country"]) == ["IN", "IN", "US"]
+
+
+def test_geoip_lookup_wins_over_the_dataset_column(tmp_path):
+    """A local database is authoritative; the dataset column is the fallback."""
+    run(FIXTURES / "sample.csv", tmp_path / "t.parquet", tmp_path / "q.parquet", "csv",
+        geo=stub_geo())
+    df = pd.read_parquet(tmp_path / "t.parquet")
+    assert list(df["asn_source"]) == ["geoip"] * 3
+    assert list(df["asn_org"]) == ["BSNL", "RJIL", "DigitalOcean"]
+
+
 def test_pipeline_enriches_every_row(tmp_path):
     summary = run(FIXTURES / "sample.csv", tmp_path / "t.parquet", tmp_path / "q.parquet",
                   "csv", geo=stub_geo())
@@ -177,8 +200,8 @@ def test_missing_mmdb_degrades_to_nulls_without_crashing(tmp_path):
 
 def test_unknown_ip_and_junk_input_are_survivable():
     geo = stub_geo()
-    assert geo.lookup("8.8.8.8") == {"geo_country": None, "asn": None,
-                                     "asn_org": None, "high_risk_asn": False}
+    assert geo.lookup("8.8.8.8") == {"geo_country": None, "asn": None, "asn_org": None,
+                                     "high_risk_asn": False, "asn_source": "none"}
     assert geo.lookup("not-an-ip")["asn"] is None
 
 
