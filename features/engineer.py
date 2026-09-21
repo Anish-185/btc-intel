@@ -34,7 +34,8 @@ ENTITY_COLUMNS = [
 ]
 
 TX_COLUMNS = ["txid", "timestamp", "input_count", "output_count", "equal_output_count",
-              "peel_ratio", "value_in", "value_out", "fee", "time_since_prev_tx_same_wallet"]
+              "equal_output_value", "peel_ratio", "value_in", "value_out", "fee",
+              "time_since_prev_tx_same_wallet"]
 
 
 def _epoch(ts) -> float | None:
@@ -196,11 +197,11 @@ def transaction_features(graph, cfg: dict | None = None) -> pd.DataFrame:
     for tx in txs:
         ts = _epoch(tx.timestamp)
         outs = tx.output_values
-        _, group = equal_value_group(outs, tolerance) if outs else (0.0, [])
+        value, group = equal_value_group(outs, tolerance) if outs else (0.0, [])
         rows.append({
             "txid": tx.txid, "timestamp": tx.timestamp,
             "input_count": len(tx.inputs), "output_count": len(tx.outputs),
-            "equal_output_count": len(group),
+            "equal_output_count": len(group), "equal_output_value": value,
             "peel_ratio": min(outs) / max(outs) if len(outs) == 2 and max(outs) else float("nan"),
             "value_in": sum(tx.input_values), "value_out": sum(outs), "fee": tx.fee,
             "time_since_prev_tx_same_wallet": _previous_gap(tx, seen, ts),

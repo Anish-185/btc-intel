@@ -142,6 +142,33 @@ signal), `peel_ratio` (only meaningful with exactly two outputs, NaN otherwise),
 Thresholds — round units, dormancy gap and burst, velocity window — live under
 `features:` in `config.yaml`.
 
+## Rules engine
+
+```sh
+python -m engines.rules --input data/processed/transactions.parquet \
+    --output data/processed/rule_alerts.parquet
+```
+
+Four detectors, each emitting `Alert{entity_id, rule_name, score, reason, evidence}`
+(`engines/rules/schema.py`). The reason is plain English with the numbers that made
+the rule fire — it is what the explainability layer will quote:
+
+```
+received from 32 distinct wallets, 32 of them first-time senders (100%),
+then peeled funds through 8 hops
+transaction has 6 outputs of equal value 0.10000000 BTC, consistent with a CoinJoin mix
+funds moved through a 3-hop peeling chain, each hop retaining under 11% of the value
+funds split across 4 wallets and re-merged into one transaction of 4 inputs within 2.0 hours
+```
+
+Scores start at `base_score` when a rule only just meets its threshold and climb to
+1.0 as evidence accumulates; `min_score` decides what is worth writing. Every
+threshold is under `engines.rules` in `config.yaml`.
+
+Recall against the generator's ground truth is printed by the test suite —
+`pytest -rP tests/test_rules.py` — so thresholds can be tuned against real numbers
+rather than guesses.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field

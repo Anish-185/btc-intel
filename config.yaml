@@ -91,6 +91,39 @@ features:
     burst_transactions: 5   # ...then this many transactions...
     burst_window_days: 1.0  # ...inside this window
 
+engines:
+  rules:
+    alerts_path: data/processed/rule_alerts.parquet
+    # An alert that only just meets a rule's threshold scores base_score; the
+    # score climbs to 1.0 as the evidence piles up. min_score then decides what
+    # is worth writing — raise it to drop borderline alerts, lower it for recall.
+    min_score: 0.4
+    base_score: 0.35
+
+    ransomware_collector:
+      min_senders: 5            # distinct wallets paying in
+      target_senders: 25        # score saturates here
+      first_time_sender_ratio: 0.6
+      min_peel_hops: 2
+      target_peel_hops: 8
+
+    coinjoin:
+      min_equal_outputs: 3
+      target_equal_outputs: 8
+      min_outputs: 3
+
+    peel_chain:
+      max_peel_ratio: 0.35      # a hop keeps most of the value, peels a little
+      min_hops: 3
+      target_hops: 10
+
+    layering:
+      min_fan_out: 4            # split width
+      min_fan_in: 3             # merge width
+      window_hours: 24
+      max_hops: 6
+      min_traced_inputs: 0.5    # share of the merge's inputs tracing back to the split
+
 risk_weights:
   rules: 0.35
   anomaly: 0.25
