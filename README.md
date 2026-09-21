@@ -30,6 +30,42 @@ Runs fully air-gapped: no network calls at any stage (`offline: true` in `config
 | `data/` | `raw/`, `processed/`, `geoip/` — gitignored |
 | `docs/` | Design notes |
 
+## Generating data
+
+```sh
+python -m generator.main --n-actors 5000 --n-transactions 200000 \
+    --output data/raw/ --formats csv,json,xml --seed 42
+```
+
+Writes `transactions.{csv,json,xml}` — the same records in NTRO's schema — plus
+`ground_truth.json`, which is **not** part of the public dataset and is read only
+by `eval/`. Same seed, byte-identical output.
+
+Typologies (`generator/typologies.py`): `normal` (the majority noise class,
+including innocent NAT/VPN shared IPs), `ransomware_collector` (victim fan-in
+then a peeling chain), `layering` (fan-out/fan-in, several hops),
+`same_actor_cluster` (one actor, several wallets, one IP, short window) and
+`coinjoin` (equal-value inputs from unrelated wallets — the trap that
+common-input-ownership clustering must not fall into). Mix and parameters live
+under `generator:` in `config.yaml`.
+
+Each transaction is broadcast across a simulated 500-node P2P network
+(`generator/net.py`) with exponential per-hop delays, so one txid appears in
+several relay rows. `--relay-observation-rate` sets the fraction of hops that get
+recorded (default 0.3); `--single-row` emits one row per txid, for testing the
+fallback when NTRO's data has no multi-hop records. Some broadcasts are masked
+behind Tor exits or hosting ASNs — ground truth records both the true and the
+observed origin IP, so the IP-correlation engine can be scored on whether it
+discounts those.
+
+`generator.inject.inject_pattern(dataset_dir, typology, params, seed)` appends one
+fresh instance of a typology to an existing dataset and updates `ground_truth.json`
+— this is what red-team mode calls.
+
+Volume scales with the gossip settings: at defaults, 200k transactions produce
+~720k rows (~1.2 GB across all three formats). Turn down `gossip.max_hops_per_tx`
+or `--relay-observation-rate`, or emit fewer formats, if that is too much.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field

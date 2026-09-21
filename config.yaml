@@ -2,22 +2,28 @@
 # NTRO's real dumps may use different field names — remap here, not in code.
 
 schema:
-  # our synthetic name -> field name in the incoming dataset
+  # our canonical name -> field name in the incoming dataset (NTRO's may differ)
+  timestamp: timestamp
+  src_ip: src_ip
+  dst_ip: dst_ip
+  src_port: src_port
+  dst_port: dst_port
   tx_id: txid
-  block_height: block_height
-  timestamp: block_time
-  input_address: input_addr
-  output_address: output_addr
-  value_btc: value
-  fee_btc: fee
-  input_count: n_inputs
-  output_count: n_outputs
+  input_addresses: input_addresses
+  output_addresses: output_addresses
+  input_amounts: input_amounts
+  output_amounts: output_amounts
+  fee: fee
+  script_type: script_type
+  geo_country: geo_country
+  asn: asn
 
 ingest:
   input_dir: data/raw
   processed_dir: data/processed
-  format: csv            # csv | jsonl | parquet
-  timestamp_unit: s      # s | ms | iso
+  format: csv            # csv | json | xml
+  timestamp_unit: iso    # s | ms | iso
+  list_separator: ";"    # how list fields are packed into a single CSV cell
 
 geoip:
   city_db: data/geoip/GeoLite2-City.mmdb
@@ -51,3 +57,76 @@ api:
   port: 8000
 
 offline: true   # no network calls anywhere in the pipeline
+
+generator:
+  start_time: "2026-01-01T00:00:00Z"
+  seconds_between_txs: 12          # mean gap; actual gaps are exponential
+  script_types: [p2wpkh, p2pkh, p2sh, p2wsh, p2tr]
+  script_type_weights: [0.55, 0.15, 0.12, 0.08, 0.10]
+  fee_btc: [0.00002, 0.0009]       # uniform range
+  exchange_share: 0.02             # fraction of base actors that are exchanges
+  nat_share_rate: 0.15             # fraction of base actors sharing a NAT/VPN IP (innocent)
+  nat_pool_size: 40                # how many shared IPs exist
+  wallets_per_actor: [1, 3]
+
+  # fraction of transactions each typology should account for (normalised)
+  pattern_mix:
+    normal: 0.86
+    ransomware_collector: 0.04
+    layering: 0.04
+    same_actor_cluster: 0.03
+    coinjoin: 0.03
+
+  typology_params:
+    ransomware_collector:
+      victims: [15, 60]
+      peel_hops: [4, 12]
+      ransom_btc: [0.01, 0.35]
+      peel_fraction: [0.05, 0.2]
+    layering:
+      fan: [4, 10]
+      depth: [2, 4]
+      amount_btc: [1.0, 40.0]
+    same_actor_cluster:
+      wallets: [3, 8]
+      window_seconds: 900
+      amount_btc: [0.05, 3.0]
+    coinjoin:
+      participants: [5, 12]
+      denomination_btc: [0.01, 0.1, 0.5, 1.0]
+
+  # how a broadcast is observed: home IP, or masked
+  broadcast:
+    tor_rate: 0.05
+    hosting_rate: 0.08
+
+  # example ASN ranges — swap for DB-IP Lite data later
+  asn_pools:
+    residential:
+      - {asn: 9829, name: BSNL, country: IN, prefix: "117.200"}
+      - {asn: 55836, name: RJIL, country: IN, prefix: "49.36"}
+      - {asn: 24560, name: Airtel, country: IN, prefix: "122.176"}
+      - {asn: 7922, name: Comcast, country: US, prefix: "73.14"}
+      - {asn: 3320, name: DTAG, country: DE, prefix: "91.65"}
+    hosting:
+      - {asn: 14061, name: DigitalOcean, country: US, prefix: "159.65"}
+      - {asn: 16509, name: AWS, country: US, prefix: "52.66"}
+      - {asn: 24940, name: Hetzner, country: DE, prefix: "88.99"}
+      - {asn: 9009, name: M247, country: NL, prefix: "185.107"}
+    tor_exit:
+      - {asn: 208294, name: TorExit, country: DE, prefix: "185.220"}
+      - {asn: 4224, name: CalyxTor, country: US, prefix: "162.247"}
+
+gossip:
+  n_nodes: 500
+  n_relays: 40                     # high-degree public relay nodes
+  relay_asn_pool: hosting
+  tor_node_share: 0.06             # share of gossip nodes that are Tor exits
+  hosting_node_share: 0.25
+  peer_degree: 8
+  relay_bias: 0.6                  # probability a peer link prefers a relay node
+  delay_mean_ms: 150               # exponential forwarding delay
+  max_hops_per_tx: 12              # cap on simulated forwarding events per tx
+  relay_observation_rate: 0.3      # fraction of hops that appear in the output
+  p2p_port: 8333
+  ephemeral_ports: [32768, 60999]
