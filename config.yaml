@@ -210,6 +210,18 @@ risk_weights:
   gnn: 0.25
   correlation: 0.15
 
+eval:
+  # The one canonical evaluation setup. Every number in eval/results.md comes
+  # from these settings via `python -m eval.report` — no ad-hoc runs.
+  seed: 41
+  n_actors: 200
+  n_transactions: 1200
+  observation_rates: [0.1, 0.3, 0.6]
+  default_rate: 0.3
+  work_dir: data/processed/eval
+  results_path: eval/results.md
+  calibration_bins: 5
+
 fusion:
   alerts_parquet: data/processed/final_alerts.parquet
   alerts_json: data/processed/final_alerts.json
