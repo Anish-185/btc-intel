@@ -21,6 +21,7 @@ from .typologies import TYPOLOGIES, Tx, World
 from .writers import open_writers
 
 GROUND_TRUTH = "ground_truth.json"
+NODE_INTEL = "node_intel.json"   # public-knowledge node list, safe to ingest
 
 
 def iso(ts: float) -> str:
@@ -127,6 +128,24 @@ def ground_truth(world: World, net: GossipNet, tx_meta: dict, args) -> dict:
     }
 
 
+def node_intel(net: GossipNet, cfg: dict) -> dict:
+    """The synthetic stand-in for Bitnodes + the Tor exit list.
+
+    Deliberately holds ONLY what the real world publishes — which addresses are
+    public relays, Tor exits or hosting networks. Nothing here says who owns a
+    wallet; that stays in ground_truth.json, which the pipeline never reads.
+    """
+    by_kind: dict[str, list[str]] = {"residential": [], "hosting": [], "tor_exit": []}
+    for n in net.nodes:
+        by_kind[n.kind].append(n.addr)
+    pools = cfg["generator"]["asn_pools"]
+    return {"source": "synthetic — generator/net.py, stands in for Bitnodes + Tor exit list",
+            "relay": [net.nodes[i].addr for i in net.relays],
+            "tor_exit": by_kind["tor_exit"],
+            "hosting": by_kind["hosting"],
+            "hosting_asns": [p["asn"] for p in pools["hosting"] + pools["tor_exit"]]}
+
+
 def generate(args, cfg: dict | None = None) -> dict:
     cfg = cfg or config.load()
     rng = random.Random(args.seed)
@@ -169,6 +188,7 @@ def generate(args, cfg: dict | None = None) -> dict:
 
     gt = ground_truth(world, net, tx_meta, args)
     (out_dir / GROUND_TRUTH).write_text(json.dumps(gt, separators=(",", ":")))
+    (out_dir / NODE_INTEL).write_text(json.dumps(node_intel(net, cfg), indent=1))
     return {"transactions": len(tx_meta), "rows": n_rows, "per_typology": produced,
             "actors": len(world.actors), "wallets": len(world.wallet_owner),
             "output": str(out_dir)}

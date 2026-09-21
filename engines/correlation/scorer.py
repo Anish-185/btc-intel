@@ -15,9 +15,12 @@ The reasons are not hedging, they are the actual state of the evidence:
     someone else's network, a custodian, or a stranger given a signed
     transaction.
   * Our records are gossip observations. A node that forwarded a transaction
-    looks, in the data, exactly like the node that originated it. Until origin
-    estimation lands (Phase 5e) we approximate with the earliest-seen hop,
-    which is a proxy and sometimes wrong.
+    looks, in the data, exactly like the node that originated it. We use
+    engines/propagation to estimate the origin, but that estimate is right
+    roughly 29% of the time at our default observation rate — and it cannot do
+    better than 34%, because the true origin is simply absent from the observed
+    hops two thirds of the time. Its confidence is folded into every score
+    here, so a weak estimate cannot masquerade as strong evidence.
   * IP addresses are shared and reassigned — carrier NAT, public wifi, DHCP
     churn, a VPN exit used by thousands.
   * Addresses can be spent by more than one party (multisig, custodial
@@ -41,18 +44,22 @@ import argparse
 import json
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
 
 import config
+from engines.propagation.estimators import estimate_all
 from engines.rules.detectors import FeatureSet
 from graph.builder import build_graph, iter_transactions, load
 from ingest.geoip import is_high_risk_asn
+from ingest.ip_intel import HOSTING, RESIDENTIAL, TOR_EXIT, IpIntel, load_intel
 
-COLUMNS = ["entity_id", "ip", "asn", "asn_org", "geo_country", "high_risk_asn",
-           "observation_count", "distinct_entities", "raw_confidence", "asn_penalty",
-           "shared_ip_penalty", "final_score", "first_seen", "last_seen", "reason"]
+COLUMNS = ["entity_id", "ip", "ip_class", "asn", "asn_org", "geo_country", "high_risk_asn",
+           "observation_count", "effective_observations", "origin_confidence",
+           "distinct_entities", "raw_confidence", "asn_penalty", "shared_ip_penalty",
+           "final_score", "first_seen", "last_seen", "reason"]
 
 HOUR = 3600.0
 DAY = 86400.0
@@ -60,7 +67,7 @@ DAY = 86400.0
 
 @dataclass
 class Observation:
-    """One relay record treated as evidence that `ip` broadcast `txid`."""
+    """One transaction's estimated origin, as evidence about a cluster."""
 
     entity_id: str
     ip: str
@@ -69,13 +76,22 @@ class Observation:
     asn: int | None = None
     asn_org: str | None = None
     country: str | None = None
+    ip_class: str = RESIDENTIAL
+    origin_confidence: float = 1.0
 
 
-def raw_confidence(observation_count: int, cfg: dict | None = None) -> float:
+def raw_confidence(observation_count: float, cfg: dict | None = None) -> float:
     """Saturating: the 20th sighting adds far less than the 2nd, and no amount
-    of repetition ever reaches certainty."""
+    of repetition ever reaches certainty.
+
+    `observation_count` may be fractional: each observation is weighted by how
+    confident engines/propagation is that this IP actually originated that
+    transaction, so three shaky estimates count for less than one solid one.
+    Weighting the *evidence* rather than scaling the *result* keeps the scale
+    meaningful — enough good observations can still reach a high score.
+    """
     k = (cfg or config.load())["engines"]["correlation"]["saturation_k"]
-    return 1.0 - math.exp(-observation_count / k)
+    return 1.0 - math.exp(-max(observation_count, 0.0) / k)
 
 
 def asn_penalty(asn: int | None, cfg: dict | None = None) -> float:
@@ -95,6 +111,22 @@ def asn_penalty(asn: int | None, cfg: dict | None = None) -> float:
     return cfg["engines"]["correlation"]["high_risk_asn_factor"] if is_high_risk_asn(asn) else 1.0
 
 
+def infrastructure_penalty(asn: int | None, ip_class: str, cfg: dict | None = None) -> float:
+    """The ASN penalty, with the IP's classification as a fallback.
+
+    Our records carry the ASN of the *source* of each hop, so an IP we only
+    ever saw as a destination has no ASN attached. Without this fallback a Tor
+    exit seen only as a destination would escape the discount entirely.
+    """
+    cfg = cfg or config.load()
+    by_asn = asn_penalty(asn, cfg)
+    if by_asn < 1.0:
+        return by_asn
+    if ip_class in (TOR_EXIT, HOSTING):
+        return cfg["engines"]["correlation"]["high_risk_asn_factor"]
+    return 1.0
+
+
 def shared_ip_penalty(distinct_entities: int, cfg: dict | None = None) -> float:
     """A NAT gateway, a café's wifi or a relay node is linked to many unrelated
     clusters. Co-occurrence there is coincidence, not association, so the more
@@ -106,38 +138,63 @@ def shared_ip_penalty(distinct_entities: int, cfg: dict | None = None) -> float:
     return max(s["min_factor"], free / distinct_entities)
 
 
-def collect_observations(df: pd.DataFrame, features: FeatureSet,
-                         cfg: dict | None = None) -> list[Observation]:
-    """Relay rows -> (cluster, IP) evidence.
+def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | None = None,
+                         origins: pd.DataFrame | None = None,
+                         intel: IpIntel | None = None) -> list[Observation]:
+    """Relay rows -> (cluster, IP) evidence, via estimated transaction origins.
 
     The broadcaster of a transaction is its *spender*, so a transaction is
-    attributed to the entity behind its inputs. CoinJoins are excluded: one
-    participant or a coordinator broadcasts for everybody, and tying that IP to
-    every participant would invent associations that do not exist.
+    attributed to the entity behind its inputs. Two refinements over reading
+    the first-seen IP directly:
+
+      * the IP is engines/propagation's estimated origin, not whichever hop we
+        happened to record first, and that estimate's own confidence is carried
+        into the score — a weak estimate must not become a strong lead;
+      * CoinJoins are excluded, because one participant or a coordinator
+        broadcasts for everybody and tying that IP to every participant would
+        invent associations that do not exist.
     """
     cfg = cfg or config.load()
-    mode = cfg["engines"]["correlation"]["evidence"]
     mixes = features.clustering.coinjoins
+    intel = intel if intel is not None else load_intel(cfg=cfg)
+    if origins is None:
+        origins, _ = estimate_all(df, intel, cfg)
 
     inputs_by_tx = {tx.txid: tx.input_addresses for tx in iter_transactions(df)}
-    rows = df.sort_values("timestamp", kind="stable")
-    if mode == "earliest_hop":
-        rows = rows.drop_duplicates(subset="txid", keep="first")
+    meta = {}
+    for row in df.sort_values("timestamp", kind="stable").itertuples():
+        meta.setdefault(str(row.txid), row)          # earliest row, for asn/country/time
 
     observations = []
-    for row in rows.itertuples():
-        txid = str(row.txid)
-        if txid in mixes:
+    for est in origins.itertuples():
+        txid = str(est.txid)
+        if txid in mixes or not est.estimated_origin_ip:
             continue
+        row = meta.get(txid)
         entities = {features.entity_of(a) for a in inputs_by_tx.get(txid, [])}
-        ts = pd.Timestamp(row.timestamp).timestamp()
-        asn = None if pd.isna(getattr(row, "asn", None)) else int(row.asn)
+        ts = pd.Timestamp(row.timestamp).timestamp() if row is not None else 0.0
+        ip = str(est.estimated_origin_ip)
+        asn = _asn_of(df, ip)
         for entity_id in entities:
             observations.append(Observation(
-                entity_id=entity_id, ip=str(row.src_ip), txid=txid, timestamp=ts, asn=asn,
-                asn_org=_text(getattr(row, "asn_org", None)),
-                country=_text(getattr(row, "geo_country", None))))
+                entity_id=entity_id, ip=ip, txid=txid, timestamp=ts, asn=asn,
+                asn_org=_text(getattr(row, "asn_org", None)) if row is not None else None,
+                country=_text(getattr(row, "geo_country", None)) if row is not None else None,
+                ip_class=str(est.ip_class), origin_confidence=float(est.confidence)))
     return observations
+
+
+@lru_cache(maxsize=1)
+def _asn_index(key: int) -> dict:
+    return {}
+
+
+def _asn_of(df: pd.DataFrame, ip: str) -> int | None:
+    match = df.loc[df["src_ip"] == ip, "asn"] if "asn" in df.columns else []
+    for value in match:
+        if not pd.isna(value):
+            return int(value)
+    return None
 
 
 def _text(value) -> str | None:
@@ -156,9 +213,14 @@ def _span_phrase(first: float, last: float, count: int) -> str:
     return f"within {max(seconds / 60.0, 1):.0f} minutes"
 
 
+CLASS_WORDS = {"known_bitcoin_relay": "a known public Bitcoin relay",
+               "tor_exit": "a Tor exit node", "hosting_vpn": "hosting/VPN infrastructure",
+               "residential_or_unknown": "residential or unclassified"}
+
+
 def build_reason(link: dict) -> str:
     """Plain English, stating the evidence and every discount applied to it."""
-    kind = "VPN/hosting/Tor-adjacent" if link["high_risk_asn"] else "residential"
+    kind = CLASS_WORDS.get(link["ip_class"], link["ip_class"])
     asn = f"ASN {link['asn']}" if link["asn"] is not None else "ASN unknown"
     if link["asn_org"]:
         asn += f" {link['asn_org']}"
@@ -166,11 +228,12 @@ def build_reason(link: dict) -> str:
         asn += f", {link['geo_country']}"
     span = _span_phrase(link["first_seen"], link["last_seen"], link["observation_count"])
     n = link["observation_count"]
-    reason = (f"IP {link['ip']} ({asn}, {kind}) observed broadcasting "
-              f"{n} transaction{'' if n == 1 else 's'} from this cluster {span}")
+    reason = (f"estimated origin {link['ip']} ({asn}, {kind}), origin confidence "
+              f"{link['origin_confidence']:.2f}, {n} transaction"
+              f"{'' if n == 1 else 's'} broadcast from it by this cluster {span}")
     if link["asn_penalty"] < 1.0:
-        reason += ("; confidence reduced because the ASN is VPN/hosting/Tor-adjacent, "
-                   "where the address is shared by unrelated people")
+        reason += (f"; confidence reduced because this address is {kind}, "
+                   "shared by unrelated people")
     if link["shared_ip_penalty"] < 1.0:
         reason += (f"; confidence reduced because this IP also broadcasts for "
                    f"{link['distinct_entities'] - 1} other clusters, consistent with "
@@ -189,7 +252,10 @@ def score_observations(observations: list[Observation], cfg: dict | None = None)
             "entity_id": obs.entity_id, "ip": obs.ip, "asn": obs.asn,
             "asn_org": obs.asn_org, "geo_country": obs.country, "txids": set(),
             "first_seen": obs.timestamp, "last_seen": obs.timestamp})
-        link["txids"].add(obs.txid)          # independent broadcasts, not rows
+        if obs.txid not in link["txids"]:    # independent broadcasts, not rows
+            link["txids"].add(obs.txid)
+            link.setdefault("origin_confidences", []).append(obs.origin_confidence)
+        link.setdefault("ip_class", obs.ip_class)
         link["first_seen"] = min(link["first_seen"], obs.timestamp)
         link["last_seen"] = max(link["last_seen"], obs.timestamp)
         if link["asn"] is None:
@@ -203,8 +269,12 @@ def score_observations(observations: list[Observation], cfg: dict | None = None)
         link["observation_count"] = count
         link["distinct_entities"] = distinct
         link["high_risk_asn"] = is_high_risk_asn(link["asn"]) if link["asn"] is not None else False
-        link["raw_confidence"] = raw_confidence(count, cfg)
-        link["asn_penalty"] = asn_penalty(link["asn"], cfg)
+        # Each observation counts only as much as we believe the origin estimate.
+        confidences = link["origin_confidences"]
+        link["origin_confidence"] = sum(confidences) / len(confidences)
+        link["effective_observations"] = round(sum(confidences), 4)
+        link["raw_confidence"] = raw_confidence(link["effective_observations"], cfg)
+        link["asn_penalty"] = infrastructure_penalty(link["asn"], link["ip_class"], cfg)
         link["shared_ip_penalty"] = shared_ip_penalty(distinct, cfg)
         link["final_score"] = (link["raw_confidence"] * link["asn_penalty"]
                                * link["shared_ip_penalty"])
@@ -221,16 +291,19 @@ def score_observations(observations: list[Observation], cfg: dict | None = None)
 
 
 def correlate(df: pd.DataFrame, features: FeatureSet | None = None,
-              cfg: dict | None = None) -> pd.DataFrame:
+              cfg: dict | None = None, origins: pd.DataFrame | None = None,
+              intel: IpIntel | None = None) -> pd.DataFrame:
     cfg = cfg or config.load()
     features = features or FeatureSet.from_graph(build_graph(df, cfg), cfg)
-    return score_observations(collect_observations(df, features, cfg), cfg)
+    return score_observations(
+        collect_observations(df, features, cfg, origins, intel), cfg)
 
 
-def run(input_path=None, output=None, cfg: dict | None = None) -> dict:
+def run(input_path=None, output=None, cfg: dict | None = None, node_intel=None) -> dict:
     cfg = cfg or config.load()
     df = load(input_path, cfg)
-    links = correlate(df, cfg=cfg)
+    intel = load_intel(None, node_intel or cfg["ingest"]["input_dir"], cfg)
+    links = correlate(df, cfg=cfg, intel=intel)
     output = Path(output or cfg["engines"]["correlation"]["output_path"])
     output.parent.mkdir(parents=True, exist_ok=True)
     links.to_parquet(output, index=False)

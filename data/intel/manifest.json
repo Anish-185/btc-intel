@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-09-21T19:49:41+00:00",
+  "files": {
+    "known_bitcoin_nodes.json": {
+      "source_url": "https://bitnodes.io/api/v1/snapshots/latest/",
+      "downloaded_at": "2026-09-21T19:49:39+00:00",
+      "bytes": 2803251,
+      "sha256": "53283a38ee80aadedfe276d53deddd2b4396577a9df1545492df259d7cccf4cc",
+      "status": "ok"
+    },
+    "tor_exit_nodes.txt": {
+      "source_url": "https://check.torproject.org/torbulkexitlist",
+      "downloaded_at": "2026-09-21T19:49:40+00:00",
+      "bytes": 19491,
+      "sha256": "d28c7d4cc38ba73ccdd43c130b93bf180cc213f028ba58744548d30f48074846",
+      "status": "ok"
+    },
+    "hosting_asns.txt": {
+      "source_url": "https://raw.githubusercontent.com/brianhama/bad-asn-list/master/bad-asn-list.csv",
+      "downloaded_at": "2026-09-21T19:49:41+00:00",
+      "bytes": 24159,
+      "sha256": "0af8e58dc07ba070a10c9083a1a9f5c9fc76be35fab32bb6d144e72caa20a252",
+      "status": "ok"
+    }
+  }
+}

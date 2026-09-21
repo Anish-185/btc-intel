@@ -26,6 +26,7 @@ from .schema import RawTransaction, validate
 log = logging.getLogger(__name__)
 QUARANTINE_COLUMNS = ["source_file", "row", "reason", "raw"]
 GROUND_TRUTH = "ground_truth.json"  # hidden labels — must never be ingested
+NOT_DATA = {GROUND_TRUTH, "node_intel.json", "manifest.json"}
 
 
 def resolve_input(path, fmt: str | None = None, cfg: dict | None = None) -> tuple[Path, str]:
@@ -38,7 +39,7 @@ def resolve_input(path, fmt: str | None = None, cfg: dict | None = None) -> tupl
     if fmt not in PARSERS:
         raise ValueError(f"unknown format {fmt!r}; have {sorted(PARSERS)}")
     # ground_truth.json lives beside the data but is NOT input — it holds the labels
-    candidates = [c for c in sorted(p.glob(f"*.{fmt}")) if c.name != GROUND_TRUTH]
+    candidates = [c for c in sorted(p.glob(f"*.{fmt}")) if c.name not in NOT_DATA]
     preferred = [c for c in candidates if c.stem == "transactions"]
     candidates = preferred or candidates
     if not candidates:

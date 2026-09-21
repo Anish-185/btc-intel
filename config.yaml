@@ -27,6 +27,19 @@ ingest:
   timestamp_unit: iso    # s | ms | iso
   list_separator: ";"    # how list fields are packed into a single CSV cell
 
+intel:
+  # Public IP intelligence, fetched once by offline/fetch_intel.sh. Read from
+  # disk only — the pipeline never touches the network.
+  dir: data/intel
+  known_nodes: known_bitcoin_nodes.json
+  tor_exits: tor_exit_nodes.txt
+  hosting_asns: hosting_asns.txt
+  manifest: manifest.json
+  # Synthetic stand-in written beside a generated dataset. Holds only what the
+  # real world publishes (which IPs are public relays, Tor exits, hosting) —
+  # never who owns what. That lives in ground_truth.json and is never read here.
+  synthetic_node_intel: node_intel.json
+
 geoip:
   country_db: data/geoip/GeoLite2-Country.mmdb
   asn_db: data/geoip/GeoLite2-ASN.mmdb
@@ -140,18 +153,38 @@ engines:
     split: [0.6, 0.2, 0.2]      # chronological, never random
     entity_aggregation: max     # max | mean, when rolling edge scores up
 
+  propagation:
+    output_path: data/processed/tx_origins.parquet
+    # Measured on generated data (tests/test_propagation.py prints the table).
+    # The binding constraint is the ceiling: the true origin is only present in
+    # the observed tree 20% / 34% / 63% of the time at relay-observation rates
+    # 0.1 / 0.3 / 0.6. Against that ceiling first_timestamp reaches ~87%, the
+    # hybrid ~65%, rumor centrality ~30% — because our origin appears as a
+    # degree-1 leaf (origin -> entry node) while Shah & Zaman's estimator seeks
+    # the tree's centre, a prior that fits full infected subtrees, not sparse
+    # samples. All three are kept and comparable; re-measure on real data.
+    estimator: first_timestamp   # first_timestamp | rumor_centrality | timestamp_weighted_centrality
+    centrality_weight: 0.6      # timestamp_weighted: weight on rumor centrality
+    timing_weight: 0.4          # ...and on how early the node reported
+    runner_ups: 3
+
+    # A public relay forwards thousands of other people's transactions, so its
+    # presence near the root of an observed tree means almost nothing.
+    class_weights:
+      known_bitcoin_relay: 0.05
+      tor_exit: 0.2
+      hosting_vpn: 0.3
+      residential_or_unknown: 1.0
+
+    single_row_confidence: 0.15   # one observation is a guess, not an estimate
+
   correlation:
     output_path: data/processed/ip_correlation.parquet
 
-    # Which relay records count as evidence that an IP broadcast a transaction.
-    # Our data holds one row per observed gossip hop, and a forwarding node is
-    # not the sender. "earliest_hop" keeps only the first-seen hop per txid,
-    # the closest available proxy for the origin until engines/correlation
-    # gains proper origin estimation (Phase 5e). "all_hops" counts every
-    # observation and leans on the shared-IP penalty to suppress relays.
-    evidence: earliest_hop      # earliest_hop | all_hops
-
-    saturation_k: 4             # raw_confidence = 1 - exp(-observations / k)
+    # Which IP counts as the broadcaster is decided by engines/propagation,
+    # not by whichever hop happened to be recorded first. Each observation is
+    # then weighted by that estimate's confidence before it counts as evidence.
+    saturation_k: 2             # raw_confidence = 1 - exp(-effective_observations / k)
     high_risk_asn_factor: 0.2   # VPN / hosting / Tor-adjacent ASN
     shared_ip:
       free_entities: 3          # an IP tied to this many clusters is not penalised
