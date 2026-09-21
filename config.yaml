@@ -124,6 +124,22 @@ engines:
       max_hops: 6
       min_traced_inputs: 0.5    # share of the merge's inputs tracing back to the split
 
+  gnn:
+    scores_path: data/processed/gnn_scores.parquet
+    # What counts as illicit when labelling from ground_truth.json. CoinJoin is
+    # deliberately absent: mixing is suspicious, not by itself a crime.
+    illicit_typologies: [ransomware_collector, layering]
+    max_edges_per_tx: 64        # cap on the input x output expansion (CoinJoins)
+    hidden: 64
+    layers: 2
+    dropout: 0.2
+    lr: 0.005
+    weight_decay: 0.0001
+    epochs: 30
+    seed: 42
+    split: [0.6, 0.2, 0.2]      # chronological, never random
+    entity_aggregation: max     # max | mean, when rolling edge scores up
+
 risk_weights:
   rules: 0.35
   anomaly: 0.25
@@ -162,6 +178,12 @@ generator:
     same_actor_cluster: 0.03
     coinjoin: 0.03
 
+  # A typology instance is spread over a window instead of being emitted
+  # back-to-back, the way AMLSim gives each pattern a period. Without this the
+  # inter-transaction gap alone gives the label away and every model trained on
+  # this data reports inflated accuracy. Window = n_txs * gap * spread_factor.
+  typology_spread_factor: 20
+
   typology_params:
     ransomware_collector:
       victims: [15, 60]
@@ -174,6 +196,7 @@ generator:
       depth: [2, 4]
       amount_btc: [1.0, 40.0]
     same_actor_cluster:
+      spread_factor: 0          # must stay bursty: one IP, one short window
       wallets: [3, 8]
       window_seconds: 900
       amount_btc: [0.05, 3.0]

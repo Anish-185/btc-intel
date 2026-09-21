@@ -169,6 +169,31 @@ Recall against the generator's ground truth is printed by the test suite —
 `pytest -rP tests/test_rules.py` — so thresholds can be tuned against real numbers
 rather than guesses.
 
+## GNN engine
+
+```sh
+pip install -e '.[gnn]'      # torch is an extra; nothing else needs it
+python -m engines.gnn.train --input data/processed/transactions.parquet \
+    --ground-truth data/raw/ground_truth.json
+python -m engines.gnn.infer --output data/processed/gnn_scores.parquet
+```
+
+A simplified GINe adapted from Multi-GNN: **nodes are entities, edges are
+transactions**, and the label sits on the edge. Kept from their design —
+edge-conditioned messages, the `(x + relu(norm(conv)))/2` residual, optional
+edge updates between layers, chronological splits. Dropped — the GAT/PNA/RGCN
+variants, port numbering, reverse message passing. Two UTXO adaptations their
+bank-ledger model does not need: a transaction expands to every (input entity →
+output entity) pair, and a pure-change transaction keeps a self-loop so it is
+still scored.
+
+⚠️ **The labels are synthetic.** This model is trained on patterns we invented
+in `generator/`, so its accuracy figures describe our simulator, not Bitcoin.
+NTRO's real data arrives unlabelled, meaning this model can be applied there but
+never retrained, and its error rate there is unknown. It is one signal among
+several in `fusion/`; the rules engine is what an investigator should see first.
+The full caveat is in `engines/gnn/train.py`'s docstring.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field

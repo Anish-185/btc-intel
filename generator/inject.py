@@ -16,7 +16,8 @@ from pathlib import Path
 
 import config
 
-from .main import GROUND_TRUTH, ground_truth, iso, observed_origin, relay_rows
+from .main import (GROUND_TRUTH, ground_truth, iso, observed_origin, relay_rows,
+                    spread_instance)
 from .net import build_net
 from .typologies import TYPOLOGIES, World
 from .writers import WRITERS, open_writers
@@ -54,6 +55,7 @@ def inject_pattern(dataset_dir, typology: str, params: dict | None = None,
     world.populate(params.get("n_counterparties", 25))  # fresh innocent counterparties
 
     txs = TYPOLOGIES[typology](world)
+    spread_instance(txs, typology, rng, cfg)
 
     formats = [f for f in WRITERS if (d / f"transactions.{f}").exists()]
     rate = params.get("relay_observation_rate", cfg["gossip"]["relay_observation_rate"])

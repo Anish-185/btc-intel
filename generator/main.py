@@ -67,6 +67,24 @@ def relay_rows(tx: Tx, origin: Ip, net: GossipNet, rng: random.Random, cfg: dict
         }
 
 
+def spread_instance(txs, name: str, rng: random.Random, cfg: dict) -> None:
+    """Scatter one instance's transactions over a window, preserving order.
+
+    Emitted back-to-back, a typology's transactions are separated by seconds
+    while ordinary wallets re-spend hours apart — so the gap alone identifies
+    the pattern and anything trained on it learns the simulator, not Bitcoin.
+    """
+    g = cfg["generator"]
+    factor = g["typology_params"].get(name, {}).get("spread_factor", g["typology_spread_factor"])
+    if len(txs) < 2 or not factor:
+        return
+    ordered = sorted(txs, key=lambda t: t.ts)
+    t0 = ordered[0].ts
+    window = len(txs) * g["seconds_between_txs"] * factor
+    for tx, offset in zip(ordered, sorted(rng.uniform(0, window) for _ in txs)):
+        tx.ts = t0 + offset   # order is preserved, so peel chains stay causal
+
+
 def pick_typology(produced: dict[str, int], targets: dict[str, float]) -> str:
     """Whichever typology is furthest below its share of the transaction budget."""
     return min(targets, key=lambda k: produced[k] / targets[k] if targets[k] else float("inf"))
@@ -130,6 +148,7 @@ def generate(args, cfg: dict | None = None) -> dict:
         while sum(produced.values()) < args.n_transactions:
             name = pick_typology(produced, targets)
             txs = TYPOLOGIES[name](world)
+            spread_instance(txs, name, rng, cfg)
             produced[name] += len(txs)
             for tx in sorted(txs, key=lambda t: t.ts):
                 actor = world.actor(tx.origin_actor)

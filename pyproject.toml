@@ -17,6 +17,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.2", "ruff>=0.5"]
+# The GNN engine only. Everything else — ingest, graph, features, rules —
+# runs without torch, which keeps the offline install small when it is not wanted.
+gnn = ["torch>=2.2", "torch-geometric>=2.5"]
 
 [build-system]
 requires = ["hatchling"]
