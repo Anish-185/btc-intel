@@ -21,14 +21,30 @@ schema:
 ingest:
   input_dir: data/raw
   processed_dir: data/processed
-  format: csv            # csv | json | xml
+  format: csv            # csv | json | xml — which file to read from a directory
+  quarantine_path: data/processed/quarantine.parquet
+  output_path: data/processed/transactions.parquet
   timestamp_unit: iso    # s | ms | iso
   list_separator: ";"    # how list fields are packed into a single CSV cell
 
 geoip:
-  city_db: data/geoip/GeoLite2-City.mmdb
-  asn_db: data/geoip/GeoLite2-ASN.mmdb
   country_db: data/geoip/GeoLite2-Country.mmdb
+  asn_db: data/geoip/GeoLite2-ASN.mmdb
+  city_db: data/geoip/GeoLite2-City.mmdb   # optional, unused for now
+  # VPN / hosting / Tor-adjacent ASNs. Small starter list — expand later.
+  # An IP in one of these is weak evidence of location or identity, so the
+  # correlation engine discounts it.
+  high_risk_asns:
+    - 14061   # DigitalOcean
+    - 16509   # AWS
+    - 24940   # Hetzner
+    - 9009    # M247
+    - 208294  # Tor exit operator (example)
+    - 4224    # Calyx / Tor-adjacent (example)
+    - 60729   # Zwiebelfreunde (Tor)
+    - 53667   # FranTech / BuyVM
+    - 20473   # Vultr / Choopa
+    - 63949   # Akamai (Linode)
 
 models:
   anomaly: models/isolation_forest.joblib

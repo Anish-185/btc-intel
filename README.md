@@ -66,6 +66,29 @@ Volume scales with the gossip settings: at defaults, 200k transactions produce
 ~720k rows (~1.2 GB across all three formats). Turn down `gossip.max_hops_per_tx`
 or `--relay-observation-rate`, or emit fewer formats, if that is too much.
 
+## Ingesting
+
+```sh
+python -m ingest.pipeline --input data/raw/ --output data/processed/transactions.parquet
+```
+
+parse → validate → enrich → parquet. `ingest/parsers.py` reads CSV, JSON or XML and
+normalises all three into `RawTransaction` (`ingest/schema.py`); field names come from
+config's `schema:` map, never from code. Malformed records — bad IP, mismatched
+input/output array lengths, negative amounts, bad timestamps — land in
+`data/processed/quarantine.parquet` with a reason and the original record, rather than
+being dropped or killing the run.
+
+A directory holding all three formats is read once: pick with `--format`, or set
+`ingest.format`. `ground_truth.json` is excluded by name, so the labels can never be
+ingested as evidence.
+
+`ingest/geoip.py` enriches each row's `src_ip` from local `.mmdb` files (paths in
+config, no network) adding `geo_country`, `asn`, `asn_org` and `high_risk_asn`.
+`is_high_risk_asn()` checks `geoip.high_risk_asns` — VPN/hosting/Tor-adjacent
+networks the correlation engine should discount. Missing databases degrade to null
+columns instead of failing.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field
