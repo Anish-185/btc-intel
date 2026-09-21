@@ -89,6 +89,37 @@ config, no network) adding `geo_country`, `asn`, `asn_org` and `high_risk_asn`.
 networks the correlation engine should discount. Missing databases degrade to null
 columns instead of failing.
 
+## Graph and clustering
+
+```python
+from graph.builder import from_parquet, iter_transactions, load
+from graph.clustering import cluster_wallets
+from graph.entity_graph import build_entity_graph
+
+txs = list(iter_transactions(load()))      # relay rows collapsed per txid
+g = from_parquet()                          # MultiDiGraph: wallet / transaction / ip
+clustering = cluster_wallets(txs)
+entities = build_entity_graph(txs, clustering)
+```
+
+`graph/builder.py` builds a `MultiDiGraph` with a `node_type` of `wallet`,
+`transaction` or `ip`, and edges wallet→tx (`input`), tx→wallet (`output`),
+ip→tx (`broadcast`); amounts, timestamps and script type ride on the edges.
+
+`graph/clustering.py` reimplements BlockSci's published heuristics in pure
+Python — common-input-ownership, and change detection by majority vote over
+`address_reuse`, `address_type`, `optimal_change` and `peeling_chain`. Each
+sub-heuristic returns the outputs it *cannot rule out*, as BlockSci's do; a tie
+or too few votes means no change link, because a wrong merge is permanent.
+CoinJoin-shaped transactions are detected first and skipped, so unrelated
+participants are never merged. Wallets are merged with union-find (`DSU`), and
+`cluster_collapse_guard` flags any cluster above `graph.collapse_guard.max_cluster_wallets`
+(default 500) as `suspicious_merge — needs review` rather than trusting it.
+
+`graph/entity_graph.py` collapses that into one node per cluster for the
+dashboard's link-analysis view: aggregated value, transaction counts, txids per
+link, broadcast IPs and the collapse-guard flag per entity.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field

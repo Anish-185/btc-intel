@@ -52,10 +52,28 @@ models:
   scaler: models/scaler.joblib
 
 graph:
-  # address clustering heuristics
+  # address clustering heuristics (reimplemented from BlockSci's published
+  # definitions — see docs/vendor_notes.md; nothing is imported from vendor/)
   common_input_ownership: true
   change_detection: true
   max_hops: 4
+
+  coinjoin:
+    # common-input-ownership is skipped on transactions that look like this
+    min_inputs: 3
+    min_outputs: 3
+    min_equal_outputs: 3        # how many outputs must share one value
+    equal_value_tolerance: 0.02 # relative, so near-equal CoinJoin outputs still count
+    dust_btc: 0.0000273         # BlockSci excludes dust-valued "equal" outputs
+
+  change:
+    heuristics: [address_reuse, address_type, optimal_change, peeling_chain]
+    min_votes: 2                # below this the change output is left undecided
+    # a tie between outputs is never resolved — guessing here corrupts clusters
+
+  collapse_guard:
+    max_cluster_wallets: 500    # above this a cluster is flagged, not trusted
+    reason: "suspicious_merge — needs review"
 
 risk_weights:
   rules: 0.35

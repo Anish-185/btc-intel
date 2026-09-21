@@ -90,6 +90,7 @@ def ground_truth(world: World, net: GossipNet, tx_meta: dict, args) -> dict:
                 "actor_id": a.actor_id,
                 "wallets": a.wallets,
                 "true_broadcast_ip": a.home_ip.addr,
+                "script_type": a.script_type,
                 "asn": a.home_ip.asn,
                 "shared_ip": a.shared_ip,  # innocent NAT/VPN co-tenancy
             }

@@ -10,6 +10,7 @@ import pytest
 import config
 from generator.inject import inject_pattern
 from generator.main import build_parser, generate
+from generator.typologies import ADDRESS_FORMS as FORMS
 from generator.writers import FIELDS, LIST_FIELDS, columns
 
 CFG = config.load()
@@ -66,7 +67,7 @@ def test_row_fields_are_well_formed(tmp_path):
         assert len(r[cols["geo_country"]]) == 2 and int(r[cols["asn"]]) > 0
         ins = r[cols["input_addresses"]].split(SEP)
         assert len(ins) == len(r[cols["input_amounts"]].split(SEP))
-        assert all(a.startswith("bc1q") for a in ins)
+        assert all(any(a.startswith(p) for p, _ in FORMS.values()) for a in ins)
     for j in json.loads((d / "transactions.json").read_text())[:200]:
         for f in LIST_FIELDS:
             assert isinstance(j[cols[f]], list) and j[cols[f]]

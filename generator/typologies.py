@@ -19,6 +19,12 @@ import config
 from .net import Ip, IpAllocator
 
 
+# Address shapes per script type: (prefix, body length). Real dumps carry this
+# variety and the change-address heuristics depend on it.
+ADDRESS_FORMS = {"p2pkh": ("1", 33), "p2sh": ("3", 33), "p2wpkh": ("bc1q", 38),
+                 "p2wsh": ("bc1q", 58), "p2tr": ("bc1p", 58)}
+
+
 @dataclass
 class Actor:
     """One real-world entity. Its wallets are, by definition, one cluster."""
@@ -26,6 +32,7 @@ class Actor:
     actor_id: int
     pattern: str
     home_ip: Ip
+    script_type: str = "p2wpkh"  # one wallet implementation per actor
     wallets: list[str] = field(default_factory=list)
     shared_ip: bool = False  # innocent NAT/VPN co-tenancy, not evidence
 
@@ -65,7 +72,8 @@ class World:
     # --- allocation -------------------------------------------------------
     def new_actor(self, pattern: str, shared_ip: bool = False) -> Actor:
         ip = self.rng.choice(self.nat_ips) if (shared_ip and self.nat_ips) else self.alloc.allocate()
-        a = Actor(len(self.actors) + self.id_offset, pattern, ip, shared_ip=shared_ip)
+        a = Actor(len(self.actors) + self.id_offset, pattern, ip,
+                  script_type=self.script_type(), shared_ip=shared_ip)
         self.actors.append(a)
         return a
 
@@ -73,7 +81,8 @@ class World:
         return self.actors[actor_id - self.id_offset]
 
     def new_wallet(self, actor: Actor) -> str:
-        addr = f"bc1q{self.rng.getrandbits(128):032x}"
+        prefix, length = ADDRESS_FORMS[actor.script_type]
+        addr = prefix + f"{self.rng.getrandbits(4 * length):0{length}x}"
         actor.wallets.append(addr)
         self.wallet_owner[addr] = actor.actor_id
         return addr
@@ -97,8 +106,9 @@ class World:
         return self.t
 
     def tx(self, actor: Actor, inputs, outputs, pattern: str, ts: float | None = None) -> Tx:
+        # script_type describes the inputs being spent, i.e. the spender's wallet
         return Tx(self.txid(), self.tick() if ts is None else ts, inputs, outputs,
-                  self.fee(), self.script_type(), actor.actor_id, pattern)
+                  self.fee(), actor.script_type, actor.actor_id, pattern)
 
     def populate(self, n_actors: int) -> None:
         """Build the standing population of ordinary wallets and exchanges."""
