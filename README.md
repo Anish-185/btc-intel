@@ -120,6 +120,28 @@ participants are never merged. Wallets are merged with union-find (`DSU`), and
 dashboard's link-analysis view: aggregated value, transaction counts, txids per
 link, broadcast IPs and the collapse-guard flag per entity.
 
+## Features
+
+```sh
+python -m features.engineer --input data/processed/transactions.parquet \
+    --output data/processed/features.parquet
+```
+
+Two grains, two tables. **Per entity** (`features.parquet`): `fan_in_ratio` /
+`fan_out_ratio` (how one-sided the entity is — 1.0 is a pure collector, 0.0 a pure
+distributor; raw counterparty and transaction counts are kept alongside so
+concentration is still derivable), `round_amount_ratio`, `velocity` (txs/day),
+`lifetime_days`, `dormant_then_active` with the gap and burst that triggered it,
+`unique_broadcast_ips`, `unique_asns`, `suspicious_merge`, and a zero-initialised
+`avg_hop_distance_from_known_bad` for `fusion/taint.py` to fill.
+
+**Per transaction** (`features_tx.parquet`): `equal_output_count` (the CoinJoin
+signal), `peel_ratio` (only meaningful with exactly two outputs, NaN otherwise),
+`input_count`, `output_count`, `time_since_prev_tx_same_wallet`.
+
+Thresholds — round units, dormancy gap and burst, velocity window — live under
+`features:` in `config.yaml`.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field

@@ -75,6 +75,22 @@ graph:
     max_cluster_wallets: 500    # above this a cluster is flagged, not trusted
     reason: "suspicious_merge — needs review"
 
+features:
+  entity_path: data/processed/features.parquet
+  transaction_path: data/processed/features_tx.parquet
+
+  # "suspiciously round": a multiple of one of these, to within the tolerance
+  round_units: [1.0, 0.5, 0.1, 0.05, 0.01]
+  round_tolerance: 0.000000001   # sub-satoshi: absorbs float error, not a real 1-sat difference
+
+  # velocity is txs/day; short-lived entities are not divided by a tiny window
+  velocity_min_window_days: 1.0
+
+  dormancy:
+    gap_days: 30            # quiet for at least this long...
+    burst_transactions: 5   # ...then this many transactions...
+    burst_window_days: 1.0  # ...inside this window
+
 risk_weights:
   rules: 0.35
   anomaly: 0.25
@@ -98,6 +114,8 @@ generator:
   script_types: [p2wpkh, p2pkh, p2sh, p2wsh, p2tr]
   script_type_weights: [0.55, 0.15, 0.12, 0.08, 0.10]
   fee_btc: [0.00002, 0.0009]       # uniform range
+  round_payment_rate: 0.18         # share of payments a human typed as a round number
+  round_units: [1.0, 0.5, 0.1, 0.05, 0.01]
   exchange_share: 0.02             # fraction of base actors that are exchanges
   nat_share_rate: 0.15             # fraction of base actors sharing a NAT/VPN IP (innocent)
   nat_pool_size: 40                # how many shared IPs exist
@@ -116,6 +134,7 @@ generator:
       victims: [15, 60]
       peel_hops: [4, 12]
       ransom_btc: [0.01, 0.35]
+      round_ransom_rate: 0.8       # ransom demands are quoted as round figures
       peel_fraction: [0.05, 0.2]
     layering:
       fan: [4, 10]

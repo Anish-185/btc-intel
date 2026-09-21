@@ -93,6 +93,13 @@ class World:
     def script_type(self) -> str:
         return self.rng.choices(self.gen["script_types"], self.gen["script_type_weights"])[0]
 
+    def maybe_round(self, amount: float, rate: float | None = None) -> float:
+        """Humans type round numbers; coin selection does not."""
+        if self.rng.random() >= (self.gen["round_payment_rate"] if rate is None else rate):
+            return amount
+        unit = self.rng.choice([u for u in self.gen["round_units"] if u <= max(amount, 0.01)])
+        return round(max(round(amount / unit) * unit, unit), 8)
+
     def fee(self) -> float:
         lo, hi = self.gen["fee_btc"]
         return round(self.rng.uniform(lo, hi), 8)
@@ -145,7 +152,8 @@ def normal(w: World) -> list[Tx]:
     n_in = w.rng.choices([1, 2, 3], [0.7, 0.2, 0.1])[0]
     inputs = [(w.wallet_of(src), round(w.rng.lognormvariate(-1.5, 1.3), 8)) for _ in range(n_in)]
     total = sum(v for _, v in inputs)
-    pay = round(total * w.rng.uniform(0.15, 0.95), 8)
+    pay = w.maybe_round(round(total * w.rng.uniform(0.15, 0.95), 8))
+    pay = min(pay, round(total - w.fee(), 8))
     outputs = [(w.wallet_of(dst), pay)]
     change = round(total - pay - w.fee(), 8)
     if change > 1e-6:
@@ -162,7 +170,8 @@ def ransomware_collector(w: World) -> list[Tx]:
     txs, pot = [], 0.0
     for _ in range(w.rng.randint(*p["victims"])):
         victim = w.new_actor("ransomware_victim")
-        amount = round(w.rng.uniform(*p["ransom_btc"]), 8)
+        amount = w.maybe_round(round(w.rng.uniform(*p["ransom_btc"]), 8),
+                               rate=p["round_ransom_rate"])
         pot += amount
         txs.append(w.tx(victim, [(w.new_wallet(victim), amount)], [(collector, amount)],
                         "ransomware_victim_payment"))

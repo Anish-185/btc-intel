@@ -53,11 +53,24 @@ def load(path=None, cfg: dict | None = None) -> pd.DataFrame:
     return pd.read_parquet(path or cfg["ingest"]["output_path"])
 
 
-def iter_transactions(df: pd.DataFrame) -> Iterator[Tx]:
-    """Collapse relay rows into transactions, keeping every broadcast IP seen."""
+def _int_or_none(value):
+    return None if value is None or pd.isna(value) else int(value)
+
+
+def iter_transactions(df: pd.DataFrame, ip_meta: dict | None = None) -> Iterator[Tx]:
+    """Collapse relay rows into transactions, keeping every broadcast IP seen.
+
+    `ip_meta`, if given, is filled with each IP's enriched asn / geo_country so
+    build_graph can put them on the ip nodes.
+    """
+    ip_meta = {} if ip_meta is None else ip_meta
     for txid, rows in df.groupby("txid", sort=False):
         first = rows.iloc[0]
         ips = list(dict.fromkeys(str(ip) for ip in rows["src_ip"])) if "src_ip" in rows else []
+        # keep whatever ingest enriched each IP with, for the ip nodes
+        for ip, asn, country in zip(rows.get("src_ip", []), rows.get("asn", [None] * len(rows)),
+                                    rows.get("geo_country", [None] * len(rows))):
+            ip_meta.setdefault(str(ip), {"asn": _int_or_none(asn), "geo_country": country})
         yield Tx(
             txid=str(txid),
             inputs=list(zip(list(first["input_addresses"]), [float(v) for v in first["input_amounts"]])),
@@ -72,7 +85,8 @@ def iter_transactions(df: pd.DataFrame) -> Iterator[Tx]:
 def build_graph(source, cfg: dict | None = None) -> nx.MultiDiGraph:
     """wallet -> transaction (input), transaction -> wallet (output),
     ip -> transaction (broadcast). Amounts, times and script_type ride on edges."""
-    txs = iter_transactions(source) if isinstance(source, pd.DataFrame) else source
+    ip_meta: dict[str, dict] = {}
+    txs = iter_transactions(source, ip_meta) if isinstance(source, pd.DataFrame) else source
     g = nx.MultiDiGraph()
     for tx in txs:
         ts = tx.timestamp
@@ -89,7 +103,7 @@ def build_graph(source, cfg: dict | None = None) -> nx.MultiDiGraph:
                        timestamp=ts, script_type=tx.script_type)
         for ip in tx.ips:
             if ip not in g:
-                g.add_node(ip, node_type=IP)
+                g.add_node(ip, node_type=IP, **ip_meta.get(ip, {"asn": None, "geo_country": None}))
             g.add_edge(ip, tx.txid, key="broadcast", kind="broadcast", timestamp=ts)
     return g
 
