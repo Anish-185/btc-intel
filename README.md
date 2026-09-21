@@ -226,6 +226,72 @@ excluded — one participant broadcasts for everybody. Measured on generated dat
 links scoring ≥ 0.4 name the true broadcast IP 100% of the time, links below 0.2
 only 9%, and every cluster with 3+ observations was identified correctly.
 
+## Origin estimation
+
+```sh
+bash offline/fetch_intel.sh            # once, while online
+python -m engines.propagation.pipeline # writes data/processed/tx_origins.parquet
+```
+
+`ingest/ip_intel.py` classifies an IP as `known_bitcoin_relay`, `tor_exit`,
+`hosting_vpn` or `residential_or_unknown` from locally cached public data — a
+Bitnodes snapshot, the Tor Project's exit list and a curated hosting-ASN list,
+each recorded in `data/intel/manifest.json` with its source URL and SHA-256.
+
+`engines/propagation/` rebuilds each transaction's propagation tree from the
+src→dst relay records and estimates which IP originated it. Three estimators,
+kept comparable: `first_timestamp` (first-spy baseline), `rumor_centrality`
+(Shah & Zaman, IEEE Trans. Inf. Theory 2011) and `timestamp_weighted_centrality`
+(Fanti & Viswanath, arXiv:1703.08761). Public relays are heavily down-weighted —
+a node that forwards everyone's traffic is the least informative candidate.
+
+**Measured** (`pytest -rP tests/test_propagation.py`): the binding constraint is
+the ceiling — the true origin is present in the observed tree only 20% / 34% /
+63% of the time at relay-observation rates 0.1 / 0.3 / 0.6. Against that ceiling
+`first_timestamp` reaches ~87%, the hybrid ~65%, rumor centrality ~30%. Rumor
+centrality underperforms because our origin is a degree-1 leaf while the
+estimator seeks the tree's centre, a prior that suits complete infected subtrees
+rather than sparse samples. Default is `first_timestamp` on that evidence.
+
+If a dataset has no multi-hop records at all, origin estimation reports
+**degraded mode** and `/stats` says so, rather than implying an estimate was made.
+
+## Fusion
+
+```sh
+python -m fusion.pipeline    # every engine, then one ranked explained alert list
+```
+
+`fusion/taint.py` propagates suspicion outward from seeds (high-confidence rules
+alerts, or an analyst's list) through the entity graph, halving per hop and
+stopping after 4, recording the `taint_path` so an investigator can dismiss an
+inherited score. `fusion/stacker.py` combines five signals — rule, anomaly, GNN,
+correlation, taint — with logistic regression, chosen because its coefficients
+are themselves part of the deliverable. `fusion/explain.py` produces exact SHAP
+values (a logistic model is additive, so there is nothing to approximate) and a
+plain-English reason built from this entity's real numbers.
+
+⚠️ **The headline AUC is circular on our data.** Taint is seeded from the rules
+engine, which fires on the same clusters our labels mark, so `taint_score` alone
+scores ~0.99 AUC — it copies the label rather than predicting it. Every fitted
+model therefore carries an `ablation` block with each signal alone and the stack
+without it; the stack without taint scores ~0.85, and that is the number worth
+quoting. Two signals also come out *inverted* on our data (anomaly 0.16,
+correlation 0.38) because exchanges are the biggest outliers and our illicit
+actors use fresh wallets — a property of the synthetic population, not a bug.
+
+## API
+
+```sh
+uvicorn api.app:app --host 127.0.0.1 --port 8000
+```
+
+`GET /stats` — pipeline status including the degraded-mode flag.
+`GET /alerts?limit=50` — the ranked, explained alert list.
+`GET /transactions/{txid}/propagation` — the propagation tree as Cytoscape
+elements, with `layout: {name: dagre, roots: [origin]}`, the estimated origin
+marked `origin`, runner-ups `runner_up`, and an IP-class badge on every node.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field

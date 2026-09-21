@@ -178,6 +178,19 @@ engines:
 
     single_row_confidence: 0.15   # one observation is a guess, not an estimate
 
+  anomaly:
+    scores_path: data/processed/anomaly_scores.parquet
+    # IsolationForest over the entity feature table. Unsupervised on purpose:
+    # unlike the GNN it needs no labels, so it is the engine that still works
+    # on NTRO's real unlabelled data.
+    contamination: 0.05
+    n_estimators: 200
+    seed: 42
+    features: [fan_in_ratio, fan_out_ratio, round_amount_ratio, velocity,
+               lifetime_days, counterparties_in, counterparties_out, txs,
+               value_in, value_out, unique_broadcast_ips, unique_asns,
+               max_burst_transactions]
+
   correlation:
     output_path: data/processed/ip_correlation.parquet
 
@@ -196,6 +209,25 @@ risk_weights:
   anomaly: 0.25
   gnn: 0.25
   correlation: 0.15
+
+fusion:
+  alerts_parquet: data/processed/final_alerts.parquet
+  alerts_json: data/processed/final_alerts.json
+  model_path: models/stacker.joblib
+  alert_threshold: 0.5        # composite score above which an alert is explained
+
+  taint:
+    decay_per_hop: 0.5        # suspicion halves at every hop from the seed
+    max_hops: 4               # beyond this, taint says nothing useful
+    seed_rule_score: 0.7      # rules alerts at or above this seed the propagation
+    min_taint: 0.01
+    follow: outgoing          # outgoing | both — taint flows with the money
+
+  stacker:
+    signals: [rule_score, anomaly_score, gnn_score, correlation_score, taint_score]
+    seed: 42
+    test_fraction: 0.3        # chronological hold-out, never random
+    max_iter: 2000
 
 thresholds:
   low: 0.3
