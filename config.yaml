@@ -1,0 +1,53 @@
+# Single source of truth for every stage. Nothing below is hardcoded elsewhere.
+# NTRO's real dumps may use different field names — remap here, not in code.
+
+schema:
+  # our synthetic name -> field name in the incoming dataset
+  tx_id: txid
+  block_height: block_height
+  timestamp: block_time
+  input_address: input_addr
+  output_address: output_addr
+  value_btc: value
+  fee_btc: fee
+  input_count: n_inputs
+  output_count: n_outputs
+
+ingest:
+  input_dir: data/raw
+  processed_dir: data/processed
+  format: csv            # csv | jsonl | parquet
+  timestamp_unit: s      # s | ms | iso
+
+geoip:
+  city_db: data/geoip/GeoLite2-City.mmdb
+  asn_db: data/geoip/GeoLite2-ASN.mmdb
+  country_db: data/geoip/GeoLite2-Country.mmdb
+
+models:
+  anomaly: models/isolation_forest.joblib
+  gnn: models/gnn.pt
+  scaler: models/scaler.joblib
+
+graph:
+  # address clustering heuristics
+  common_input_ownership: true
+  change_detection: true
+  max_hops: 4
+
+risk_weights:
+  rules: 0.35
+  anomaly: 0.25
+  gnn: 0.25
+  correlation: 0.15
+
+thresholds:
+  low: 0.3
+  medium: 0.6
+  high: 0.8
+
+api:
+  host: 127.0.0.1
+  port: 8000
+
+offline: true   # no network calls anywhere in the pipeline
