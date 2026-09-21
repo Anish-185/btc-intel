@@ -292,6 +292,25 @@ uvicorn api.app:app --host 127.0.0.1 --port 8000
 elements, with `layout: {name: dagre, roots: [origin]}`, the estimated origin
 marked `origin`, runner-ups `runner_up`, and an IP-class badge on every node.
 
+## Evaluation
+
+```sh
+python -m eval.report      # writes eval/results.md
+```
+
+One command, one results file, one canonical setup (seed and sizes in
+`config.yaml` under `eval:`). Every number quoted anywhere in this project comes
+from here — an earlier version quoted two different "ceiling" figures for the
+same statistic because two ad-hoc runs used different dataset sizes.
+
+`docs/origin_eval_protocol.md` pre-registers how the default origin estimator is
+chosen, and was committed before the topology fix so the rule could not be
+written around the result.
+
+The **shifted** set (`--shifted`) deforms the typologies — jittered peel ratios,
+deeper chains, longer windows, interleaved CoinJoins. Where both are reported,
+the shifted number is the headline.
+
 ## Configuration
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field

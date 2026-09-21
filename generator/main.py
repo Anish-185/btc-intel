@@ -22,6 +22,9 @@ from .writers import open_writers
 
 GROUND_TRUTH = "ground_truth.json"
 NODE_INTEL = "node_intel.json"   # public-knowledge node list, safe to ingest
+WATCHLIST = "synthetic_watchlist.json"   # the analyst's known-bad seeds
+
+ILLICIT_PATTERNS = ("ransomware_collector", "layering")
 
 
 def iso(ts: float) -> str:
@@ -128,6 +131,51 @@ def ground_truth(world: World, net: GossipNet, tx_meta: dict, args) -> dict:
     }
 
 
+def shift_config(cfg: dict, rng: random.Random) -> dict:
+    """--shifted: the same typologies, deformed.
+
+    A detector tuned to the standard set is being asked whether it learned the
+    pattern or memorised our parameters. Peel ratios are jittered, chains and
+    layers run deeper, instances are stretched over longer windows, and mixes
+    are interleaved with the illicit flows.
+    """
+    cfg = json.loads(json.dumps(cfg))
+    g = cfg["generator"]
+    s = g["shift"]
+    params = g["typology_params"]
+
+    jitter = s["peel_ratio_jitter"]
+    lo, hi = params["ransomware_collector"]["peel_fraction"]
+    params["ransomware_collector"]["peel_fraction"] = [
+        round(max(0.01, lo * (1 - jitter)), 4), round(min(0.95, hi * (1 + jitter)), 4)]
+    extra_lo, extra_hi = s["extra_hops"]
+    for key, field in (("ransomware_collector", "peel_hops"), ("layering", "depth")):
+        low, high = params[key][field]
+        params[key][field] = [low + extra_lo, high + extra_hi]
+    g["typology_spread_factor"] *= rng.uniform(*s["delay_multiplier"])
+    return cfg
+
+
+def watchlist(world: World, gt: dict, cfg: dict, rng: random.Random) -> dict:
+    """The wallets an analyst already knows about — taint's only seed source.
+
+    Deliberately a small sample, not the label: roughly `watchlist_fraction` of
+    the wallets in illicit clusters. Taint seeded from here is being asked to
+    find the *rest*, which is the only version of the question worth scoring.
+    """
+    fraction = cfg["generator"]["watchlist_fraction"]
+    known: list[dict] = []
+    for cluster_id, cluster in gt["clusters"].items():
+        if cluster["pattern_type"] not in ILLICIT_PATTERNS:
+            continue
+        for wallet in cluster["wallets"]:
+            if rng.random() < fraction:
+                known.append({"wallet": wallet, "cluster_id": cluster_id,
+                              "pattern_type": cluster["pattern_type"]})
+    return {"source": "synthetic — stands in for an analyst-supplied known-bad list",
+            "fraction": fraction, "count": len(known), "wallets": known}
+
+
 def node_intel(net: GossipNet, cfg: dict) -> dict:
     """The synthetic stand-in for Bitnodes + the Tor exit list.
 
@@ -149,6 +197,8 @@ def node_intel(net: GossipNet, cfg: dict) -> dict:
 def generate(args, cfg: dict | None = None) -> dict:
     cfg = cfg or config.load()
     rng = random.Random(args.seed)
+    if getattr(args, "shifted", False):
+        cfg = shift_config(cfg, random.Random(args.seed + 7))
     net = build_net(random.Random(args.seed + 1), cfg)  # topology stable across runs
 
     world = World(rng, cfg)
@@ -169,6 +219,11 @@ def generate(args, cfg: dict | None = None) -> dict:
             txs = TYPOLOGIES[name](world)
             spread_instance(txs, name, rng, cfg)
             produced[name] += len(txs)
+            if (getattr(args, "shifted", False) and name != "normal"
+                    and rng.random() < cfg["generator"]["shift"]["mixed_pattern_rate"]):
+                mixed = TYPOLOGIES["coinjoin"](world)   # launder the trail through a mix
+                produced["coinjoin"] += len(mixed)
+                txs = txs + mixed
             for tx in sorted(txs, key=lambda t: t.ts):
                 actor = world.actor(tx.origin_actor)
                 origin, kind = observed_origin(actor, net, rng, cfg)
@@ -189,7 +244,10 @@ def generate(args, cfg: dict | None = None) -> dict:
     gt = ground_truth(world, net, tx_meta, args)
     (out_dir / GROUND_TRUTH).write_text(json.dumps(gt, separators=(",", ":")))
     (out_dir / NODE_INTEL).write_text(json.dumps(node_intel(net, cfg), indent=1))
+    (out_dir / WATCHLIST).write_text(
+        json.dumps(watchlist(world, gt, cfg, random.Random(args.seed + 11)), indent=1))
     return {"transactions": len(tx_meta), "rows": n_rows, "per_typology": produced,
+            "shifted": bool(getattr(args, "shifted", False)),
             "actors": len(world.actors), "wallets": len(world.wallet_owner),
             "output": str(out_dir)}
 
@@ -208,6 +266,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="fraction of gossip hops that appear in the output")
     p.add_argument("--single-row", action="store_true",
                    help="one row per txid (origin broadcast only) — no multi-hop records")
+    p.add_argument("--shifted", action="store_true",
+                   help="deform the typologies (jittered ratios, deeper chains, longer "
+                        "windows, interleaved mixes) to test generalisation")
     return p
 
 

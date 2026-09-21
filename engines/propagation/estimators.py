@@ -33,6 +33,7 @@ find a candidate, not the most.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 
@@ -45,7 +46,8 @@ from ingest.ip_intel import IpIntel, IpClassification
 from .tree import PropagationTree, build_trees, degraded_mode
 
 COLUMNS = ["txid", "estimated_origin_ip", "ip_class", "estimator_used", "confidence",
-           "runner_up_ips", "runner_up_scores", "n_observations", "degraded"]
+           "runner_up_ips", "runner_up_scores", "n_observations", "degraded",
+           "origin_likely_unobserved"]
 
 
 @dataclass
@@ -59,6 +61,7 @@ class OriginEstimate:
     n_observations: int = 0
     degraded: bool = False
     evidence: list[str] = field(default_factory=list)
+    likely_unobserved: bool = False
 
     @property
     def runner_ups(self) -> list[tuple[str, float]]:
@@ -166,6 +169,24 @@ def confidence_of(ranked: list[tuple[str, float]], n_observations: int) -> float
     return round(min(1.0, max(0.0, share * observed)), 4)
 
 
+def likely_unobserved(ip_class: str, confidence: float, cfg: dict | None = None) -> bool:
+    """Read this as "do not lean on this estimate", not as proof of absence.
+
+    Set when the best candidate is a public relay — a node that forwards other
+    people's traffic and is never a plausible sender — or when confidence falls
+    below the cutoff taken from the reliability curve.
+
+    Measured (eval/results.md): flagged estimates are right ~54% of the time
+    against ~81% when clear, so the flag does separate weak from strong. As a
+    predictor that the origin is literally absent from the data its precision
+    is only ~0.24, because that event is rare (~16% of transactions) — a raised
+    flag means "this is shaky", not "the sender is not in here".
+    """
+    p = (cfg or config.load())["engines"]["propagation"]
+    return bool(ip_class in p["unobserved_classes"]
+                or confidence < p["unobserved_confidence_cutoff"])
+
+
 def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = None,
                     estimator: str | None = None) -> OriginEstimate:
     cfg = cfg or config.load()
@@ -177,11 +198,13 @@ def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = No
         # the confidence low enough that nothing downstream leans on it.
         ip = tree.earliest()
         c = intel.classify(ip, tree.graph.nodes.get(ip, {}).get("asn")) if ip else None
+        ip_class = c.ip_class if c else "residential_or_unknown"
+        confidence = p["single_row_confidence"] if ip else 0.0
         return OriginEstimate(
-            tree.txid, ip, c.ip_class if c else "residential_or_unknown", "first_timestamp",
-            p["single_row_confidence"] if ip else 0.0,
+            tree.txid, ip, ip_class, "first_timestamp", confidence,
             [(ip, 1.0)] if ip else [], tree.n_observations, degraded=True,
-            evidence=["single relay observation: first-seen IP, not an estimate"])
+            evidence=["single relay observation: first-seen IP, not an estimate"],
+            likely_unobserved=likely_unobserved(ip_class, confidence, cfg))
 
     scores = ESTIMATORS[name](tree, cfg)
     weighted, classified = apply_class_weights(scores, tree, intel, cfg)
@@ -190,17 +213,24 @@ def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = No
         return OriginEstimate(tree.txid, None, "residential_or_unknown", name, 0.0, [],
                               tree.n_observations, degraded=True)
     best_ip = ranked[0][0]
+    ip_class = classified[best_ip].ip_class
+    confidence = confidence_of(ranked, tree.n_observations)
     return OriginEstimate(
-        tree.txid, best_ip, classified[best_ip].ip_class, name,
-        confidence_of(ranked, tree.n_observations), ranked, tree.n_observations,
-        degraded=False, evidence=classified[best_ip].evidence)
+        tree.txid, best_ip, ip_class, name, confidence, ranked, tree.n_observations,
+        degraded=False, evidence=classified[best_ip].evidence,
+        likely_unobserved=likely_unobserved(ip_class, confidence, cfg))
 
 
 def estimate_all(df: pd.DataFrame, intel: IpIntel, cfg: dict | None = None,
-                 estimator: str | None = None) -> tuple[pd.DataFrame, dict]:
+                 estimator: str | None = None,
+                 class_weights: bool = True) -> tuple[pd.DataFrame, dict]:
     cfg = cfg or config.load()
     n_runner_ups = cfg["engines"]["propagation"]["runner_ups"]
     status = degraded_mode(df)
+    if not class_weights:                    # ablation: no relay/Tor/hosting filter
+        cfg = json.loads(json.dumps(cfg))
+        cfg["engines"]["propagation"]["class_weights"] = {
+            k: 1.0 for k in cfg["engines"]["propagation"]["class_weights"]}
     trees = build_trees(df)
     rows = []
     for tree in trees.values():
@@ -212,5 +242,6 @@ def estimate_all(df: pd.DataFrame, intel: IpIntel, cfg: dict | None = None,
             "runner_up_ips": [ip for ip, _ in runners],
             "runner_up_scores": [round(float(s), 6) for _, s in runners],
             "n_observations": est.n_observations, "degraded": est.degraded,
+            "origin_likely_unobserved": est.likely_unobserved,
         })
     return pd.DataFrame(rows, columns=COLUMNS), status

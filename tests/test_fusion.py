@@ -17,7 +17,7 @@ from fusion.explain import build_reason, explain_entity, shap_contributions
 from fusion.pipeline import collect_signals, build_alerts, labels_for
 from fusion.pipeline import run as fusion_run
 from fusion.stacker import SIGNALS, Stacker, ablation, default_weights, train
-from fusion.taint import Taint, compute_taint, propagate, seeds_from_rules
+from fusion.taint import Taint, compute_taint, propagate, seeds_from_watchlist
 
 CFG = config.load()
 TAINT = CFG["fusion"]["taint"]
@@ -87,19 +87,29 @@ def test_both_direction_mode_is_configurable():
     assert "payer" in propagate(g, {"seed": 1.0}, both)
 
 
-def test_seeds_come_from_confident_rule_alerts_only():
-    alerts = pd.DataFrame({"entity_id": ["a", "b"], "score": [0.9, 0.4],
-                           "rule_name": ["r", "r"], "reason": ["x", "y"],
-                           "evidence": [[], []]})
-    seeds = seeds_from_rules(alerts, CFG)
-    assert set(seeds) == {"a"}                          # 0.4 is below seed_rule_score
-    assert seeds_from_rules(pd.DataFrame(), CFG) == {}
+def test_seeds_come_from_the_analyst_watchlist():
+    watchlist = {"wallets": [{"wallet": "bc1qa", "cluster_id": "C1"},
+                             {"wallet": "bc1qb", "cluster_id": "C1"}]}
+    entity_of = {"bc1qa": "C1", "bc1qb": "C1"}.get
+    assert seeds_from_watchlist(watchlist, entity_of, CFG) == {"C1": 1.0}
+    assert seeds_from_watchlist({"wallets": []}, entity_of, CFG) == {}
+
+
+def test_taint_is_never_seeded_from_our_own_rules():
+    """Seeding from rules made taint a copy of the rules' output (AUC 0.999
+    alone while finding nothing new). The entry point must not accept them."""
+    import inspect
+
+    import fusion.taint as taint_module
+    assert not hasattr(taint_module, "seeds_from_rules")
+    signature = inspect.signature(compute_taint)
+    assert "alerts" not in signature.parameters
+    assert "watchlist" in signature.parameters
 
 
 def test_compute_taint_returns_a_frame_with_paths():
-    alerts = pd.DataFrame({"entity_id": ["seed"], "score": [1.0], "rule_name": ["r"],
-                           "reason": ["x"], "evidence": [[]]})
-    df = compute_taint(chain(4), alerts, cfg=CFG)
+    watchlist = {"wallets": [{"wallet": "w", "cluster_id": "seed"}]}
+    df = compute_taint(chain(4), watchlist, {"w": "seed"}.get, cfg=CFG)
     assert list(df.columns) == ["entity_id", "taint_score", "taint_path", "taint_hops",
                                 "taint_seed"]
     assert df["taint_score"].is_monotonic_decreasing
@@ -113,9 +123,23 @@ def signal_frame(n=200, separable=True) -> tuple[pd.DataFrame, pd.Series]:
         rows.append({"entity_id": f"c{i}", "first_seen": i,
                      "rule_score": 0.8 if (bad and separable) else 0.1,
                      "anomaly_score": 0.6 if (bad and separable) else 0.2,
-                     "gnn_score": 0.0, "correlation_score": 0.3, "taint_score": 0.0})
+                     "gnn_score": 0.0, "taint_score": 0.0})
         labels.append(int(bad))
     return pd.DataFrame(rows), pd.Series(labels)
+
+
+def test_correlation_is_not_a_risk_signal():
+    """An IP correlation says something about who, not about how risky."""
+    assert "correlation_score" not in SIGNALS
+
+
+def test_stacker_weights_are_never_negative():
+    """Every input is a suspicion signal: more of it may not lower risk."""
+    X, y = signal_frame()
+    X["anomaly_score"] = 1.0 - y                          # perfectly anti-correlated
+    stacker = train(X, y, CFG)
+    assert all(w >= 0 for w in stacker.coefficients().values())
+    assert stacker.coefficients()["anomaly_score"] == 0.0
 
 
 def test_stacker_learns_a_separable_signal():
@@ -181,8 +205,7 @@ def test_reason_uses_this_entity_s_real_numbers():
                      "round_amount_ratio": 0.8, "anomaly_score": 0.9, "gnn_score": 0.0,
                      "taint_score": 0.25, "suspicious_merge": False})
     reason = build_reason(row, {"rule_score": 0.4},
-                          ["received from 12 distinct wallets"],
-                          "estimated origin 1.2.3.4, hosting/VPN infrastructure",
+                          ["received from 12 distinct wallets"], None,
                           ["C_seed", "C_mid", "C1"], CFG)
     assert "0.91" in reason and "12 distinct" in reason
     assert "40 transactions per day" in reason
@@ -224,7 +247,7 @@ def pipeline(tmp_path_factory):
                                         "--formats", "csv"]))
     ingest_run(raw, d / "t.parquet", d / "q.parquet", "csv")
     summary = fusion_run(d / "t.parquet", raw / "ground_truth.json",
-                         d / "final.parquet", d / "final.json", CFG)
+                         d / "final.parquet", d / "final.json", CFG, watchlist_path=raw)
     return d, summary
 
 
@@ -236,12 +259,11 @@ def test_pipeline_reports_auc_with_and_without_taint(pipeline):
     print(f"  {'signal':<20}{'alone':>8}{'stack without it':>20}")
     for signal, scores in table.items():
         print(f"  {signal:<20}{str(scores['alone']):>8}{str(scores['stack_without_it']):>20}")
-    print("  NB: taint is seeded from the rules engine, which fires on the same "
-          "clusters the\n      labels mark — its AUC is circular. The honest number is "
-          "the stack without it.")
+    print("  NB: taint now seeds only from the analyst watchlist, never from our "
+          "own rules.")
     assert metrics["auc"] is not None
-    without_taint = table["taint_score"]["stack_without_it"]
-    assert without_taint > 0.5, "the non-circular signals carry no information at all"
+    assert table["taint_score"]["alone"] < 0.95, (
+        "taint looks like a copy of the label again — check its seeds")
 
 
 def test_every_alert_has_a_reason_and_evidence(pipeline):
@@ -255,6 +277,42 @@ def test_every_alert_has_a_reason_and_evidence(pipeline):
     assert alerts["top_signal"].isin(SIGNALS).all()
     for blob in alerts["contributions"]:
         assert set(json.loads(blob)) == set(SIGNALS)
+
+
+def test_alerts_carry_attribution_leads_separately_from_the_score(pipeline):
+    """Leads answer 'who', the risk score answers 'how suspicious' — not mixed."""
+    d, _ = pipeline
+    alerts = pd.read_parquet(d / "final.parquet")
+    assert "correlation_score" not in alerts.columns
+    leads = [json.loads(blob) for blob in alerts["leads"]]
+    assert any(leads), "no alert carried any attribution lead"
+    limit = CFG["fusion"]["leads_per_entity"]
+    for bucket in leads:
+        assert len(bucket) <= limit
+        for lead in bucket:
+            assert set(lead) >= {"ip", "ip_class", "confidence", "evidence"}
+            assert 0.0 <= lead["confidence"] <= 1.0
+
+
+def test_taint_finds_accomplices_the_rules_missed(pipeline):
+    """The only version of the question worth scoring."""
+    from eval.datasets import Dataset
+    from eval.fusion_eval import evaluate
+
+    import shutil
+
+    d, _ = pipeline
+    shutil.copy(d / "t.parquet", d / "transactions.parquet")   # the Dataset naming
+    dataset = Dataset("pipeline", d, d / "raw", 0.3, False, 17,
+                      n_actors=200, n_transactions=1500)
+    result = evaluate(dataset, CFG)
+    taint = result["taint"]
+    print(f"\n  accomplices found that rules missed: "
+          f"{taint['accomplices_found_that_rules_missed']} "
+          f"(precision {taint['precision']}, recall of the remainder "
+          f"{taint['recall_of_the_remainder']})")
+    assert taint["excluded_as_already_known"] > 0
+    assert taint["accomplices_found_that_rules_missed"] > 0
 
 
 def test_alerts_json_is_servable(pipeline):

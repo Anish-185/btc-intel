@@ -64,18 +64,47 @@ class GossipNet:
             return self.rng.choice(self.relays)
         return self.rng.randrange(len(self.nodes))
 
+    def origin_peers(self, rng: random.Random) -> list[int]:
+        """How many peers the sender announces to.
+
+        A sender is a node, not a pendant leaf: Bitcoin Core opens 8 outbound
+        connections by default and announces to all of them. Modelling the
+        origin with a single link made it a degree-1 leaf of every propagation
+        tree, which quietly decided the estimator comparison — a centrality
+        estimator cannot find a source the topology has placed at the rim.
+        """
+        light = rng.random() < self.cfg["light_client_share"]
+        lo, hi = self.cfg["light_client_peers" if light else "origin_peers"]
+        count = rng.randint(lo, hi)
+        peers, seen = [], set()
+        while len(peers) < count:
+            node = self.entry_node()
+            if node not in seen:
+                seen.add(node)
+                peers.append(node)
+            elif len(seen) >= len(self.nodes):
+                break
+        return peers
+
     def diffuse(self, origin: Ip, t0: float, rng: random.Random) -> list[tuple[float, Ip, Ip]]:
         """Bitcoin-ish diffusion: exponential per-hop delay, breadth over peers.
 
-        Returns hops as (timestamp, from_ip, to_ip). Hop 0 is the origin wallet
-        handing the tx to its entry node, so hop 0's src is the true origin IP.
+        Returns hops as (timestamp, from_ip, to_ip). The origin announces to
+        each of its own peers first, so it sits at the centre of its immediate
+        neighbourhood rather than dangling off a single edge.
         """
         mean = self.cfg["delay_mean_ms"] / 1000.0
         budget = self.cfg["max_hops_per_tx"]
-        entry = self.entry_node()
-        hops = [(t0, origin, self.nodes[entry])]
-        seen = {entry}
-        queue = [(t0, entry)]
+        entries = self.origin_peers(rng)
+        hops = []
+        seen: set[int] = set()
+        queue = []
+        for node in entries:
+            t = t0 + rng.expovariate(1.0 / mean) * 0.25   # announcements are near-simultaneous
+            hops.append((t, origin, self.nodes[node]))
+            seen.add(node)
+            queue.append((t, node))
+        heapq.heapify(queue)
         while queue and len(hops) < budget:
             t, node = heapq.heappop(queue)
             for peer in self.peers[node]:

@@ -8,15 +8,14 @@ magnitude. Interpretability outranks the last few points of AUC.
 
 ⚠️  TWO THINGS TO KNOW BEFORE QUOTING ANY AUC FROM THIS MODULE.
 
-1. TAINT IS CIRCULAR HERE. Taint is seeded from high-confidence rules alerts,
-   and our labels mark exactly the clusters those rules fire on. Measured on
-   generated data, taint_score alone scores AUC 0.999 — it is not predicting
-   the label, it is a copy of it. The stack WITHOUT taint scores 0.85, and that
-   is the number worth reporting. In production, where seeds come from an
-   analyst's own list rather than from our rules, the loop is broken and taint
-   becomes a real signal; on our data it is not evidence of anything. Every
-   fitted model therefore carries an `ablation` block showing each signal alone
-   and the stack without it — read it before believing the headline.
+1. TAINT USED TO BE CIRCULAR AND NO LONGER IS. It was seeded from our own
+   high-confidence rules alerts, on the same clusters the labels describe, and
+   scored AUC 0.999 alone — a copy of the label, not a prediction of it. Seeds
+   now come only from an analyst watchlist (generator/ emits a ~10% sample of
+   illicit wallets), so taint is scored on whether it finds the accomplices the
+   rules missed. Every fitted model still carries an `ablation` block showing
+   each signal alone and the stack without it — read it before believing any
+   headline number.
 
 2. TRAINED ON OUR SYNTHETIC GROUND TRUTH.
 
@@ -43,19 +42,77 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 
 import config
 
-SIGNALS = ["rule_score", "anomaly_score", "gnn_score", "correlation_score", "taint_score"]
+# correlation_score is deliberately NOT here. An IP correlation says something
+# about *who*, not about whether an entity is risky; folding it into a risk
+# score conflates attribution with suspicion. It is surfaced per alert as a
+# separate "leads" section instead.
+SIGNALS = ["rule_score", "anomaly_score", "gnn_score", "taint_score"]
+
+
+class NonNegativeLogistic:
+    """Logistic regression whose weights may not go negative.
+
+    Every input is a suspicion signal: more of it must never make an entity
+    look safer. Left unconstrained the model happily learns negative weights
+    that fit our synthetic population — anomaly, for instance, goes negative
+    because exchanges are the biggest outliers — and those weights are exactly
+    the ones least likely to transfer to real data. Constraining the sign costs
+    a little fit and buys a model whose behaviour is predictable.
+
+    L-BFGS-B on the weighted log-likelihood, bounds [0, inf) on the
+    coefficients and a free intercept. Kept linear so the SHAP values in
+    explain.py stay exact rather than approximated.
+    """
+
+    def __init__(self, max_iter: int = 2000, class_weight: str | None = "balanced"):
+        self.max_iter = max_iter
+        self.class_weight = class_weight
+        self.coef_ = None
+        self.intercept_ = None
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=float)
+        n, d = X.shape
+        weights = np.ones(n)
+        if self.class_weight == "balanced" and 0 < y.sum() < n:
+            weights = np.where(y == 1, n / (2 * y.sum()), n / (2 * (n - y.sum())))
+
+        def objective(theta):
+            w, b = theta[:d], theta[d]
+            z = np.clip(X @ w + b, -30, 30)
+            loss = weights * (np.logaddexp(0, z) - y * z)
+            p = 1.0 / (1.0 + np.exp(-z))
+            residual = weights * (p - y)
+            return loss.sum(), np.concatenate([X.T @ residual, [residual.sum()]])
+
+        start = np.zeros(d + 1)
+        bounds = [(0.0, None)] * d + [(None, None)]
+        result = minimize(objective, start, jac=True, method="L-BFGS-B", bounds=bounds,
+                          options={"maxiter": self.max_iter})
+        self.coef_ = np.array([result.x[:d]])
+        self.intercept_ = np.array([result.x[d]])
+        return self
+
+    def decision_function(self, X):
+        return np.asarray(X, dtype=float) @ self.coef_[0] + self.intercept_[0]
+
+    def predict_proba(self, X):
+        p = 1.0 / (1.0 + np.exp(-np.clip(self.decision_function(X), -30, 30)))
+        return np.column_stack([1 - p, p])
 
 
 @dataclass
 class Stacker:
     """A fitted composite scorer, or a config-weighted fallback when unfitted."""
 
-    model: LogisticRegression | None = None
+    model: object | None = None
     signals: list[str] = field(default_factory=lambda: list(SIGNALS))
     metrics: dict = field(default_factory=dict)
     fallback_weights: dict[str, float] = field(default_factory=dict)
@@ -95,7 +152,6 @@ def default_weights(cfg: dict | None = None) -> dict[str, float]:
     return {"rule_score": weights.get("rules", 0.35),
             "anomaly_score": weights.get("anomaly", 0.25),
             "gnn_score": weights.get("gnn", 0.25),
-            "correlation_score": weights.get("correlation", 0.15),
             "taint_score": weights.get("taint", 0.25)}
 
 
@@ -130,9 +186,11 @@ def ablation(signals: pd.DataFrame, labels: pd.Series, stacker_signals: list[str
         rest = [s for s in stacker_signals if s != signal]
         without = None
         if rest and len(set(y)) > 1:
-            model = LogisticRegression(max_iter=cfg["fusion"]["stacker"]["max_iter"],
-                                       class_weight="balanced",
-                                       random_state=cfg["fusion"]["stacker"]["seed"])
+            model = (NonNegativeLogistic(max_iter=cfg["fusion"]["stacker"]["max_iter"])
+                     if cfg["fusion"]["stacker"].get("non_negative", True)
+                     else LogisticRegression(max_iter=cfg["fusion"]["stacker"]["max_iter"],
+                                             class_weight="balanced",
+                                             random_state=cfg["fusion"]["stacker"]["seed"]))
             try:
                 model.fit(X[rest], y)
                 without = round(float(roc_auc_score(y, model.predict_proba(X[rest])[:, 1])), 4)
@@ -160,17 +218,26 @@ def train(signals: pd.DataFrame, labels: pd.Series, cfg: dict | None = None) -> 
         train_mask = pd.Series(True, index=signals.index)
         test_mask = train_mask
 
-    model = LogisticRegression(max_iter=s["max_iter"], class_weight="balanced",
-                               random_state=s["seed"])
+    model = (NonNegativeLogistic(max_iter=s["max_iter"])
+             if s.get("non_negative", True)
+             else LogisticRegression(max_iter=s["max_iter"], class_weight="balanced",
+                                     random_state=s["seed"]))
     model.fit(X[train_mask], y[train_mask])
     stacker.model = model
 
-    probs = model.predict_proba(X[test_mask])[:, 1]
-    held_out = y[test_mask]
+    # With few positives the chronological hold-out can land on a single class,
+    # which makes AUC undefined. Fall back to scoring every labelled row and say
+    # so, rather than reporting nothing.
+    evaluated_on, in_sample = test_mask, False
+    if len(set(y[test_mask])) < 2:
+        evaluated_on, in_sample = pd.Series(True, index=signals.index), True
+    probs = model.predict_proba(X[evaluated_on])[:, 1]
+    held_out = y[evaluated_on]
     stacker.metrics = {
         "fitted": True,
         "auc": round(float(roc_auc_score(held_out, probs)), 4) if len(set(held_out)) > 1 else None,
-        "train_rows": int(train_mask.sum()), "test_rows": int(test_mask.sum()),
+        "auc_in_sample": in_sample,
+        "train_rows": int(train_mask.sum()), "test_rows": int(evaluated_on.sum()),
         "positives": int(y.sum()),
         "coefficients": {k: round(v, 4) for k, v in stacker.coefficients().items()},
         "ablation": ablation(signals, labels, stacker.signals, cfg),

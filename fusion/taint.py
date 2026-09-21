@@ -1,9 +1,16 @@
 """Taint propagation: suspicion inherited by following the money.
 
-Seeds are entities we already have reason to suspect — high-confidence rules
-alerts, or a list an analyst supplies. Suspicion then flows outward along the
-entity graph, halving (by config) at every hop, and stopping after a few hops
-because beyond that everything on a blockchain is connected to everything.
+Seeds are entities an analyst already knows are bad — a watchlist. Suspicion
+flows outward along the entity graph, halving (by config) at every hop, and
+stopping after a few hops because beyond that everything on a blockchain is
+connected to everything.
+
+Seeds are NEVER taken from our own rules engine. That was the original design
+and it made taint worthless as an independent signal: the rules fire on the
+same clusters the labels describe, so taint scored AUC 0.999 alone while
+finding nothing the rules had not already flagged. Taint earns its place only
+by finding accomplices the rules missed, which requires its seeds to come from
+outside the system.
 
 This is the "haircut" idea from conventional taint analysis, simplified: we
 decay per hop rather than per proportion of value, because our goal is to rank
@@ -18,7 +25,9 @@ investigator can see exactly which chain produced the score and dismiss it.
 from __future__ import annotations
 
 import heapq
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import networkx as nx
 import pandas as pd
@@ -43,17 +52,32 @@ class Taint:
         return self.path[0] if self.path else None
 
 
-def seeds_from_rules(alerts: pd.DataFrame, cfg: dict | None = None) -> dict[str, float]:
-    """Entities the rules engine is confident about become taint sources."""
+def seeds_from_watchlist(watchlist: dict, entity_of, cfg: dict | None = None) -> dict[str, float]:
+    """Map an analyst's known-bad wallets onto the entities holding them."""
     cfg = cfg or config.load()
-    floor = cfg["fusion"]["taint"]["seed_rule_score"]
-    if alerts is None or alerts.empty:
-        return {}
-    strong = alerts[alerts["score"] >= floor]
-    out: dict[str, float] = {}
-    for row in strong.itertuples():
-        out[row.entity_id] = max(out.get(row.entity_id, 0.0), float(row.score))
-    return out
+    weight = cfg["fusion"]["taint"]["watchlist_weight"]
+    seeds: dict[str, float] = {}
+    for item in (watchlist or {}).get("wallets", []):
+        wallet = item["wallet"] if isinstance(item, dict) else str(item)
+        entity = entity_of(wallet)
+        if entity:
+            seeds[entity] = max(seeds.get(entity, 0.0), float(weight))
+    return seeds
+
+
+def load_watchlist(path=None, cfg: dict | None = None) -> dict:
+    """Look for the watchlist beside the dataset, then in data/intel/."""
+    cfg = cfg or config.load()
+    candidates = []
+    if path:
+        p = Path(path)
+        candidates += [p / cfg["intel"]["synthetic_watchlist"]] if p.is_dir() else [p]
+    candidates.append(Path(cfg["ingest"]["input_dir"]) / cfg["intel"]["synthetic_watchlist"])
+    candidates.append(Path(cfg["intel"]["watchlist_path"]))
+    for candidate in candidates:
+        if candidate.exists():
+            return json.loads(candidate.read_text())
+    return {"wallets": []}
 
 
 def propagate(entity_graph: nx.DiGraph, seeds: dict[str, float],
@@ -102,11 +126,13 @@ def taint_frame(taints: dict[str, Taint]) -> pd.DataFrame:
     return df.sort_values("taint_score", ascending=False, ignore_index=True)
 
 
-def compute_taint(entity_graph: nx.DiGraph, alerts: pd.DataFrame | None = None,
-                  extra_seeds: dict[str, float] | None = None,
+def compute_taint(entity_graph: nx.DiGraph, watchlist: dict | None = None,
+                  entity_of=None, extra_seeds: dict[str, float] | None = None,
                   cfg: dict | None = None) -> pd.DataFrame:
     cfg = cfg or config.load()
-    seeds = seeds_from_rules(alerts, cfg) if alerts is not None else {}
+    seeds: dict[str, float] = {}
+    if watchlist and entity_of is not None:
+        seeds = seeds_from_watchlist(watchlist, entity_of, cfg)
     for entity, weight in (extra_seeds or {}).items():
         seeds[entity] = max(seeds.get(entity, 0.0), float(weight))
     return taint_frame(propagate(entity_graph, seeds, cfg))

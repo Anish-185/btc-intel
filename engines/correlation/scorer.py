@@ -283,9 +283,11 @@ def score_observations(observations: list[Observation], cfg: dict | None = None)
         link["last_seen"] = pd.Timestamp(link["last_seen"], unit="s", tz="UTC")
         rows.append({c: link[c] for c in COLUMNS})
 
+    # No score floor. Links are ranked and consumed top-k per entity
+    # (fusion.pipeline.attribution_leads); the old min_score was calibrated
+    # against a scale that no longer exists now that each observation is
+    # weighted by its origin-estimate confidence.
     df = pd.DataFrame(rows, columns=COLUMNS)
-    floor = cfg["engines"]["correlation"]["min_score"]
-    df = df[df["final_score"] >= floor] if len(df) else df
     return df.sort_values(["final_score", "entity_id"], ascending=[False, True],
                           ignore_index=True)
 
