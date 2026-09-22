@@ -1,0 +1,238 @@
+/* =====================================================================
+   btc-intel — design tokens
+   Derived in docs/design/design_analysis.md. Every value below is a
+   decision recorded there; change the document and this file together.
+
+   Three rules this file encodes:
+     1. Ink is one colour at four alphas, never four greys.
+     2. --evidence (blue) means "interactive, or ours". It NEVER means
+        severity. Severity has its own ramp, and every level of it carries
+        a glyph and a label so colour is never the only signal.
+     3. The field is a place, not a theme: --field stays dark in both
+        themes, because a link-analysis graph is network space, not
+        document space.
+   ===================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* -- surfaces ------------------------------------------------------- */
+  --paper: #f4f5f7;
+  --surface: #ffffff;
+  --sunk: #ecedf1;
+  --field: #070b18; /* dark in both themes, on purpose */
+  --field-ink: #dce6ff;
+  --field-muted: #7f9bd8;
+  --field-rule: #16224a;
+
+  /* -- ink: one colour, four alphas ----------------------------------- */
+  --ink: #0b1016;
+  --ink-soft: #0b1016b8; /* 72% — secondary prose      */
+  --ink-muted: #0b10169e; /* 62% — labels, units        */
+  --ink-faint: #0b10167a; /* 48% — disabled, tick marks */
+
+  /* -- hairlines ------------------------------------------------------ */
+  --rule: #dcdfe6;
+  --rule-soft: #e9ebf0;
+
+  /* -- the accent ----------------------------------------------------- */
+  --evidence: #1b44d8;
+  --evidence-hi: #2b56f0;
+  --evidence-lo: #142f9e;
+  --evidence-w7: #1b44d812;
+  --evidence-w12: #1b44d81f;
+  --on-evidence: #f5f7ff;
+
+  /* -- verdicts (an analyst's decision, not a severity) --------------- */
+  --confirmed: #186b45;
+  --confirmed-bg: #e6f2eb;
+  --dismissed: var(--ink-muted);
+
+  /* -- caution: low_confidence_origin, anonymized entry points --------
+     Same amber as medium risk, because it means the same thing:
+     do not lean on this. Always paired with the ⚠ glyph and words. */
+  --caution: #845200;
+  --caution-bg: #faf0da;
+
+  /* -- risk ramp ------------------------------------------------------
+     Never used alone. Each level ships with RISK_GLYPH + LABEL + number;
+     the meter itself is braille cells, so it survives greyscale. */
+  --risk-low: #3d4d63;
+  --risk-low-bg: #eceef3;
+  --risk-medium: #845200;
+  --risk-medium-bg: #faf0da;
+  --risk-high: #ad3f1a;
+  --risk-high-bg: #fbe9df;
+  --risk-critical: #8e1426;
+  --risk-critical-bg: #fadde1;
+
+  /* -- graph node families (categories, not severities) ----------------
+     These sit on --field, which is dark in both themes, so they are NOT
+     re-declared per theme: a node keeps its colour when the page flips. */
+  --node-wallet: #7e9dff;
+  --node-transaction: #97a3b8;
+  --node-ip: #e3b25c;
+  --node-taint: #ff8f61;
+
+  /* -- type ----------------------------------------------------------- */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --fs-display: 2.125rem; /* 34 */
+  --fs-h1: 1.625rem; /* 26 */
+  --fs-h2: 1.25rem; /* 20 */
+  --fs-h3: 1rem; /* 16 */
+  --fs-body: 0.9375rem; /* 15 */
+  --fs-small: 0.8125rem; /* 13 */
+  --fs-data: 0.8125rem; /* 13, mono, tabular */
+  --fs-label: 0.65625rem; /* 10.5, mono, uppercase */
+  --fs-stat: 2.75rem; /* 44, mono */
+  --fs-stat-lg: 4rem; /* 64, mono */
+
+  --lh-display: 1.12;
+  --lh-head: 1.3;
+  --lh-body: 1.6;
+  --lh-data: 1.4;
+
+  --ls-display: -0.02em;
+  --ls-h1: -0.015em;
+  --ls-stat: -0.04em;
+  --ls-label: 0.12em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semi: 600;
+
+  /* -- measure and structure ------------------------------------------ */
+  --measure: 40rem; /* 640 — reading width      */
+  --content-max: 72.5rem; /* 1160 — console width     */
+  --rail-w: 13rem; /* 208 — left rail          */
+  --rail-gap: 3.5rem;
+  --row-h: 2.125rem; /* 34 — table row           */
+
+  /* -- space: 4px base ------------------------------------------------ */
+  --sp-0: 0.125rem;
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+  --sp-8: 4rem;
+  --sp-9: 6rem;
+
+  /* -- radius: square is the house style ------------------------------- */
+  --r-0: 0;
+  --r-1: 2px;
+
+  /* -- borders -------------------------------------------------------- */
+  --bw-hair: 1px;
+  --bw-active: 1.5px;
+
+  /* -- elevation: hairlines do this job; these two float over the page - */
+  --shadow-float: 0 8px 28px -12px #0b101638, 0 0 0 1px var(--rule);
+  --shadow-toast: 0 6px 20px -10px #0b101640, 0 0 0 1px var(--rule);
+
+  /* -- motion --------------------------------------------------------- */
+  --dur-1: 150ms; /* press, chip swap        */
+  --dur-2: 200ms; /* hover, dim              */
+  --dur-3: 280ms; /* route crossfade, FLIP   */
+  --dur-4: 400ms; /* gauge draw, count-up    */
+  --stagger: 40ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* -- focus ---------------------------------------------------------- */
+  --focus-ring: 2px solid var(--evidence);
+  --focus-offset: 2px;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #0a0e17;
+  --surface: #111723;
+  --sunk: #070b12;
+  /* --field, --field-* stay as they are: the field is not themed. */
+
+  --ink: #e9edf5;
+  --ink-soft: #e9edf5c4;
+  --ink-muted: #e9edf58f;
+  --ink-faint: #e9edf55c;
+
+  --rule: #252e3e;
+  --rule-soft: #1a2230;
+
+  --evidence: #7e9dff;
+  --evidence-hi: #9db4ff;
+  --evidence-lo: #5c7ff0;
+  --evidence-w7: #7e9dff14;
+  --evidence-w12: #7e9dff24;
+  --on-evidence: #061026;
+
+  --confirmed: #5fc794;
+  --confirmed-bg: #0e2319;
+  --caution: #e3b25c;
+  --caution-bg: #241c0d;
+
+  --risk-low: #9aa8bf;
+  --risk-low-bg: #151c28;
+  --risk-medium: #e3b25c;
+  --risk-medium-bg: #241c0d;
+  --risk-high: #ff8f61;
+  --risk-high-bg: #2a150e;
+  --risk-critical: #ff7186;
+  --risk-critical-bg: #2b1017;
+
+  --shadow-float: 0 10px 30px -14px #00000080, 0 0 0 1px var(--rule);
+  --shadow-toast: 0 8px 22px -12px #00000080, 0 0 0 1px var(--rule);
+}
+
+/* Default theme is light, like the reference site. The app writes
+   data-theme explicitly; this only covers a first paint before that,
+   for someone whose system is set to dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    color-scheme: dark;
+    --paper: #0a0e17;
+    --surface: #111723;
+    --sunk: #070b12;
+    --ink: #e9edf5;
+    --ink-soft: #e9edf5c4;
+    --ink-muted: #e9edf58f;
+    --ink-faint: #e9edf55c;
+    --rule: #252e3e;
+    --rule-soft: #1a2230;
+    --evidence: #7e9dff;
+    --evidence-hi: #9db4ff;
+    --evidence-lo: #5c7ff0;
+    --evidence-w7: #7e9dff14;
+    --evidence-w12: #7e9dff24;
+    --on-evidence: #061026;
+    --confirmed: #5fc794;
+    --confirmed-bg: #0e2319;
+    --caution: #e3b25c;
+    --caution-bg: #241c0d;
+    --risk-low: #9aa8bf;
+    --risk-low-bg: #151c28;
+    --risk-medium: #e3b25c;
+    --risk-medium-bg: #241c0d;
+    --risk-high: #ff8f61;
+    --risk-high-bg: #2a150e;
+    --risk-critical: #ff7186;
+    --risk-critical-bg: #2b1017;
+  }
+}
+
+/* Motion is a nicety; data is not. Everything non-essential stops here. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+    --stagger: 0ms;
+  }
+}
