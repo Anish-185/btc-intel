@@ -7,7 +7,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Alert } from "../api/types";
-import { patternLabel, truncateId } from "../lib/format";
+import { formatId } from "../lib/formatId";
+import { patternLabel } from "../lib/format";
 import { reducedMotion } from "../lib/motion";
 import { RiskMeter } from "./ui";
 
@@ -153,7 +154,7 @@ export function AlertTable({
                     style={{ viewTransitionName: `entity-${cssName(alert.entity_id)}` }}
                     onFocus={() => setFocused(index)}
                   >
-                    {truncateId(alert.entity_id, 10, 4)}
+                    {formatId(alert.entity_id)}
                   </Link>
                 </td>
                 <td style={{ fontSize: "var(--fs-small)" }} className="soft">

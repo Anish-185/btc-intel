@@ -8,7 +8,8 @@
  *  screenshot of it.
  */
 import type { Core } from "cytoscape";
-import { readToken, shortId } from "./model";
+import { readToken } from "./model";
+import { formatId } from "../../lib/formatId";
 
 const escape = (value: string) =>
   value.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -103,7 +104,7 @@ export function toSvg(cy: Core, options: SvgOptions = {}): string {
     const label = String(node.data("label") ?? node.id());
     parts.push(
       `<text x="${cx.toFixed(1)}" y="${(cy2 + h / 2 + 10).toFixed(1)}" fill="${ink}" font-size="9" ` +
-        `text-anchor="middle" opacity="0.8">${escape(shortId(label, 10, 4))}</text>`,
+        `text-anchor="middle" opacity="0.8">${escape(formatId(label))}</text>`,
     );
   }
 

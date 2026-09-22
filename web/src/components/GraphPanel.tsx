@@ -9,7 +9,8 @@ import { useCallback, useMemo, useState } from "react";
 import type { ElementDefinition, LayoutOptions } from "cytoscape";
 import { api } from "../api/client";
 import type { EntityGraph, Propagation } from "../api/types";
-import { ipClass, truncateId } from "../lib/format";
+import { ipClass } from "../lib/format";
+import { formatId } from "../lib/formatId";
 import { token } from "../lib/tokens";
 import { FieldGraph } from "./FieldGraph";
 import { Chip } from "./ui";
@@ -43,7 +44,7 @@ function toElements(graph: EntityGraph, riskScore: number): ElementDefinition[] 
         colour: nodeColour(String(data.type)),
         size: data.is_focus ? base : data.type === "transaction" ? 6 : 9,
         focus: data.is_focus ? 1 : 0,
-        label: data.type === "ip" ? String(data.label) : truncateId(String(data.label ?? data.id), 6, 4),
+        label: data.type === "ip" ? String(data.label) : formatId(String(data.label ?? data.id)),
       },
     })),
     ...graph.elements.edges.map(({ data }) => ({ data })),
@@ -118,7 +119,7 @@ export function GraphPanel({
         {tree ? (
           <>
             <span className="mono" style={{ fontSize: "var(--fs-small)" }}>
-              {truncateId(tree.txid, 10, 6)}
+              {formatId(tree.txid)}
             </span>
             <button type="button" className="btn btn-ghost bracket field-btn" onClick={() => setTree(null)}>
               Back to neighbourhood
@@ -131,7 +132,7 @@ export function GraphPanel({
             disabled={loading}
             onClick={() => showPropagation(selected.id)}
           >
-            {loading ? "Loading…" : `Show propagation · ${truncateId(selected.id, 8, 4)}`}
+            {loading ? "Loading…" : `Show propagation · ${formatId(selected.id)}`}
           </button>
         ) : (
           <span className="label">select a transaction node to trace its broadcast</span>

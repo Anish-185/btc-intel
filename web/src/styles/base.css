@@ -620,6 +620,17 @@ table.data tbody tr[data-settled="true"] {
   color: var(--caution);
 }
 
+/* A build mismatch is not a passing status: it stays until it is fixed. */
+.build-notice {
+  margin-bottom: var(--sp-5);
+  border-color: color-mix(in srgb, var(--risk-high) 45%, transparent);
+  background: var(--risk-high-bg);
+}
+
+.build-notice .label {
+  color: var(--risk-high);
+}
+
 /* -- the field: dark in both themes ----------------------------------- */
 .field-panel {
   position: relative;

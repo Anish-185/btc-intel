@@ -15,8 +15,10 @@ import popper from "cytoscape-popper";
 import cxtmenu from "cytoscape-cxtmenu";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 
+import { createFitter, type Fitter } from "./fit";
 import { graphStyle } from "./style";
-import { readToken, shortId, type EdgeData, type NodeData } from "./model";
+import { readToken, type EdgeData, type NodeData } from "./model";
+import { formatId } from "../../lib/formatId";
 
 /** Tippy needs a real DOM element; cytoscape-popper gives it a virtual rect. */
 function tippyFactory(ref: { getBoundingClientRect: () => DOMRect }, content: HTMLElement) {
@@ -71,7 +73,7 @@ function tooltipFor(element: NodeSingular | EdgeSingular): HTMLElement {
     if (data.type === "wallet") {
       rows.push(["risk", (data.risk ?? 0).toFixed(3)]);
       rows.push(["alerted", data.alerted ? "yes" : "no"]);
-      if (data.entity_id) rows.push(["entity", shortId(String(data.entity_id), 12, 6)]);
+      if (data.entity_id) rows.push(["entity", formatId(String(data.entity_id), { head: 12, tail: 6 })]);
     }
     if (data.type === "ip" && data.country) rows.push(["country", String(data.country)]);
     if (data.type === "aggregate") rows.push(["hidden neighbours", String(data.remaining ?? 0)]);
@@ -85,7 +87,7 @@ function tooltipFor(element: NodeSingular | EdgeSingular): HTMLElement {
       : element.source().data("type") === "transaction"
         ? element.source().id()
         : null);
-    if (txid) rows.push(["txid", shortId(String(txid), 10, 6)]);
+    if (txid) rows.push(["txid", formatId(String(txid), { head: 10, tail: 6 })]);
     if (data.type === "broadcast") rows.push(["link", "probabilistic — broadcast observation"]);
   }
 
@@ -108,6 +110,7 @@ export function useGraphInstance(
 ) {
   const container = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  const fitter = useRef<Fitter | null>(null);
   const tip = useRef<TippyInstance | null>(null);
 
   useEffect(() => {
@@ -125,6 +128,7 @@ export function useGraphInstance(
       boxSelectionEnabled: true,
     });
     cyRef.current = cy;
+    fitter.current = createFitter(cy, host);
 
     // Entity clusters collapse to one node and open again.
     (cy as never as { expandCollapse: (o: object) => void }).expandCollapse({
@@ -218,6 +222,8 @@ export function useGraphInstance(
     onReady(cy);
     return () => {
       hideTip();
+      fitter.current?.dispose();
+      fitter.current = null;
       cy.destroy();
       cyRef.current = null;
     };
@@ -225,5 +231,5 @@ export function useGraphInstance(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { container, cyRef };
+  return { container, cyRef, fitter };
 }

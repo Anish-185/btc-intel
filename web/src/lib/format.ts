@@ -6,11 +6,10 @@ export const score3 = (value: number | null | undefined) =>
 export const pct = (value: number | null | undefined) =>
   value == null ? "—" : `${Math.round(value * 100)}%`;
 
-/** Long hashes and addresses, shortened but never silently: the full value is
- *  always the element's title and what the copy action puts on the clipboard. */
-export function truncateId(value: string, head = 8, tail = 6): string {
-  return value.length <= head + tail + 1 ? value : `${value.slice(0, head)}…${value.slice(-tail)}`;
-}
+/** Identifier shortening lives in one place — see lib/formatId.ts. Re-exported
+ *  here because this is where the rest of the console already looks for
+ *  formatting. */
+export { ELLIPSIS, ID_HEAD, ID_TAIL, formatId, maxIdLength } from "./formatId";
 
 export const PATTERN_LABEL: Record<string, string> = {
   ransomware_collector: "ransomware collector",

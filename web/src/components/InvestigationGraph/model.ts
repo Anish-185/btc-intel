@@ -339,8 +339,6 @@ function hash(value: string): number {
 }
 
 // --- misc -----------------------------------------------------------------
-export const shortId = (value: string, head = 8, tail = 4) =>
-  value.length <= head + tail + 1 ? value : `${value.slice(0, head)}…${value.slice(-tail)}`;
 
 /** Elements arriving from the API, deduplicated against what is on screen. */
 export function newElements(

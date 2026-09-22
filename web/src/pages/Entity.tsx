@@ -7,7 +7,8 @@ import { api } from "../api/client";
 import { useApi } from "../lib/useApi";
 import { useEnter } from "../lib/motion";
 import { cssName } from "../components/AlertTable";
-import { patternLabel, truncateId } from "../lib/format";
+import { patternLabel } from "../lib/format";
+import { formatId } from "../lib/formatId";
 import { Gauge } from "../components/Gauge";
 import { EvidenceList } from "../components/EvidenceList";
 import { LeadsPanel } from "../components/LeadsPanel";
@@ -71,7 +72,7 @@ export function Entity() {
               style={{ marginTop: "var(--sp-2)", viewTransitionName: `entity-${cssName(id)}` }}
               title={id}
             >
-              {truncateId(id, 20, 8)}
+              {formatId(id, { head: 20, tail: 8 })}
             </h1>
             <p className="stack" style={{ gap: "var(--sp-2)", marginTop: "var(--sp-3)" }}>
               <span style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-2)" }}>
@@ -134,7 +135,7 @@ export function Entity() {
                   <span key={`${step}-${i}`}>
                     {i > 0 && <span aria-hidden="true"> ⟶ </span>}
                     <span className="id-chip" title={step}>
-                      {truncateId(step, 10, 4)}
+                      {formatId(step)}
                     </span>
                   </span>
                 ))}
@@ -204,7 +205,7 @@ export function Entity() {
               <div className="evidence-item" key={wallet}>
                 <span className="label">wallet</span>
                 <span className="value" title={wallet}>
-                  {truncateId(wallet, 24, 10)}
+                  {formatId(wallet, { head: 24, tail: 10 })}
                 </span>
                 <CopyValue value={wallet} />
               </div>

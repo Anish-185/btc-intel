@@ -18,6 +18,8 @@ analyst's identity recorded with the verdict.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -47,6 +49,29 @@ app.add_middleware(CORSMiddleware, allow_origins=config.get("api.cors_origins"),
 
 CLASS_BADGE = {"known_bitcoin_relay": "relay", "tor_exit": "tor",
                "hosting_vpn": "hosting", "residential_or_unknown": "residential"}
+
+STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+@lru_cache(maxsize=1)
+def _commit() -> str:
+    """Which build this process is. Read once, at start.
+
+    A demo is lost when the browser talks to a server started before the fix
+    it is demonstrating — the page looks right and the data is old. The commit
+    is stamped into both halves so they can be compared instead of trusted.
+    BTC_INTEL_COMMIT wins, for a container built without a .git directory.
+    """
+    stamped = os.environ.get("BTC_INTEL_COMMIT")
+    if stamped:
+        return stamped.strip()[:7]
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short=7", "HEAD"],
+                             cwd=Path(__file__).resolve().parent.parent,
+                             capture_output=True, text=True, timeout=2, check=True)
+        return out.stdout.strip()
+    except Exception:                      # no git, no repo, no problem
+        return "unknown"
 
 # Where the API reads from. Defaults come from config.yaml; configure() points
 # the app at another set of artefacts (a second case, or a test fixture).
@@ -107,6 +132,24 @@ def _alert_for(entity_id: str) -> dict | None:
         if entity_id in (alert.get("alert_id"), alert.get("entity_id")):
             return alert
     return None
+
+
+@app.get("/version")
+def version() -> dict:
+    """What is actually running here.
+
+    The console fetches this on load and compares `commit` with the one
+    compiled into its own bundle; a mismatch means one half is stale and the
+    page says so rather than showing yesterday's answers.
+    """
+    return {
+        "commit": _commit(),
+        "started_at": STARTED_AT,
+        # From the schema, not from app.routes: routes mounted through a
+        # router are wrapped and would not be counted. A missing endpoint is
+        # exactly the kind of staleness this is here to catch.
+        "routes": len(app.openapi().get("paths", {})),
+    }
 
 
 # --- dashboard ------------------------------------------------------------

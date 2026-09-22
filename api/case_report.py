@@ -21,6 +21,8 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import simpleSplit
 from reportlab.pdfgen import canvas as pdf_canvas
 
+from .format_id import format_id
+
 MARGIN = 20 * mm
 WIDTH, HEIGHT = A4
 
@@ -110,7 +112,10 @@ def _draw_graph(c, graph: dict, y_top: float, height: float) -> None:
             c.line(a[0], a[1], b[0], b[1])
     for node in nodes:
         data = node["data"]
-        x, y = pos[data["id"]]
+        placed = pos.get(data["id"])
+        if placed is None:          # a saved view can hold a node the layout skipped
+            continue
+        x, y = placed
         focus = data.get("is_focus")
         c.setFillColor(FOCUS if focus else NODE_COLOURS.get(data["type"], MUTED))
         radius = 3.6 if focus else 2.4
@@ -146,7 +151,7 @@ def render_pdf(detail: dict, graph: dict, now: datetime) -> bytes:
     score = detail["scores"].get("risk_score")
     c.setFont("Helvetica-Bold", 11)
     c.setFillColor(INK)
-    c.drawString(MARGIN, y, f"Entity {detail['entity_id']}")
+    c.drawString(MARGIN, y, f"Entity {format_id(detail['entity_id'], head=20, tail=8)}")
     c.drawRightString(WIDTH - MARGIN, y,
                       f"risk score {score:.3f}" if isinstance(score, (int, float))
                       else "not alerted")
@@ -169,12 +174,16 @@ def render_pdf(detail: dict, graph: dict, now: datetime) -> bytes:
     if not evidence:
         y = _wrap(c, "—", MARGIN, y, width, colour=MUTED)
     for item in evidence:
-        y = _wrap(c, f"• {item}", MARGIN, y, width, size=8.5, leading=11)
+        # Shortened exactly as the console shortened it, so a reader can match
+        # a line in the report to a row on the screen.
+        y = _wrap(c, f"• {format_id(item, head=18, tail=8)}", MARGIN, y, width,
+                  size=8.5, leading=11)
     y -= 10
 
     if detail.get("taint_path"):
         y = _heading(c, "taint path", y)
-        y = _wrap(c, " → ".join(detail["taint_path"]), MARGIN, y, width, size=8.5) - 10
+        y = _wrap(c, " → ".join(format_id(step) for step in detail["taint_path"]),
+                  MARGIN, y, width, size=8.5) - 10
 
     leads = detail.get("leads") or []
     if leads:

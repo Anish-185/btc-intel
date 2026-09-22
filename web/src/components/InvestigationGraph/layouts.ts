@@ -85,15 +85,21 @@ export function layoutFor(
   } as unknown as LayoutOptions;
 }
 
-/** Run a layout and fit the result.
+/** Run a layout, and fit only when fitting is what the reader asked for.
  *
- *  Cytoscape's own `fit` option is applied by some layouts and ignored by
- *  others depending on how they finish, which shows up as a graph drawn small
- *  in a corner. Fitting on `layoutstop` is one line and always true.
+ *  Two rules, learned the hard way:
+ *
+ *    * Cytoscape's own `fit` option is honoured by some layouts and ignored by
+ *      others depending on how they finish, which shows up as a graph drawn
+ *      small in a corner. Fitting on `layoutstop` is one line and always true.
+ *    * Fitting is only ever right for a *whole-graph* layout — the first one,
+ *      and an explicit switch. Fitting after an expansion yanks the view away
+ *      from what the analyst was looking at to accommodate nodes they have not
+ *      read yet, which is how a graph tool loses someone's place.
  */
-export function runLayout(cy: Core, options: LayoutOptions, fit = true): void {
+export function runLayout(cy: Core, options: LayoutOptions, fit: (() => void) | false): void {
   const run = cy.layout(options);
-  if (fit) run.one("layoutstop", () => cy.fit(undefined, 30));
+  if (fit) run.one("layoutstop", fit);
   run.run();
 }
 

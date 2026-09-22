@@ -2,7 +2,8 @@
  *  reader never has to guess whether a 64-character string is a transaction or
  *  an address, and transactions link to their propagation tree. */
 import { Link } from "react-router-dom";
-import { evidenceKind, truncateId } from "../lib/format";
+import { evidenceKind } from "../lib/format";
+import { formatId } from "../lib/formatId";
 import { CopyValue } from "./ui";
 
 export function EvidenceList({ items }: { items: string[] }) {
@@ -18,11 +19,11 @@ export function EvidenceList({ items }: { items: string[] }) {
             <span className="label">{kind}</span>
             {kind === "transaction" ? (
               <Link to={`/tx/${item}`} title={item} viewTransition>
-                {truncateId(item, 16, 8)}
+                {formatId(item)}
               </Link>
             ) : kind === "wallet" ? (
               <Link to={`/entities/${encodeURIComponent(item)}`} title={item} viewTransition>
-                {truncateId(item, 16, 8)}
+                {formatId(item)}
               </Link>
             ) : (
               <span className="value" title={item}>

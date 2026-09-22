@@ -5,7 +5,8 @@ import { useParams } from "react-router-dom";
 import type { ElementDefinition, LayoutOptions } from "cytoscape";
 import { api } from "../api/client";
 import { useApi } from "../lib/useApi";
-import { ipClass, truncateId } from "../lib/format";
+import { ipClass } from "../lib/format";
+import { formatId } from "../lib/formatId";
 import { token } from "../lib/tokens";
 import { Chip, ErrorNote, Label, SkeletonRows } from "../components/ui";
 import { Shell } from "../components/Shell";
@@ -59,7 +60,7 @@ export function Transaction() {
           <div>
             <Label>transaction</Label>
             <h1 className="mono" title={txid} style={{ marginTop: "var(--sp-2)" }}>
-              {truncateId(txid, 24, 10)}
+              {formatId(txid, { head: 24, tail: 10 })}
             </h1>
           </div>
           {data && (

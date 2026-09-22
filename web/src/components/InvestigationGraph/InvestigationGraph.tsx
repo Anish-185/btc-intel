@@ -30,13 +30,13 @@ import {
   edgeVisible,
   newElements,
   nodeVisible,
-  shortId,
   simplifyConnectors,
   type EdgeData,
   type Filters,
   type GraphPayload,
   type NodeData,
 } from "./model";
+import { formatId } from "../../lib/formatId";
 import { layoutFor, layoutNewOnly, runLayout, type LayoutName } from "./layouts";
 import { useGraphInstance, type GraphHandlers } from "./useGraphInstance";
 import { download, toPngBlob, toSvg } from "./svgExport";
@@ -104,7 +104,9 @@ export function InvestigationGraph({
 
   const handlers = useRef<GraphHandlers>({} as GraphHandlers);
   const [ready, setReady] = useState(false);
-  const { container, cyRef } = useGraphInstance(handlers, () => setReady(true));
+  const { container, cyRef, fitter } = useGraphInstance(handlers, () => setReady(true));
+  /** A whole-graph layout is allowed to reframe the view. An expansion is not. */
+  const fitView = useCallback(() => fitter.current?.fit(), [fitter]);
 
   // --- adding and removing ------------------------------------------------
   const pushAction = useCallback((action: Action) => {
@@ -138,13 +140,13 @@ export function InvestigationGraph({
       cy.batch(() => cy.add(accepted));
       trueElements.current = cy.elements().map((el) => ({ data: el.data() }));
       if (options.layout) {
-        runLayout(cy, layoutFor(layout, cy, { root: focusId, animate }));
+        runLayout(cy, layoutFor(layout, cy, { root: focusId, animate }), fitView);
       }
       return accepted.map((el) => String(dataOf(el).id));
     },
     // `layout` and `focusId` are read when called, not captured for the instance
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layout, focusId, animate, notify],
+    [layout, focusId, animate, notify, fitView],
   );
 
   const expand = useCallback(
@@ -199,7 +201,7 @@ export function InvestigationGraph({
         trueElements.current = cy.elements().map((el) => ({ data: el.data() }));
         setPruned(result.pruned_edges);
         setLayout("flow");
-        runLayout(cy, layoutFor("flow", cy, { root: id, animate }));
+        runLayout(cy, layoutFor("flow", cy, { root: id, animate }), fitView);
         pushAction({
           label: `trace ${direction} from ${id}`,
           undo: () => {
@@ -207,7 +209,7 @@ export function InvestigationGraph({
               cy.elements().remove();
               cy.add(before);
             });
-            runLayout(cy, layoutFor("force", cy, { animate }));
+            runLayout(cy, layoutFor("force", cy, { animate }), fitView);
           },
           redo: () => void runTrace(id, direction),
         });
@@ -353,7 +355,7 @@ export function InvestigationGraph({
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    runLayout(cy, layoutFor(layout, cy, { root: focusId ?? selected?.id ?? null, animate }));
+    runLayout(cy, layoutFor(layout, cy, { root: focusId ?? selected?.id ?? null, animate }), fitView);
     // Re-laying out on selection change would move the graph under the reader.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout]);
@@ -431,7 +433,7 @@ export function InvestigationGraph({
         cy.add(trueElements.current);
       });
     }
-    runLayout(cy, layoutFor(layout, cy, { root: focusId, animate }));
+    runLayout(cy, layoutFor(layout, cy, { root: focusId, animate }), fitView);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [simplify]);
 
@@ -451,7 +453,7 @@ export function InvestigationGraph({
         setMode("browse");
         pathPick.current = [];
       } else if (event.key.toLowerCase() === "f") {
-        cy.fit(undefined, 30);
+        fitView();
       } else if (event.key === "Delete" || event.key === "Backspace") {
         const chosen = cy.$("node:selected");
         if (chosen.nonempty()) {
@@ -462,7 +464,7 @@ export function InvestigationGraph({
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [cyRef, hide]);
+  }, [cyRef, fitView, hide]);
 
   // Restore a saved investigation.
   useEffect(() => {
@@ -490,7 +492,7 @@ export function InvestigationGraph({
         });
         if (state.filters) setFilters(state.filters);
         if (state.layout) setLayout(state.layout);
-        cy.fit(undefined, 30);
+        fitView();
         notify(`Restored "${record.name}".`);
       })
       .catch((error: Error) => notify(`Could not load that investigation: ${error.message}`));
@@ -588,7 +590,7 @@ export function InvestigationGraph({
         trace={trace}
         onTrace={setTrace}
         onSearch={search}
-        onFit={() => cyRef.current?.fit(undefined, 30)}
+        onFit={fitView}
         onUndo={undo}
         onRedo={redo}
         canUndo={stack.past.length > 0}
@@ -645,7 +647,7 @@ export function labelled(data: NodeData): NodeData {
     label:
       data.type === "ip" || data.type === "aggregate"
         ? (data.label ?? data.id)
-        : shortId(String(data.label ?? data.id), 8, 4),
+        : formatId(String(data.label ?? data.id)),
   };
 }
 

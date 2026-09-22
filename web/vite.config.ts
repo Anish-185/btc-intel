@@ -1,10 +1,27 @@
+import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+
+/** The commit this bundle was built from, compiled in as a constant.
+ *
+ *  The console compares it with what /version reports; a mismatch means the
+ *  page and the server are not the same build, which is how a demo ends up
+ *  showing yesterday's behaviour with today's UI. BTC_INTEL_COMMIT wins, for
+ *  a build without a .git directory. */
+const commit = (() => {
+  if (process.env.BTC_INTEL_COMMIT) return process.env.BTC_INTEL_COMMIT.trim().slice(0, 7);
+  try {
+    return execSync("git rev-parse --short=7 HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+})();
 
 // The API is same-origin in production (FastAPI serves web/dist), so the dev
 // server proxies instead of hard-coding a base URL anywhere in the app.
 export default defineConfig({
   plugins: [react()],
+  define: { __APP_COMMIT__: JSON.stringify(commit) },
   server: {
     // In dev the API lives on another port, and its paths (/alerts, /entities)
     // are also the console's own routes — so the calls are namespaced under

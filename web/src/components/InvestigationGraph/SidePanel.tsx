@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../api/client";
 import type { EntityDetail } from "../../api/types";
-import { truncateId } from "../../lib/format";
+import { formatId } from "../../lib/formatId";
 import { RiskMeter } from "../ui";
 import type { NodeData } from "./model";
 
@@ -61,7 +61,7 @@ export function SidePanel({
       </div>
 
       <p className="mono graph-side-id" title={node.id}>
-        {truncateId(node.id, 22, 8)}
+        {formatId(node.id, { head: 18, tail: 8 })}
       </p>
 
       {node.type === "wallet" && (
@@ -100,7 +100,7 @@ export function SidePanel({
               <ul className="graph-side-list">
                 {detail.evidence.slice(0, 6).map((item) => (
                   <li key={item} className="mono" title={item}>
-                    {truncateId(item, 16, 6)}
+                    {formatId(item, { head: 14, tail: 6 })}
                   </li>
                 ))}
               </ul>

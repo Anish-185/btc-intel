@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -273,3 +274,26 @@ def test_stats_summarises_the_dashboard_header(fixture_client):
     assert body["alerts_by_pattern_type"]["layering"] == 1
     assert body["alerts_by_pattern_type"]["ransomware_collector"] == 1
     assert body["avg_confidence"] == pytest.approx((0.91 + 0.64 + 0.52) / 3, abs=1e-3)
+
+
+def test_version_reports_the_build_and_the_route_count(client):
+    """The console compares this with the commit compiled into its bundle."""
+    api, _ = client
+    body = api.get("/version").json()
+    assert set(body) == {"commit", "started_at", "routes"}
+    assert body["commit"] and len(body["commit"]) <= 40
+    assert body["routes"] >= 10, "routes are counted from the schema, so routers count too"
+    # Parsable, and in the past.
+    started = datetime.fromisoformat(body["started_at"])
+    assert started <= datetime.now(timezone.utc)
+
+
+def test_version_prefers_the_stamped_commit(monkeypatch, client):
+    """A container built without .git passes BTC_INTEL_COMMIT instead."""
+    api, _ = client
+    monkeypatch.setenv("BTC_INTEL_COMMIT", "deadbeefcafe")
+    app_module._commit.cache_clear()
+    try:
+        assert api.get("/version").json()["commit"] == "deadbee"
+    finally:
+        app_module._commit.cache_clear()

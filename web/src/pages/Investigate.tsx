@@ -13,7 +13,7 @@ import { ErrorNote, Label, SkeletonRows } from "../components/ui";
 import { Shell } from "../components/Shell";
 import { useToast } from "../components/Toasts";
 import { useApi } from "../lib/useApi";
-import { truncateId } from "../lib/format";
+import { formatId } from "../lib/formatId";
 
 export function Investigate() {
   const [params] = useSearchParams();
@@ -51,7 +51,7 @@ export function Investigate() {
             <h1 style={{ marginTop: "var(--sp-2)" }}>
               {focus ? (
                 <span className="mono" title={focus}>
-                  {truncateId(focus, 20, 8)}
+                  {formatId(focus, { head: 20, tail: 8 })}
                 </span>
               ) : investigation ? (
                 "Saved investigation"

@@ -2,6 +2,7 @@
  *  an on-this-page list, and the theme toggle. Content to the right. */
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation, useParams } from "react-router-dom";
+import { useBuildCheck } from "../lib/useBuildCheck";
 import { useTheme } from "../lib/theme";
 import { forgetTokens } from "../lib/tokens";
 import { CommandPalette } from "./CommandPalette";
@@ -25,6 +26,7 @@ export interface Anchor {
 
 export function Shell({ anchors, children }: { anchors?: Anchor[]; children: ReactNode }) {
   const [theme, toggleTheme] = useTheme();
+  const build = useBuildCheck();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
   const { pathname } = useLocation();
@@ -129,7 +131,37 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
         </div>
       </header>
 
-      <main className="content">{children}</main>
+      <main className="content">
+        {(build.mismatch || build.unreachable) && (
+          <div className="notice build-notice" role="alert">
+            <span aria-hidden="true">⚠</span>
+            <div>
+              <p className="label">
+                {build.mismatch ? "The API is a different build" : "The API is not answering"}
+              </p>
+              <p className="soft" style={{ marginTop: "var(--sp-1)" }}>
+                {build.mismatch ? (
+                  <>
+                    This page was built from <code className="mono">{build.ours}</code>; the
+                    server at <code className="mono">{"/version"}</code> reports{" "}
+                    <code className="mono">{build.theirs}</code>, started{" "}
+                    {build.startedAt?.replace("T", " ").replace("+00:00", " UTC")}. Restart it
+                    with <code className="mono">offline/run_offline.sh</code> before trusting
+                    anything on screen.
+                  </>
+                ) : (
+                  <>
+                    Nothing answered <code className="mono">/version</code>. Either the API is
+                    not running, or it is an older build without that endpoint — start it with{" "}
+                    <code className="mono">offline/run_offline.sh</code>.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+        {children}
+      </main>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
