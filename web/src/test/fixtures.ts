@@ -1,0 +1,76 @@
+import type { Alert, EntityDetail } from "../api/types";
+
+export const alert = (over: Partial<Alert> = {}): Alert => ({
+  alert_id: "C000001",
+  entity_id: "C000001",
+  entity_type: "cluster",
+  pattern_types: ["ransomware_collector"],
+  risk_score: 0.91,
+  reason: "Flagged due to ransomware collector structure.",
+  evidence: ["a".repeat(64)],
+  top_signal: "rule_score",
+  rule_score: 0.88,
+  anomaly_score: 0.1,
+  gnn_score: 0,
+  taint_score: 0.5,
+  taint_path: ["C000009", "C000001"],
+  leads: "[]",
+  contributions: "{}",
+  wallets: 12,
+  suspicious_merge: false,
+  ...over,
+});
+
+export const ALERTS: Alert[] = [
+  alert(),
+  alert({
+    alert_id: "C000002",
+    entity_id: "C000002",
+    pattern_types: ["layering"],
+    risk_score: 0.64,
+    reason: "Flagged due to layering fan-out and merge.",
+    wallets: 4,
+  }),
+  alert({
+    alert_id: "C000003",
+    entity_id: "C000003",
+    pattern_types: [],
+    risk_score: 0.22,
+    reason: "Flagged due to inherited taint only.",
+    wallets: 1,
+  }),
+];
+
+export const DETAIL: EntityDetail = {
+  entity_id: "C000001",
+  entity_type: "cluster",
+  wallets: ["bc1qwallet0001", "bc1qwallet0002"],
+  flag: null,
+  features: { txs: 31 },
+  scores: {
+    risk_score: 0.91,
+    rule_score: 0.88,
+    anomaly_score: 0.1,
+    gnn_score: 0,
+    taint_score: 0.5,
+    top_signal: "rule_score",
+    contributions: { rule_score: 0.7 },
+  },
+  alerted: true,
+  pattern_types: ["ransomware_collector"],
+  reason: "Flagged due to ransomware collector structure: 31 first-time senders paid one address.",
+  evidence: ["b".repeat(64), "bc1qwallet0001"],
+  taint_path: ["C000009", "C000001"],
+  leads: [
+    {
+      ip: "185.220.9.9",
+      ip_class: "tor_exit",
+      confidence: 0.21,
+      observations: 3,
+      anonymized_entry_point: true,
+      label: "anonymized entry point",
+      evidence: "estimated origin 185.220.9.9, origin confidence 0.21",
+    },
+  ],
+  caveat: "scores rank leads for a human; an entity without an alert is not cleared",
+};
