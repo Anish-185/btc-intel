@@ -6,21 +6,25 @@ import { useApi } from "../lib/useApi";
 import { useEnter } from "../lib/motion";
 import { patternLabel } from "../lib/format";
 import { AmbientField } from "../components/AmbientField";
+import { RiskMeter } from "../components/ui";
 import { ErrorNote, Label, Notice, SkeletonRows, Stat } from "../components/ui";
 import { Shell } from "../components/Shell";
 
 const ANCHORS = [
   { id: "case", label: "This case" },
+  { id: "next", label: "Where to start" },
   { id: "patterns", label: "Alerts by pattern" },
   { id: "pipeline", label: "Pipeline" },
 ];
 
 export function Home() {
   const { data, error, loading } = useApi((signal) => api.stats(signal), []);
+  const queue = useApi((signal) => api.alerts({ limit: 5 }, signal), []);
   const header = useEnter<HTMLDivElement>(0);
   const caseSection = useEnter<HTMLElement>(1);
-  const patterns = useEnter<HTMLElement>(2);
-  const pipeline = useEnter<HTMLElement>(3);
+  const next = useEnter<HTMLElement>(2);
+  const patterns = useEnter<HTMLElement>(3);
+  const pipeline = useEnter<HTMLElement>(4);
 
   const origin = data?.features.origin_estimation;
   const byPattern = Object.entries(data?.alerts_by_pattern_type ?? {}).sort((a, b) => b[1] - a[1]);
@@ -75,6 +79,40 @@ export function Home() {
             />
           </div>
         )}
+      </section>
+
+      <section className="section" id="next" ref={next}>
+        <div className="section-head">
+          <h2>Where to start</h2>
+          <Link to="/alerts" viewTransition>
+            All {data?.total_alerts ?? ""} alerts →
+          </Link>
+        </div>
+        {queue.loading ? (
+          <SkeletonRows rows={3} />
+        ) : (
+          <div className="evidence-list">
+            {(queue.data?.alerts ?? []).map((alert) => (
+              <Link
+                key={alert.alert_id}
+                to={`/entities/${encodeURIComponent(alert.entity_id)}`}
+                className="case-row"
+                viewTransition
+              >
+                <span className="mono" title={alert.entity_id}>
+                  {alert.entity_id.slice(0, 14)}…
+                </span>
+                <RiskMeter score={alert.risk_score} cells={6} />
+                <span className="soft case-reason">{alert.reason}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+        <p className="muted" style={{ marginTop: "var(--sp-3)", fontSize: "var(--fs-small)" }}>
+          Open a case for its evidence, its neighbourhood graph and the addresses it was seen
+          broadcasting from. Press <span className="mono">Ctrl K</span> to jump straight to an
+          entity, transaction or IP.
+        </p>
       </section>
 
       <section className="section" id="patterns" ref={patterns}>

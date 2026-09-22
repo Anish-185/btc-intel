@@ -722,6 +722,37 @@ table.data tbody tr[data-settled="true"] {
   transform-origin: left center;
 }
 
+.case-row {
+  display: grid;
+  grid-template-columns: 13rem auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: var(--bw-hair) solid var(--rule-soft);
+  font-size: var(--fs-small);
+  color: var(--ink);
+  text-decoration: none;
+}
+.case-row:hover {
+  background: var(--evidence-w7);
+  color: var(--ink);
+}
+.case-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 48rem) {
+  .case-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1);
+  }
+  .case-reason {
+    white-space: normal;
+  }
+}
+
 /* -- entity ----------------------------------------------------------- */
 .entity-head {
   display: flex;

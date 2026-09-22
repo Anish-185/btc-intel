@@ -1,7 +1,7 @@
 /** The frame every page sits in: a left rail with the wordmark, the sections,
  *  an on-this-page list, and the theme toggle. Content to the right. */
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useParams } from "react-router-dom";
 import { useTheme } from "../lib/theme";
 import { forgetTokens } from "../lib/tokens";
 import { CommandPalette } from "./CommandPalette";
@@ -27,6 +27,15 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
   const { pathname } = useLocation();
+  const params = useParams();
+
+  // A case and a transaction are places too. Showing the open one in the rail
+  // is how a reader learns the console has more than two pages.
+  const open = params.id
+    ? { label: `Case ${params.id.slice(0, 10)}…`, to: pathname }
+    : params.txid
+      ? { label: `Transaction ${params.txid.slice(0, 8)}…`, to: pathname }
+      : null;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -72,6 +81,11 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
               {page.label}
             </NavLink>
           ))}
+          {open && (
+            <NavLink to={open.to} className="rail-link" title={params.id ?? params.txid}>
+              <span className="mono" style={{ fontSize: "var(--fs-small)" }}>{open.label}</span>
+            </NavLink>
+          )}
         </nav>
 
         {anchors?.length ? (
