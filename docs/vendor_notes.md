@@ -187,3 +187,46 @@ index-numbered.
 | AMLSim | Apache-2.0 | Parameter-driven generator with injected labelled typologies | Java/MASON simulator, JanusGraph, legacy pins | No |
 | BlockSci | **GPL-3.0** | Change-address heuristics, common-input clustering, CoinJoin ID, taint | C++ storage engine, chain parser, fluent API | No |
 | Explainable-BTC-Detection | MIT | Temporal split + threshold discipline, imbalance metrics, SHAP explanations | Elliptic-specific preprocessing, model bake-off | No |
+
+---
+
+## Front-end graph libraries (web/)
+
+Checked before install, the same way the vendored research repos were. Versions
+are what `package.json` pins; licences are read out of each package's own
+metadata, not from its README.
+
+| Package | Version | Licence | Verdict |
+| --- | --- | --- | --- |
+| `cytoscape` | 3.34.3 | MIT | bundled |
+| `cytoscape-fcose` | 2.2.0 | MIT | bundled (force layout) |
+| `cytoscape-dagre` | 2.5.0 | MIT | bundled (flow tree) |
+| `cytoscape-expand-collapse` | 4.1.1 | MIT | bundled (entity clusters) |
+| `cytoscape-popper` | 4.0.1 | MIT | bundled (tooltip anchoring) |
+| `cytoscape-cxtmenu` | 3.5.0 | MIT | bundled (context menu) |
+| `tippy.js` | 6.3.7 | MIT | bundled (tooltips) |
+| `@popperjs/core` | 2.11.8 | MIT | bundled (tippy's positioning engine) |
+| `dagre`, `layout-base`, `cose-base` | — | MIT | transitive, bundled |
+| **`cytoscape-svg`** | 0.4.0 | **GNU GPL-3.0** | **not installed — see below** |
+
+### Why `cytoscape-svg` is not in the build
+
+The brief asked for it, and the licence check is what caught it: `cytoscape-svg`
+is GPL-3.0. btc-intel is MIT (`LICENSE`), and GPL-3.0 is a copyleft licence —
+bundling it into the shipped front-end would put the distributed work under
+GPL-3.0 terms, which is not something a build script should decide on a
+project's behalf. This is the same call already made for BlockSci above: read
+the published behaviour, write our own.
+
+SVG export is therefore implemented in
+`web/src/components/InvestigationGraph/svgExport.ts` — about a hundred lines
+that walk the live Cytoscape model (node positions, sizes, shapes, colours,
+labels; edge endpoints and widths) and write an SVG document directly. It has
+two advantages beyond the licence: the output uses our own design tokens rather
+than a screenshot of them, and the same function serves the PDF case report, so
+a report embeds the analyst's actual view.
+
+If the GPL terms are ever acceptable for a particular deployment — an internal
+NTRO build that is never distributed, say — swapping our exporter for the
+package is a two-line change. The decision belongs to whoever ships it, which
+is why it is written down here rather than assumed.

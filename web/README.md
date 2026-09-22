@@ -1,87 +1,84 @@
-# btc-intel web
+# Motion spec
 
-The investigator console: alert triage, case detail and link analysis over the
-`api/` backend. React + TypeScript + Vite, no UI framework, no CSS framework,
-nothing fetched from the network at runtime.
+Every animation in `web/`, what triggers it, and what it does when the reader
+has asked for less motion.
 
-```sh
-npm install
-npm run dev        # http://localhost:5173
-```
+Three rules the whole list obeys:
 
-The dev server expects the API at `http://127.0.0.1:8000`:
+1. **Only `transform` and `opacity` animate.** Nothing else touches layout.
+2. **Motion never gates data.** No component waits for an animation before
+   rendering, and no surface is inert while one runs. The table can be clicked
+   mid-FLIP, the graph can be dragged while nodes are still fading in.
+3. **`prefers-reduced-motion: reduce` removes it**, not shortens it. The media
+   query zeroes the duration tokens (`tokens.css`), a global rule clamps every
+   CSS transition and animation to 0.001ms, the scripted animations check
+   `reducedMotion()` before starting, and the ambient canvas never opens a
+   frame loop at all.
 
-```sh
-cd ..
-.venv/bin/python -m uvicorn api.app:app --host 127.0.0.1 --port 8000
-```
+Tokens: `--dur-1 150ms`, `--dur-2 200ms`, `--dur-3 280ms`, `--dur-4 400ms`,
+`--stagger 40ms`, `--ease-out cubic-bezier(.22, 1, .36, 1)`,
+`--ease-standard cubic-bezier(.4, 0, .2, 1)`.
 
-If there is nothing to look at yet, produce a case first:
+| # | Animation | Trigger | Duration / easing | Reduced motion |
+| --- | --- | --- | --- | --- |
+| 1 | **Route crossfade** — the whole view cross-dissolves | any in-app navigation (`<Link viewTransition>`) | 280ms `ease-out`, via the View Transitions API (`@view-transition` in `base.css`) | `navigation: none` — the page simply swaps |
+| 2 | **Shared element: entity id** — the queue row's id morphs into the case page's heading | clicking a row's entity link | handled by the same view transition; `view-transition-name: entity-<id>` on both | no transition; heading appears in place |
+| 3 | **Shared element: risk score** — the row's meter morphs into the case gauge's position | same as 2 | same transition; `view-transition-name: score-<id>` | as above |
+| 4 | **Section entrance** — each page's sections fade up 10px, staggered | first mount of a page (`useEnter(index)`) | 400ms `ease-out`, `index × 40ms` delay, `fill: backwards` | not started; sections render in final state |
+| 5 | **Stat count-up** — a numeral counts from 0 to its value | stat block mounts (`useCountUp`) | 400ms, cubic ease-out, rAF | value set immediately |
+| 6 | **Gauge arc draw** — the risk arc sweeps from 0 to the score | case page mounts | 400ms `ease-out` on `stroke-dasharray` | arc rendered at full length |
+| 7 | **Chart bars grow** — pattern bars scale in from the left | overview mounts | 400ms `ease-out`, 40ms stagger, `transform: scaleX` | drawn at full width |
+| 8 | **Row hover** — background tints to `--evidence-w7` | pointer or focus within a row | 200ms `ease-out`, colour only, **no movement** | instant tint |
+| 9 | **Table FLIP** — rows slide from their old position to their new one | sort or filter change (`AlertTable`'s layout effect) | 280ms `ease-out` on `translateY` | rows appear in the new order |
+| 10 | **Verdict settle** — the confirm/reject buttons are replaced by a status chip and the row dims to 55% | a verdict is recorded | 150ms `ease-out` on opacity | instant swap |
+| 11 | **Toast** — a confirmation slides into the corner | a verdict recorded, a report started | appears/disappears with the CSS transition tokens; auto-dismisses after 3.2s | appears and disappears instantly; the 3.2s life is unchanged |
+| 12 | **Skeleton shimmer** — a gradient sweeps a loading placeholder | any pending request | 1.4s linear, infinite | the global reduce rule stops the animation; the placeholder stays |
+| 13 | **Graph node entrance** — nodes fade in, 8ms apart | first layout of a graph | 260ms per node | nodes drawn opaque immediately |
+| 14 | **Graph layout** — cose/dagre animate to their final positions | mount, hop-count change, switching to the propagation tree | 300ms, Cytoscape's own easing | `animate: false`; the layout is applied in one step |
+| 15 | **Graph hover dim** — everything that is not a neighbour drops to 12% opacity | hovering a node | 200ms, opacity only | Cytoscape's transition is still declared but the dim is instant enough to be unnoticeable; the state itself is kept, because it is information, not decoration |
+| 16 | **Marching ants** — the taint path's dashes flow along the edge | a graph containing a taint path | `line-dash-offset` stepped every 90ms | loop never starts; the taint path stays dashed and still |
+| 17 | **Ambient field** — the home header's dither grid drifts | overview page visible and tab focused | redrawn at 8fps, paused off-screen (IntersectionObserver) and when `document.hidden` | never starts; one static frame is drawn |
+| 18 | **Command palette** — the dialog fades in over a dimmed page | ⌘/Ctrl-K | native `<dialog>` + backdrop, CSS-transitioned | instant |
+| 19 | **Sub-nav marker** — the active anchor's rule extends from 8px to 20px | the reader scrolls into a section | 200ms `ease-out` on `width` | instant |
+| 20 | **Button press/hover** — background and colour shift | pointer | 200ms `ease-out`, colour only | instant |
 
-```sh
-python -m generator.main --n-actors 200 --n-transactions 1200 --output data/raw --formats csv
-python -m ingest.pipeline
-python -m fusion.pipeline
-```
+## The investigation graph
 
-## Environment
+| # | Animation | Trigger | Duration / easing | Reduced motion |
+| --- | --- | --- | --- | --- |
+| 21 | **Layout transition** — nodes glide to their new places when the layout changes | the layout toggle, a trace, simplify connectors | 300ms, Cytoscape's own easing, then a fit | `animate: false`; positions are applied in one step |
+| 22 | **Incremental expansion** — only the new nodes are laid out; everything already placed is locked and does not move | double-click, or **expand** | 260ms | applied instantly, still without moving existing nodes |
+| 23 | **Search centring** — the view pans and zooms to the match | typing in **find** | 250ms | jumps straight there |
+| 24 | **Hover dim** — everything that is not a neighbour drops to 10% | hovering a node | 200ms, opacity only | instant |
+| 25 | **Taint dashes** — the marching ants on the taint path | a taint path is present | `line-dash-offset` stepped every 90ms | the loop never starts; the path stays dashed and still |
+| 26 | **Tooltip** — appears above the node under the pointer | hover | tippy.js default, ~100ms | tippy's own transition is trivial; the content is what matters and it is instant |
 
-| variable | default | meaning |
-| --- | --- | --- |
-| `VITE_API_BASE` | empty — same origin | Where the API lives. Production serves `web/dist` and the API from one origin, so the default is correct there and nothing needs setting. |
+Nothing in the graph waits on an animation: expansion adds nodes to the model
+first and animates second, and the canvas accepts pointer input throughout.
 
-In development the API runs on another port *and* its paths (`/alerts`,
-`/entities`) are also the console's own routes, so `.env.development` sets
-`VITE_API_BASE=/api` and `vite.config.ts` proxies that prefix to the backend,
-stripping it on the way through. Copy `.env.example` to `.env.local` to point a
-build somewhere else.
+## What is deliberately not animated
 
-## Build
+- **Numbers in the table.** A score that animates while being read is a score
+  being misread.
+- **Filtering.** Rows leave immediately; only surviving rows animate their
+  position (9).
+- **Anything on the error and degraded-mode notices.** A warning that fades in
+  is a warning that can be missed.
+- **Page scroll.** No smooth-scroll hijacking; the browser's own behaviour is
+  left alone, and `scroll-behavior` is set to `auto` under reduced motion.
 
-```sh
-npm run build          # -> web/dist, static
-npm run preview        # serve the build locally
-npm run check:offline  # fails if dist would fetch anything external
-npm run check:contrast # WCAG AA check over the design tokens
-npm test               # vitest
-```
+## No animation library
 
-`npm run build` writes a plain static `dist/` — `index.html`, hashed JS/CSS and
-locally bundled fonts. Serve it from FastAPI, nginx, or a USB stick; there is
-no server-side rendering and no runtime configuration to inject.
+The two effects that need scripting — the table FLIP and the count-up — are a
+dozen lines each on the Web Animations API (`lib/motion.ts`). Everything else is
+CSS or the View Transitions API. `motion` was allowed by the brief for layout
+animation; it was not added because nothing here needed more than what the
+platform already does, and the console has a bundle budget to keep.
 
-Current size: **95 KB gzipped** for the initial load, plus a **176 KB gzipped**
-graph chunk that loads only when a case page is opened.
+## Verification
 
-## Layout
-
-```
-src/
-  api/          client.ts, types.ts — every call the console makes, typed
-  lib/          risk, formatting, theme, motion primitives, token reads
-  components/   shell, table, graph, leads, small shared pieces
-  pages/        Home, Alerts, Entity, Transaction
-  styles/       tokens.css (the design system), base.css (the components)
-  test/         setup, fixtures, console.test.tsx
-```
-
-`styles/tokens.css` is the source of truth for colour, type, spacing and
-motion; it is documented in `docs/design/design_analysis.md`. Nothing outside
-that file invents a colour or a duration.
-
-## Things worth knowing before changing it
-
-- **Risk is never colour alone.** Every score is drawn as braille cells + the
-  number + the word (`⣿⣿⣿⣤⠂⠂⠂⠂ 0.44 medium`). It survives greyscale, printing
-  and copy-paste into a case note. If you add a risk surface, keep all three.
-- **Leads are not reasons.** IP correlation lives in its own panel, on its own
-  surface, worded "associated with". It must not migrate into the evidence or
-  the risk explanation — that is the product's central claim about what it does
-  and does not assert. There is a test for it.
-- **The field is a place, not a theme.** The graph and the home header stay dark
-  in both light and dark themes.
-- **Motion never gates data.** Every animation is transform/opacity only and the
-  content is interactive throughout. `prefers-reduced-motion` turns all of it
-  off, including the ambient canvas. See `docs/design/motion_spec.md`.
-- **Offline is a requirement, not a preference.** No CDN links, no Google
-  Fonts, no remote images. `npm run check:offline` enforces it after a build.
+`src/test/console.test.tsx` asserts that the ambient field does not open a frame
+loop under `prefers-reduced-motion: reduce`, and that it does otherwise. The
+rest is enforced structurally: `reducedMotion()` guards every scripted
+animation, and the global CSS rule catches anything declarative that is added
+later.

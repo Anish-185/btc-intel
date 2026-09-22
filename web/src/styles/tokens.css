@@ -73,6 +73,14 @@
   --node-transaction: #97a3b8;
   --node-ip: #e3b25c;
   --node-taint: #ff8f61;
+  /* The graph's own risk ramp: green -> amber -> red, as a node fill rather
+     than as text. It is a separate ramp from --risk-* because those are tuned
+     for text on a themed page, while these sit on --field, which is dark in
+     both themes — so, like the other node colours, they are declared once. */
+  --risk-node-none: #5fc794;
+  --risk-node-medium: #e3b25c;
+  --risk-node-high: #ff8f61;
+  --risk-node-critical: #ff7186;
 
   /* -- type ----------------------------------------------------------- */
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;

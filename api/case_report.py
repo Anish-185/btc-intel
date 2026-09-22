@@ -56,10 +56,27 @@ def _heading(c, text: str, y: float) -> float:
     return y - 16
 
 
-def _layout(nodes: list[dict], edges: list[dict], box: tuple[float, float, float, float]
-            ) -> dict[str, tuple[float, float]]:
-    """Positions from networkx's spring layout, rescaled into the box."""
+def _layout(nodes: list[dict], edges: list[dict], box: tuple[float, float, float, float],
+            given: dict[str, dict] | None = None) -> dict[str, tuple[float, float]]:
+    """Positions from networkx's spring layout, rescaled into the box.
+
+    `given` short-circuits it: when the analyst saved an investigation, the
+    report draws the arrangement they built rather than a fresh one, which is
+    the difference between a report of the case and a picture of the data.
+    """
     x0, y0, w, h = box
+    if given:
+        points = {n["data"]["id"]: given[n["data"]["id"]]
+                  for n in nodes if n["data"]["id"] in given}
+        if points:
+            xs = [p["x"] for p in points.values()]
+            ys = [p["y"] for p in points.values()]
+            span_x = (max(xs) - min(xs)) or 1.0
+            span_y = (max(ys) - min(ys)) or 1.0
+            # PDF y grows upward, the screen's grows down — flip it.
+            return {node: (x0 + (p["x"] - min(xs)) / span_x * w,
+                           y0 + h - (p["y"] - min(ys)) / span_y * h)
+                    for node, p in points.items()}
     g = nx.Graph()
     g.add_nodes_from(n["data"]["id"] for n in nodes)
     g.add_edges_from((e["data"]["source"], e["data"]["target"]) for e in edges)
@@ -76,13 +93,14 @@ def _layout(nodes: list[dict], edges: list[dict], box: tuple[float, float, float
 
 def _draw_graph(c, graph: dict, y_top: float, height: float) -> None:
     nodes = graph["elements"]["nodes"][:60]
+    positions = graph.get("positions")
     keep = {n["data"]["id"] for n in nodes}
     edges = [e for e in graph["elements"]["edges"]
              if e["data"]["source"] in keep and e["data"]["target"] in keep]
     box = (MARGIN + 6, y_top - height + 6, WIDTH - 2 * MARGIN - 12, height - 12)
     c.setStrokeColor(RULE)
     c.rect(MARGIN, y_top - height, WIDTH - 2 * MARGIN, height)
-    pos = _layout(nodes, edges, box)
+    pos = _layout(nodes, edges, box, positions)
 
     c.setLineWidth(0.4)
     c.setStrokeColor(RULE)
@@ -100,7 +118,8 @@ def _draw_graph(c, graph: dict, y_top: float, height: float) -> None:
 
     c.setFont("Helvetica", 7.5)
     c.setFillColor(MUTED)
-    legend = (f"green wallets {graph['counts']['wallets']} · "
+    legend = ((f"{graph.get('source_label')} · " if graph.get("source_label") else "")
+              + f"green wallets {graph['counts']['wallets']} · "
               f"blue transactions {graph['counts']['transactions']} · "
               f"brown IPs {graph['counts']['ips']} · red = this entity · "
               f"within {graph['hops']} hops"

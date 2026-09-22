@@ -95,6 +95,10 @@ const PAIRS = [
   ["--node-transaction", "--field", 3.0, "graph node: transaction"],
   ["--node-ip", "--field", 3.0, "graph node: ip"],
   ["--node-taint", "--field", 3.0, "graph node: taint path"],
+  ["--risk-node-none", "--field", 3.0, "graph node: no risk signal"],
+  ["--risk-node-medium", "--field", 3.0, "graph node: medium risk"],
+  ["--risk-node-high", "--field", 3.0, "graph node: high risk"],
+  ["--risk-node-critical", "--field", 3.0, "graph node: critical risk"],
   ["--evidence", "--surface", 3.0, "focus ring"],
 ];
 

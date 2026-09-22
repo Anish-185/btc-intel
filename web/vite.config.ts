@@ -24,7 +24,18 @@ export default defineConfig({
       output: {
         // The graph engine is the heavy dependency and only the entity page
         // needs it; keep it out of the initial download.
-        manualChunks: { graph: ["cytoscape", "cytoscape-dagre"] },
+        manualChunks: {
+          graph: [
+            "cytoscape",
+            "cytoscape-dagre",
+            "cytoscape-fcose",
+            "cytoscape-expand-collapse",
+            "cytoscape-popper",
+            "cytoscape-cxtmenu",
+            "tippy.js",
+            "@popperjs/core",
+          ],
+        },
       },
     },
   },

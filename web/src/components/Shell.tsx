@@ -15,6 +15,7 @@ const MOD = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator
 const PAGES = [
   { to: "/", label: "Overview" },
   { to: "/alerts", label: "Alert queue" },
+  { to: "/investigate", label: "Investigation graph" },
 ];
 
 export interface Anchor {

@@ -2,7 +2,7 @@
  *  evidence, connected to what — and only then, separately, which addresses it
  *  was seen broadcasting from. */
 import { Suspense, lazy, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useApi } from "../lib/useApi";
 import { useEnter } from "../lib/motion";
@@ -157,6 +157,13 @@ export function Entity() {
         <div className="section-head">
           <h2>Link analysis</h2>
           <span className="field" style={{ gap: "var(--sp-2)" }}>
+            <Link
+              className="btn btn-ghost bracket"
+              to={`/investigate?focus=${encodeURIComponent(id)}`}
+              viewTransition
+            >
+              Investigate →
+            </Link>
             <span className="label">hops</span>
             {[1, 2, 3].map((n) => (
               <button

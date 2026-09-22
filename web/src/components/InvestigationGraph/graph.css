@@ -1,0 +1,332 @@
+/* The investigation graph's chrome. The canvas itself is styled in style.ts,
+   because Cytoscape paints to a canvas and never sees CSS.
+
+   Everything here sits on --field, which is dark in both themes. */
+
+.investigation-graph {
+  display: flex;
+  flex-direction: column;
+}
+
+.graph-toolbar {
+  border-bottom: var(--bw-hair) solid var(--field-rule);
+}
+
+.graph-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.graph-toolbar-row + .graph-toolbar-row {
+  border-top: var(--bw-hair) solid var(--field-rule);
+}
+
+.graph-toolbar-gap {
+  flex: 1 1 auto;
+}
+
+.graph-toolbar .label {
+  color: var(--field-muted);
+}
+
+.graph-segment {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.graph-toolbar input,
+.graph-toolbar select,
+.graph-filters input,
+.graph-filters select {
+  background: #0d1428;
+  color: var(--field-ink);
+  border: var(--bw-hair) solid var(--field-rule);
+  border-radius: var(--r-1);
+  padding: 0.2rem 0.375rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+
+.graph-toolbar input[type="number"] {
+  width: 4.5rem;
+}
+.graph-toolbar input[type="search"] {
+  width: 13rem;
+}
+
+.graph-toolbar .btn[aria-pressed="true"] {
+  background: #17224a;
+  color: var(--field-ink);
+}
+
+.graph-busy {
+  color: var(--node-ip);
+}
+
+.graph-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3);
+  border-top: var(--bw-hair) solid var(--field-rule);
+  background: #080d1e;
+}
+
+.graph-filter-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.graph-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--field-ink);
+}
+
+.graph-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: var(--bw-hair) solid var(--field-rule);
+  background: #241c0d;
+  color: var(--caution);
+  font-size: var(--fs-small);
+}
+
+.graph-stage {
+  position: relative;
+  flex: 1 1 auto;
+}
+
+.graph-canvas {
+  width: 100%;
+  touch-action: none; /* pinch-zoom belongs to the graph, not the page */
+}
+
+/* -- legend ------------------------------------------------------------- */
+.graph-legend {
+  position: absolute;
+  left: var(--sp-3);
+  bottom: var(--sp-3);
+  display: flex;
+  gap: var(--sp-5);
+  padding: var(--sp-3);
+  background: #060a17e0;
+  border: var(--bw-hair) solid var(--field-rule);
+  font-size: var(--fs-small);
+  color: var(--field-ink);
+  pointer-events: none;
+}
+
+.graph-legend ul {
+  list-style: none;
+  margin: var(--sp-1) 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.graph-legend li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.lg-shape {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  background: var(--field-muted);
+}
+.lg-wallet {
+  border-radius: 50%;
+  background: var(--risk-node-none);
+}
+.lg-tx {
+  transform: rotate(45deg);
+  width: 9px;
+  height: 9px;
+  background: var(--node-transaction);
+}
+.lg-ip {
+  background: var(--node-ip);
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+.lg-agg {
+  width: 18px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--field-rule);
+  border: 1px solid var(--field-muted);
+}
+
+.lg-ramp {
+  display: flex;
+  margin-top: var(--sp-1);
+  width: 11rem;
+  height: 8px;
+}
+.lg-ramp span {
+  flex: 1;
+}
+
+.lg-ramp-ends,
+.lg-note {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  color: var(--field-muted);
+}
+
+.lg-note {
+  display: block;
+  max-width: 17rem;
+}
+
+/* -- side panel --------------------------------------------------------- */
+.graph-side {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  width: min(20rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  overflow-y: auto;
+  padding: var(--sp-3);
+  background: #060a17f2;
+  border: var(--bw-hair) solid var(--field-rule);
+  color: var(--field-ink);
+}
+
+.graph-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.graph-side-head .label {
+  color: var(--field-muted);
+}
+
+.graph-side-id {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+
+.graph-side-risk {
+  margin: var(--sp-3) 0;
+}
+
+.graph-side .soft {
+  color: #c3d0ecd9;
+  font-size: var(--fs-small);
+}
+
+.graph-side .muted {
+  color: var(--field-muted);
+  font-size: var(--fs-small);
+}
+
+.graph-side-label {
+  margin-top: var(--sp-3);
+  color: var(--field-muted);
+}
+
+.graph-side-list {
+  list-style: none;
+  margin: var(--sp-1) 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.125rem;
+  font-size: 0.6875rem;
+  color: #c3d0ecd9;
+}
+
+.graph-side-open {
+  margin-top: var(--sp-3);
+  --bk: var(--field-muted);
+  color: var(--field-ink);
+  text-decoration: none;
+}
+
+.graph-side-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-3);
+  border-top: var(--bw-hair) solid var(--field-rule);
+  padding-top: var(--sp-2);
+}
+
+.graph-side-actions .btn,
+.graph-side .btn {
+  color: var(--field-muted);
+}
+.graph-side-actions .btn:hover {
+  color: var(--field-ink);
+}
+
+/* -- tooltips ----------------------------------------------------------- */
+.tippy-box[data-theme~="btc-intel"] {
+  background: #060a17;
+  border: var(--bw-hair) solid var(--field-rule);
+  border-radius: var(--r-1);
+  color: var(--field-ink);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.tippy-box[data-theme~="btc-intel"] .tippy-arrow {
+  color: #060a17;
+}
+
+.graph-tip {
+  display: grid;
+  gap: 0.125rem;
+  padding: 0.25rem 0.125rem;
+}
+
+.graph-tip > div {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: space-between;
+}
+
+.graph-tip-key {
+  color: var(--field-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.5625rem;
+}
+
+@media (max-width: 48rem) {
+  .graph-legend {
+    display: none;
+  }
+  .graph-side {
+    position: static;
+    width: auto;
+    max-height: none;
+    border-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .investigation-graph * {
+    transition: none !important;
+  }
+}

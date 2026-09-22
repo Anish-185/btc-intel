@@ -35,6 +35,7 @@ from engines.rules.detectors import FeatureSet
 from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
 from ingest.ip_intel import load_intel
 
+from . import graph as graph_api
 from .case_report import render_pdf
 
 app = FastAPI(title="btc-intel", version="0.1.0",
@@ -289,13 +290,41 @@ def entity_graph(entity_id: str, hops: int | None = Query(None, ge=1, le=4)) -> 
 
 
 @app.get("/entities/{entity_id}/report")
-def entity_report(entity_id: str, hops: int | None = Query(None, ge=1, le=4)) -> Response:
-    """A one-page PDF case report, ready to attach to a file."""
+def entity_report(entity_id: str, hops: int | None = Query(None, ge=1, le=4),
+                  investigation: str | None = None) -> Response:
+    """A one-page PDF case report, ready to attach to a file.
+
+    With `?investigation=<id>` the figure is the analyst's own saved view —
+    the same nodes in the same arrangement they were looking at — rather than
+    a freshly computed neighbourhood. A case report should show what the
+    investigator saw.
+    """
     detail = entity(entity_id)
-    graph = subgraph(entity_id, hops or config.get("api.graph_hops"))
+    graph = (_investigation_figure(investigation)
+             if investigation else subgraph(entity_id, hops or config.get("api.graph_hops")))
     pdf = render_pdf(detail, graph, datetime.now(timezone.utc))
     return Response(pdf, media_type="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="btc-intel-{entity_id}.pdf"'})
+
+
+def _investigation_figure(investigation_id: str) -> dict:
+    """A saved investigation, in the shape the report's figure draws."""
+    record = graph_api.load_investigation(investigation_id)
+    state = record.get("state", {})
+    elements = state.get("elements", [])
+    nodes = [e for e in elements if "source" not in e.get("data", {})]
+    edges = [e for e in elements if "source" in e.get("data", {})]
+    counts = {kind: sum(1 for n in nodes if n["data"].get("type") == kind)
+              for kind in ("wallet", "transaction", "ip")}
+    return {
+        "elements": {"nodes": nodes, "edges": edges},
+        "positions": state.get("positions", {}),
+        "counts": {"wallets": counts["wallet"], "transactions": counts["transaction"],
+                   "ips": counts["ip"]},
+        "hops": state.get("hops", 0),
+        "truncated": False,
+        "source_label": f"saved investigation {record.get('name') or record['id']}",
+    }
 
 
 # --- analyst feedback -----------------------------------------------------
@@ -394,3 +423,8 @@ def propagation(txid: str) -> dict:
         "layout": {"name": "dagre", "roots": [estimate.ip] if estimate.ip else []},
         "elements": {"nodes": nodes, "edges": edges},
     }
+
+
+# The investigation graph endpoints, sharing this module's cached graph and
+# alert list rather than rebuilding either.
+graph_api.register(app, _features, _alerts)
