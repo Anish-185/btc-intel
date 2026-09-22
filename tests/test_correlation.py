@@ -80,8 +80,10 @@ def test_tor_exit_scores_below_an_identical_residential_ip():
     links = links_for(rows)
     residential = score_of(links, "117.200.1.10")
     tor = score_of(links, "185.220.9.9")
-    assert tor < residential
-    assert tor == pytest.approx(residential * CFG["engines"]["correlation"]["high_risk_asn_factor"])
+    # Two discounts now stack: the ASN penalty here, and the reduced attribution
+    # confidence the propagation engine hands over for an anonymized entry point
+    # (the rank penalty moved out — see docs/detection_unit_protocol.md).
+    assert tor < residential * CFG["engines"]["correlation"]["high_risk_asn_factor"]
 
 
 def test_hosting_asn_is_penalised_the_same_way():

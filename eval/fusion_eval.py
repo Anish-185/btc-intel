@@ -1,26 +1,28 @@
-"""Fusion evaluation: stacker AUC, taint's independent value, per-typology recall."""
+"""Fusion evaluation, scored on the actor (see docs/detection_unit_protocol.md).
+
+The stacker is trained on the actor-level label — an entity is illicit iff it
+holds a wallet of a ground-truth illicit operation — and the headline numbers
+are per case: did we find the operation, was the alert a real case, and can we
+trace out to the rest of it. The old broad wallet label is still fitted and
+reported beside it, as the secondary comparison the previous pass quoted.
+"""
 
 from __future__ import annotations
 
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
-import config
 from engines.rules.detectors import FeatureSet
 from fusion.pipeline import collect_signals
 from fusion.stacker import SIGNALS, ablation, train
 
+from .actors import (BROAD_PATTERNS, actors_of, broad_label_wallets, case_metrics,
+                     illicit_entities, per_typology_cases)
 from .datasets import Dataset
-
-# Two ways to say "illicit", reported side by side because they measure very
-# different things. ACTORS is who ran the scheme; ASSOCIATED includes every
-# pass-through wallet the money touched, most of which have one transaction and
-# are, by construction, indistinguishable from ordinary small wallets.
-ACTOR_PATTERNS = {"ransomware_collector"}
-ASSOCIATED_PATTERNS = {"ransomware_collector", "layering", "cashout"}
 
 
 def label_entities(dataset: Dataset, features: FeatureSet, patterns: set[str]) -> set[str]:
+    """Entities holding any wallet of a cluster with one of these patterns."""
     gt = dataset.ground_truth()
     out = set()
     for cluster in gt["clusters"].values():
@@ -30,35 +32,59 @@ def label_entities(dataset: Dataset, features: FeatureSet, patterns: set[str]) -
     return out
 
 
+def fit_block(signals: pd.DataFrame, ids: set[str], cfg: dict) -> dict | None:
+    """Fit the stacker on one label definition and report it with its ablation."""
+    y = signals["entity_id"].isin(ids).astype(int)
+    if y.sum() == 0 or y.sum() == len(y):
+        return None
+    stacker = train(signals, y, cfg)
+    return {
+        "positives": int(y.sum()),
+        "auc": stacker.metrics.get("auc"),
+        "auc_in_sample": stacker.metrics.get("auc_in_sample", False),
+        "coefficients": stacker.metrics.get("coefficients", {}),
+        "ablation": ablation(signals, y, list(SIGNALS), cfg),
+        "signal_auc": {s: round(float(roc_auc_score(y, signals[s])), 4)
+                       if signals[s].std() else None for s in SIGNALS},
+        "stacker": stacker,
+    }
+
+
 def evaluate(dataset: Dataset, cfg: dict) -> dict:
     bundle = collect_signals(dataset.frame(), cfg, dataset.raw)
     signals = bundle["signals"]
     features = bundle["features"]
+    actors = actors_of(dataset)
 
-    actors = label_entities(dataset, features, ACTOR_PATTERNS)
-    associated = label_entities(dataset, features, ASSOCIATED_PATTERNS)
+    actor_entities = illicit_entities(actors, features.entity_of)
+    broad_entities = label_entities(dataset, features, BROAD_PATTERNS)
 
-    out = {"dataset": dataset.name, "entities": len(signals),
-           "watchlist_seeds": len(bundle["seed_entities"]),
-           "rule_alerts": len(bundle["alerts"])}
+    out = {"dataset": dataset.name, "seed": dataset.seed, "shifted": dataset.shifted,
+           "entities": len(signals), "watchlist_seeds": len(bundle["seed_entities"]),
+           "rule_alerts": len(bundle["alerts"]), "actors": len(actors)}
 
-    for label_name, ids in (("associated", associated), ("actors", actors)):
-        y = signals["entity_id"].isin(ids).astype(int)
-        if y.sum() == 0 or y.sum() == len(y):
-            continue
-        stacker = train(signals, y, cfg)
-        out[label_name] = {
-            "positives": int(y.sum()),
-            "auc": stacker.metrics.get("auc"),
-            "auc_in_sample": stacker.metrics.get("auc_in_sample", False),
-            "coefficients": stacker.metrics.get("coefficients", {}),
-            "ablation": ablation(signals, y, list(SIGNALS), cfg),
-            "signal_auc": {s: round(float(roc_auc_score(y, signals[s])), 4)
-                           if signals[s].std() else None for s in SIGNALS},
-        }
+    out["actor"] = fit_block(signals, actor_entities, cfg)
+    out["broad"] = fit_block(signals, broad_entities, cfg)
 
-    out["taint"] = taint_value(signals, bundle, associated, cfg)
-    out["per_typology"] = per_typology_recall(dataset, bundle, cfg)
+    # Alerts as the product would raise them: the actor-trained stacker at the
+    # configured threshold. Every case metric below is scored on this set.
+    block = out["actor"]
+    if block:
+        scored = block["stacker"].score(signals)
+        alerted = set(signals.loc[scored >= cfg["fusion"]["alert_threshold"], "entity_id"])
+        entity_wallets = {cid: set(members)
+                          for cid, members in features.clustering.clusters.items()}
+        out["cases"] = case_metrics(dataset, alerted, features.entity_of, entity_wallets,
+                                    bundle["entity_graph"], cfg)
+        out["per_typology_cases"] = per_typology_cases(dataset, alerted, features.entity_of,
+                                                       bundle["entity_graph"], cfg)
+        out["alerted_entities"] = len(alerted)
+        block.pop("stacker", None)
+    if out["broad"]:
+        out["broad"].pop("stacker", None)
+
+    out["taint"] = taint_value(signals, bundle, actor_entities, cfg)
+    out["per_typology_wallets"] = per_typology_recall(dataset, bundle, cfg)
     return out
 
 
@@ -94,8 +120,7 @@ def taint_value(signals: pd.DataFrame, bundle: dict, illicit: set[str], cfg: dic
 
 
 def per_typology_recall(dataset: Dataset, bundle: dict, cfg: dict) -> pd.DataFrame:
-    """Which typologies the stack actually catches, one row each."""
-    gt = dataset.ground_truth()
+    """Wallet-level coverage per typology — secondary, kept for comparability."""
     features = bundle["features"]
     signals = bundle["signals"]
     flagged = set(bundle["alerts"]["entity_id"]) if len(bundle["alerts"]) else set()
@@ -116,3 +141,7 @@ def per_typology_recall(dataset: Dataset, bundle: dict, cfg: dict) -> pd.DataFra
             "watchlist_seeded": round(len(entities & seeds) / len(entities), 3),
         })
     return pd.DataFrame(rows)
+
+
+def broad_wallet_count(dataset: Dataset) -> int:
+    return len(broad_label_wallets(dataset))

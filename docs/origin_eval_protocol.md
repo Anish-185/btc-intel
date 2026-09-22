@@ -47,7 +47,9 @@ simplest estimator and the cheapest to explain to an investigator.
   than one that is wrong and confident.
 - Ablation with and without the relay/Tor/hosting class weighting, to show what
   that filter is worth.
-- The `origin_likely_unobserved` flag's precision and recall.
+- The `low_confidence_origin` flag's precision and recall (renamed from
+  `origin_likely_unobserved`; its cutoff is now chosen and reported per
+  `docs/detection_unit_protocol.md`).
 
 ## What would invalidate this
 

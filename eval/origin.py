@@ -1,15 +1,24 @@
-"""Origin-estimator evaluation, per docs/origin_eval_protocol.md."""
+"""Origin-estimator evaluation.
+
+Protocols: docs/origin_eval_protocol.md (which estimator is the default) and
+docs/detection_unit_protocol.md (the origin outcome costs, the three filter
+configurations, and how `low_confidence_origin`'s cutoff is chosen on seed A
+and reported on seed B).
+"""
 
 from __future__ import annotations
 
 import pandas as pd
 
-import config
 from engines.propagation.estimators import ESTIMATORS, estimate_all
 from engines.propagation.tree import build_trees
 from ingest.ip_intel import load_intel
 
 from .datasets import Dataset
+
+FILTER_MODES = ("off", "combined", "split")
+OUTCOMES = ("correct_actionable", "correct_infrastructure",
+            "wrong_uninvolved_third_party", "abstained")
 
 
 def truth_of(dataset: Dataset) -> dict[str, str]:
@@ -33,10 +42,11 @@ def ceiling(dataset: Dataset) -> tuple[float, int]:
 
 
 def score_estimator(dataset: Dataset, name: str, cfg: dict,
-                    class_weights: bool = True) -> dict:
+                    mode: str | None = None) -> dict:
+    """One estimator under one origin-filter configuration."""
     truth = truth_of(dataset)
     intel = load_intel(None, dataset.raw, cfg)
-    origins, _ = estimate_all(dataset.frame(), intel, cfg, name, class_weights)
+    origins, _ = estimate_all(dataset.frame(), intel, cfg, name, mode)
     origins = origins[~origins["degraded"]]
     if origins.empty:
         return {"estimator": name, "n": 0}
@@ -49,13 +59,14 @@ def score_estimator(dataset: Dataset, name: str, cfg: dict,
     observable = [observed[r.txid] for r in origins.itertuples()]
 
     conditional = [c for c, o in zip(correct, observable) if o]
+    frame = origins.assign(correct=correct, origin_observed=observable)
     return {
-        "estimator": name, "n": len(origins),
+        "estimator": name, "n": len(origins), "filter": mode or cfg["engines"]["propagation"]["origin_filter"]["mode"],
         "top1": sum(correct) / len(correct),
         "top3": sum(top3) / len(top3),
         "conditional_top1": (sum(conditional) / len(conditional)) if conditional else 0.0,
         "brier": brier(origins["confidence"], correct),
-        "frame": origins.assign(correct=correct, origin_observed=observable),
+        "frame": frame,
     }
 
 
@@ -82,21 +93,107 @@ def reliability(frame: pd.DataFrame, bins: int) -> pd.DataFrame:
     })
 
 
-def flag_quality(frame: pd.DataFrame) -> dict:
-    """How often origin_likely_unobserved is right.
+# --- the flag and the cost-weighted outcome metric ------------------------
+def flagged_at(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> pd.Series:
+    """`low_confidence_origin` recomputed at an arbitrary cutoff.
 
-    "Right" means: the flag is set and the true origin really was absent from
-    the observed tree, or the flag is clear and it really was present.
+    Same rule as engines.propagation.low_confidence_origin: a public relay at
+    the top, or confidence below the cutoff.
+    """
+    p = cfg["engines"]["propagation"]
+    cut = p["low_confidence_cutoff"] if cutoff is None else cutoff
+    return frame["ip_class"].isin(p["low_confidence_classes"]) | (frame["confidence"] < cut)
+
+
+def outcomes(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> pd.Series:
+    """One outcome per estimate, per docs/detection_unit_protocol.md.
+
+    Abstention (the flag raised) is free; naming an uninvolved address is the
+    expensive error; naming the right anonymized entry point is worth something
+    but not as much as a residential address an ISP request can act on.
+    """
+    anonymized = frame["ip_class"] != "residential_or_unknown"
+    flagged = flagged_at(frame, cfg, cutoff)
+    return pd.Series(
+        [OUTCOMES[3] if f else OUTCOMES[1] if (c and a) else OUTCOMES[0] if c else OUTCOMES[2]
+         for f, c, a in zip(flagged, frame["correct"], anonymized)],
+        index=frame.index)
+
+
+def cost_score(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> dict:
+    """Accuracy, the outcome mix, and the cost-weighted score."""
+    if frame.empty:
+        return {}
+    weights = cfg["engines"]["propagation"]["origin_filter"]["cost_weights"]
+    labels = outcomes(frame, cfg, cutoff)
+    counts = labels.value_counts()
+    out = {"n": len(frame), "accuracy": round(float(frame["correct"].mean()), 3)}
+    out.update({name: int(counts.get(name, 0)) for name in OUTCOMES})
+    out["cost_weighted_score"] = round(
+        float(sum(counts.get(name, 0) * weights[name] for name in OUTCOMES) / len(frame)), 3)
+    return out
+
+
+def filter_comparison(dataset: Dataset, cfg: dict, estimator: str | None = None) -> pd.DataFrame:
+    """The filter off, the old combined filter, and the new split filter."""
+    name = estimator or cfg["engines"]["propagation"]["estimator"]
+    rows = []
+    for mode in FILTER_MODES:
+        result = score_estimator(dataset, name, cfg, mode)
+        if not result.get("n"):
+            continue
+        frame = result["frame"]
+        row = {"filter": mode, "top1": round(result["top1"], 3),
+               "conditional_top1": round(result["conditional_top1"], 3)}
+        row.update({k: v for k, v in cost_score(frame, cfg).items() if k != "accuracy"})
+        row["anonymized_entry_points"] = int(frame["anonymized_entry_point"].sum())
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def choose_cutoff(dataset: Dataset, cfg: dict, estimator: str | None = None,
+                  mode: str = "split") -> tuple[float, pd.DataFrame]:
+    """Pick `low_confidence_cutoff` on seed A, by the pre-registered rule.
+
+    The value in {0.10, 0.15, ... 0.90} maximising the cost-weighted score;
+    ties go to the lower cutoff, which abstains less.
+    """
+    name = estimator or cfg["engines"]["propagation"]["estimator"]
+    frame = score_estimator(dataset, name, cfg, mode)["frame"]
+    rows = []
+    for step in range(2, 19):
+        cutoff = round(step * 0.05, 2)
+        scored = cost_score(frame, cfg, cutoff)
+        rows.append({"cutoff": cutoff, "flagged": int(flagged_at(frame, cfg, cutoff).sum()),
+                     **{k: scored[k] for k in ("abstained", "correct_actionable",
+                                               "correct_infrastructure",
+                                               "wrong_uninvolved_third_party",
+                                               "cost_weighted_score")}})
+    table = pd.DataFrame(rows)
+    best = table["cost_weighted_score"].max()
+    chosen = float(table[table["cost_weighted_score"] == best]["cutoff"].min())
+    return chosen, table
+
+
+def flag_quality(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> dict:
+    """How well `low_confidence_origin` separates weak estimates from strong.
+
+    `precision`/`recall` are against the event "the true origin was not in the
+    observed tree at all" — the thing the flag's old name claimed. They are low
+    because that event is rare; the accuracy split underneath is what the flag
+    is actually for.
     """
     if frame.empty:
         return {}
-    flagged = frame["origin_likely_unobserved"]
+    flagged = flagged_at(frame, cfg, cutoff)
     unobserved = ~frame["origin_observed"]
     tp = int((flagged & unobserved).sum())
     fp = int((flagged & ~unobserved).sum())
     fn = int((~flagged & unobserved).sum())
     tn = int((~flagged & ~unobserved).sum())
-    return {"flagged": int(flagged.sum()), "of": len(frame),
+    return {"cutoff": cfg["engines"]["propagation"]["low_confidence_cutoff"]
+            if cutoff is None else cutoff,
+            "flagged": int(flagged.sum()), "of": len(frame),
             "precision": round(tp / (tp + fp), 3) if tp + fp else 0.0,
             "recall": round(tp / (tp + fn), 3) if tp + fn else 0.0,
             "accuracy": round((tp + tn) / len(frame), 3),
@@ -122,11 +219,14 @@ def evaluate(datasets: dict[float, Dataset], cfg: dict) -> dict:
 
 
 def class_weight_ablation(dataset: Dataset, cfg: dict) -> pd.DataFrame:
-    """What the relay / Tor / hosting down-weighting is actually worth."""
+    """Every estimator under every filter configuration."""
     rows = []
     for name in ESTIMATORS:
-        for label, weights in (("with filter", True), ("without filter", False)):
-            result = score_estimator(dataset, name, cfg, class_weights=weights)
-            rows.append({"estimator": name, "class_weights": label,
-                         "top1": result["top1"], "conditional_top1": result["conditional_top1"]})
+        for mode in FILTER_MODES:
+            result = score_estimator(dataset, name, cfg, mode)
+            rows.append({"estimator": name, "filter": mode,
+                         "top1": result.get("top1", 0.0),
+                         "conditional_top1": result.get("conditional_top1", 0.0),
+                         "cost_weighted_score": cost_score(result["frame"], cfg)
+                         .get("cost_weighted_score") if result.get("n") else None})
     return pd.DataFrame(rows)

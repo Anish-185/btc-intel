@@ -262,23 +262,32 @@ If a dataset has no multi-hop records at all, origin estimation reports
 python -m fusion.pipeline    # every engine, then one ranked explained alert list
 ```
 
-`fusion/taint.py` propagates suspicion outward from seeds (high-confidence rules
-alerts, or an analyst's list) through the entity graph, halving per hop and
-stopping after 4, recording the `taint_path` so an investigator can dismiss an
-inherited score. `fusion/stacker.py` combines five signals — rule, anomaly, GNN,
-correlation, taint — with logistic regression, chosen because its coefficients
-are themselves part of the deliverable. `fusion/explain.py` produces exact SHAP
+`fusion/taint.py` propagates suspicion outward from an analyst watchlist — and
+only from there — through the entity graph, halving per hop and stopping after
+4, recording the `taint_path` so an investigator can dismiss an inherited score.
+`fusion/stacker.py` combines four signals — rule, anomaly, GNN, taint — with
+logistic regression under a non-negative constraint, chosen because its
+coefficients are themselves part of the deliverable. Correlation is not in the
+score: it says something about *who*, not about how risky an entity is, and is
+surfaced per alert as attribution leads. `fusion/explain.py` produces exact SHAP
 values (a logistic model is additive, so there is nothing to approximate) and a
 plain-English reason built from this entity's real numbers.
 
-⚠️ **The headline AUC is circular on our data.** Taint is seeded from the rules
-engine, which fires on the same clusters our labels mark, so `taint_score` alone
-scores ~0.99 AUC — it copies the label rather than predicting it. Every fitted
-model therefore carries an `ablation` block with each signal alone and the stack
-without it; the stack without taint scores ~0.85, and that is the number worth
-quoting. Two signals also come out *inverted* on our data (anomaly 0.16,
-correlation 0.38) because exchanges are the biggest outliers and our illicit
-actors use fresh wallets — a property of the synthetic population, not a bug.
+⚠️ **The headline AUC used to be circular and no longer is.** Taint was seeded
+from our own rules engine, which fires on the same clusters the labels describe,
+so `taint_score` alone scored ~0.999 AUC — a copy of the label. Seeds now come
+from the analyst watchlist only, and the stacker scores ~0.67 on the actor label
+(`eval/results.md`). Every fitted model still carries an `ablation` block with
+each signal alone and the stack without it; read it before quoting a number.
+Anomaly comes out *below chance* on our data (~0.18) because exchanges are the
+biggest outliers and our illicit actors use fresh wallets — the non-negative
+constraint clamps its weight to zero rather than learning a negative one that
+would not transfer.
+
+**The unit of detection is the actor**, not the wallet: one ground-truth illicit
+operation, pre-registered in `docs/detection_unit_protocol.md`. Case detection
+rate, alert precision and trace coverage are the numbers that matter; wallet
+recall is reported as secondary.
 
 ## API
 
@@ -286,11 +295,26 @@ actors use fresh wallets — a property of the synthetic population, not a bug.
 uvicorn api.app:app --host 127.0.0.1 --port 8000
 ```
 
-`GET /stats` — pipeline status including the degraded-mode flag.
-`GET /alerts?limit=50` — the ranked, explained alert list.
+`GET /stats` — dashboard header: entity and alert counts, alerts by pattern
+type, mean confidence, plus pipeline status including the degraded-mode flag.
+`GET /alerts?limit=50&offset=0&min_score=&entity_type=&pattern_type=` — the
+ranked, explained alert list, highest risk first.
+`GET /entities/{entity_id}` — features, every engine score, the reason, the
+evidence, the taint path and the attribution leads.
+`GET /entities/{entity_id}/graph?hops=2` — the surrounding wallets,
+transactions and IPs as Cytoscape elements.
+`GET /entities/{entity_id}/report` — a one-page PDF case report (ReportLab).
+`POST /alerts/{alert_id}/feedback` `{"status": "confirmed" | "false_positive"}`
+— appended to `data/processed/feedback.parquet` for recalibrating the stacker.
+The alert id is the entity id: there is one alert per entity.
 `GET /transactions/{txid}/propagation` — the propagation tree as Cytoscape
 elements, with `layout: {name: dagre, roots: [origin]}`, the estimated origin
 marked `origin`, runner-ups `runner_up`, and an IP-class badge on every node.
+
+**No authentication**, deliberately, for the demo — it binds to localhost and
+serves synthetic data. A deployment would need auth, per-case authorisation, an
+audit log of who read which entity, and a CORS list that is not a dev-server
+convenience. Said again at the top of `api/app.py`.
 
 ## Evaluation
 

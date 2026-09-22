@@ -171,29 +171,59 @@ engines:
     runner_ups: 3
 
     # A public relay forwards thousands of other people's transactions, so its
-    # presence near the root of an observed tree means almost nothing.
-    class_weights:
-      known_bitcoin_relay: 0.05
-      tor_exit: 0.2
-      hosting_vpn: 0.3
-      residential_or_unknown: 1.0
+    # presence near the root of an observed tree means almost nothing. A Tor
+    # exit or a hosting address is different: when a broadcast is masked, that
+    # address IS where it entered the network. Penalising it in the ranking
+    # pushes the estimator off the right answer, so the split configuration
+    # penalises only relays and handles the other two by labelling them an
+    # anonymized entry point and discounting the attribution confidence handed
+    # to the correlation engine. See docs/detection_unit_protocol.md.
+    origin_filter:
+      mode: split          # off | combined | split — eval reports all three
+      variants:
+        "off":            # quoted: bare off is a YAML boolean
+          known_bitcoin_relay: 1.0
+          tor_exit: 1.0
+          hosting_vpn: 1.0
+          residential_or_unknown: 1.0
+        combined:          # the old filter: everything shared is penalised
+          known_bitcoin_relay: 0.05
+          tor_exit: 0.2
+          hosting_vpn: 0.3
+          residential_or_unknown: 1.0
+        split:
+          known_bitcoin_relay: 0.05
+          tor_exit: 1.0
+          hosting_vpn: 1.0
+          residential_or_unknown: 1.0
+      anonymized_entry_classes: [tor_exit, hosting_vpn]
+      # An anonymized entry point is a real observation about the transaction
+      # and a poor one about the person: the estimate keeps its rank and its
+      # confidence, but only this share of it counts as attribution evidence.
+      attribution_confidence_factor: 0.4
+      # Cost of each origin outcome, pre-registered. Being wrong out loud costs
+      # three times what being right is worth; abstaining is free.
+      cost_weights:
+        correct_actionable: 1.0
+        correct_infrastructure: 0.3
+        wrong_uninvolved_third_party: -3.0
+        abstained: 0.0
 
     single_row_confidence: 0.15   # one observation is a guess, not an estimate
 
-    # Say so when the origin is probably not in the data at all, rather than
-    # naming the best of a bad set of candidates. Set when the top candidate is
-    # shared infrastructure (a relay forwards everyone's traffic; a Tor exit or
-    # hosting address is used by thousands) or when confidence is below the
-    # cutoff. eval/ reports how often the flag is right.
-    # Cutoff chosen from the reliability curve in eval/results.md: below 0.35
-    # the estimator is right ~54% of the time, above it ~81%.
-    unobserved_confidence_cutoff: 0.35
+    # low_confidence_origin (formerly origin_likely_unobserved — the old name
+    # asserted the true origin was absent, which it cannot know; what it
+    # measures is that this estimate is weak). Set when the top candidate is a
+    # public relay, or when confidence is below the cutoff.
+    # Cutoff chosen on seed A by the rule in docs/detection_unit_protocol.md
+    # and reported unchanged on seed B; see eval/results.md.
+    low_confidence_cutoff: 0.35
     # Only public relays. Tor exits and hosting addresses were in this list
     # until it was measured: when a broadcast is masked, those ARE the origin,
     # and top candidates in those classes are correct 62-63% of the time.
     # Flagging them made the flag worse. A Bitnodes-listed relay is different —
     # it forwards other people's traffic and is never a plausible sender.
-    unobserved_classes: [known_bitcoin_relay]
+    low_confidence_classes: [known_bitcoin_relay]
 
   anomaly:
     scores_path: data/processed/anomaly_scores.parquet
@@ -243,12 +273,16 @@ eval:
   n_transactions: 1200
   observation_rates: [0.1, 0.3, 0.6]
   default_rate: 0.3
+  # Seed A chooses thresholds; seed B only ever reports them. Never swapped.
+  seed_b: 43
   work_dir: data/processed/eval
   results_path: eval/results.md
   calibration_bins: 5
 
 fusion:
   alerts_parquet: data/processed/final_alerts.parquet
+  # Analyst verdicts from the API, for recalibrating fusion/stacker.py later.
+  feedback_parquet: data/processed/feedback.parquet
   alerts_json: data/processed/final_alerts.json
   model_path: models/stacker.joblib
   alert_threshold: 0.5        # composite score above which an alert is explained
@@ -282,6 +316,14 @@ thresholds:
 api:
   host: 127.0.0.1
   port: 8000
+  # Local frontend dev only. A real deployment terminates TLS and authenticates
+  # in front of this, and this list stops being a wildcard.
+  cors_origins: ["http://localhost:5173", "http://127.0.0.1:5173",
+                 "http://localhost:3000", "http://127.0.0.1:3000"]
+  page_size: 50          # default /alerts page
+  max_page_size: 200
+  graph_hops: 2          # default radius of /entities/{id}/graph
+  max_graph_nodes: 300   # cut-off, so the browser is never asked to draw a hairball
 
 offline: true   # no network calls anywhere in the pipeline
 

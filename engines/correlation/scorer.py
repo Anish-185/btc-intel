@@ -180,7 +180,13 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
                 entity_id=entity_id, ip=ip, txid=txid, timestamp=ts, asn=asn,
                 asn_org=_text(getattr(row, "asn_org", None)) if row is not None else None,
                 country=_text(getattr(row, "geo_country", None)) if row is not None else None,
-                ip_class=str(est.ip_class), origin_confidence=float(est.confidence)))
+                ip_class=str(est.ip_class),
+                # The *attribution* confidence, not the estimate's own: an
+                # anonymized entry point (Tor exit, hosting) is discounted here
+                # rather than being pushed down the ranking. See
+                # engines.propagation.attribution_confidence_of.
+                origin_confidence=float(getattr(est, "attribution_confidence",
+                                                est.confidence))))
     return observations
 
 

@@ -28,12 +28,15 @@ Three estimators, compared rather than assumed:
 All three are then multiplied by a per-class weight, because a publicly
 reachable Bitcoin node sitting at the centre of an observed tree is where
 everybody's transactions pass through — it is the least informative place to
-find a candidate, not the most.
+find a candidate, not the most. That penalty applies to relays only: a Tor exit
+or hosting address is where a masked broadcast really did enter the network, so
+penalising it in the ranking costs accuracy for nothing. Those are labelled
+anonymized entry points instead, and only their attribution confidence is
+discounted. See docs/detection_unit_protocol.md.
 """
 
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import dataclass, field
 
@@ -46,8 +49,9 @@ from ingest.ip_intel import IpIntel, IpClassification
 from .tree import PropagationTree, build_trees, degraded_mode
 
 COLUMNS = ["txid", "estimated_origin_ip", "ip_class", "estimator_used", "confidence",
-           "runner_up_ips", "runner_up_scores", "n_observations", "degraded",
-           "origin_likely_unobserved"]
+           "attribution_confidence", "runner_up_ips", "runner_up_scores",
+           "n_observations", "degraded", "low_confidence_origin",
+           "anonymized_entry_point"]
 
 
 @dataclass
@@ -61,7 +65,14 @@ class OriginEstimate:
     n_observations: int = 0
     degraded: bool = False
     evidence: list[str] = field(default_factory=list)
-    likely_unobserved: bool = False
+    low_confidence: bool = False
+    anonymized_entry_point: bool = False
+    # Confidence as *attribution evidence*, which is not the same thing. A Tor
+    # exit or hosting address can be exactly where the transaction entered the
+    # network and still say almost nothing about who sent it: the estimate keeps
+    # its rank and its stated confidence, and only the share of it that the
+    # correlation engine may treat as evidence is reduced.
+    attribution_confidence: float = 0.0
 
     @property
     def runner_ups(self) -> list[tuple[str, float]]:
@@ -141,12 +152,39 @@ ESTIMATORS = {
 
 
 # --- class weighting and confidence --------------------------------------
+def class_weights(cfg: dict | None = None, mode: str | None = None) -> dict[str, float]:
+    """The rank penalties for one filter configuration: off, combined or split.
+
+    `split` is the default and only penalises public relays. See
+    docs/detection_unit_protocol.md for why Tor and hosting left the penalty.
+    """
+    f = (cfg or config.load())["engines"]["propagation"]["origin_filter"]
+    return dict(f["variants"][mode or f["mode"]])
+
+
+def is_anonymized_entry(ip_class: str, cfg: dict | None = None) -> bool:
+    """A Tor exit or hosting address: where the broadcast entered the network,
+    not (usefully) who sent it."""
+    f = (cfg or config.load())["engines"]["propagation"]["origin_filter"]
+    return ip_class in f["anonymized_entry_classes"]
+
+
+def attribution_confidence_of(confidence: float, anonymized: bool,
+                              cfg: dict | None = None) -> float:
+    """What the correlation engine may treat as evidence, not what we believe."""
+    if not anonymized:
+        return confidence
+    f = (cfg or config.load())["engines"]["propagation"]["origin_filter"]
+    return round(confidence * float(f["attribution_confidence_factor"]), 4)
+
+
 def apply_class_weights(scores: dict[str, float], tree: PropagationTree, intel: IpIntel,
-                        cfg: dict | None = None) -> tuple[dict[str, float], dict[str, IpClassification]]:
+                        cfg: dict | None = None,
+                        mode: str | None = None) -> tuple[dict[str, float], dict[str, IpClassification]]:
     """Down-weight infrastructure. A public relay is where everyone's traffic
     passes; finding it at the centre of a tree is expected, not incriminating."""
     cfg = cfg or config.load()
-    weights = cfg["engines"]["propagation"]["class_weights"]
+    weights = class_weights(cfg, mode)
     classified: dict[str, IpClassification] = {}
     weighted = {}
     for ip, score in scores.items():
@@ -169,26 +207,28 @@ def confidence_of(ranked: list[tuple[str, float]], n_observations: int) -> float
     return round(min(1.0, max(0.0, share * observed)), 4)
 
 
-def likely_unobserved(ip_class: str, confidence: float, cfg: dict | None = None) -> bool:
-    """Read this as "do not lean on this estimate", not as proof of absence.
+def low_confidence_origin(ip_class: str, confidence: float, cfg: dict | None = None) -> bool:
+    """"Do not lean on this estimate" — nothing stronger.
 
     Set when the best candidate is a public relay — a node that forwards other
     people's traffic and is never a plausible sender — or when confidence falls
-    below the cutoff taken from the reliability curve.
+    below the cutoff, which is chosen on seed A and reported on seed B per
+    docs/detection_unit_protocol.md.
 
-    Measured (eval/results.md): flagged estimates are right ~54% of the time
-    against ~81% when clear, so the flag does separate weak from strong. As a
-    predictor that the origin is literally absent from the data its precision
-    is only ~0.24, because that event is rare (~16% of transactions) — a raised
-    flag means "this is shaky", not "the sender is not in here".
+    Formerly `origin_likely_unobserved`. Renamed because that name claimed the
+    true origin was absent from the data, which no flag can know from inside:
+    measured as a predictor of literal absence its precision was ~0.24, because
+    absence is rare. What it actually separates is weak estimates from strong
+    ones (right ~54% of the time when raised against ~81% when clear), and it is
+    now named for that.
     """
     p = (cfg or config.load())["engines"]["propagation"]
-    return bool(ip_class in p["unobserved_classes"]
-                or confidence < p["unobserved_confidence_cutoff"])
+    return bool(ip_class in p["low_confidence_classes"]
+                or confidence < p["low_confidence_cutoff"])
 
 
 def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = None,
-                    estimator: str | None = None) -> OriginEstimate:
+                    estimator: str | None = None, mode: str | None = None) -> OriginEstimate:
     cfg = cfg or config.load()
     p = cfg["engines"]["propagation"]
     name = estimator or p["estimator"]
@@ -204,10 +244,13 @@ def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = No
             tree.txid, ip, ip_class, "first_timestamp", confidence,
             [(ip, 1.0)] if ip else [], tree.n_observations, degraded=True,
             evidence=["single relay observation: first-seen IP, not an estimate"],
-            likely_unobserved=likely_unobserved(ip_class, confidence, cfg))
+            low_confidence=low_confidence_origin(ip_class, confidence, cfg),
+            anonymized_entry_point=is_anonymized_entry(ip_class, cfg),
+            attribution_confidence=attribution_confidence_of(
+                confidence, is_anonymized_entry(ip_class, cfg), cfg))
 
     scores = ESTIMATORS[name](tree, cfg)
-    weighted, classified = apply_class_weights(scores, tree, intel, cfg)
+    weighted, classified = apply_class_weights(scores, tree, intel, cfg, mode)
     ranked = sorted(weighted.items(), key=lambda kv: (-kv[1], kv[0]))
     if not ranked:
         return OriginEstimate(tree.txid, None, "residential_or_unknown", name, 0.0, [],
@@ -215,33 +258,40 @@ def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = No
     best_ip = ranked[0][0]
     ip_class = classified[best_ip].ip_class
     confidence = confidence_of(ranked, tree.n_observations)
+    anonymized = is_anonymized_entry(ip_class, cfg)
+    evidence = list(classified[best_ip].evidence)
+    if anonymized:
+        evidence.append("anonymized entry point: this is where the broadcast entered "
+                        "the network, not necessarily who sent it")
     return OriginEstimate(
         tree.txid, best_ip, ip_class, name, confidence, ranked, tree.n_observations,
-        degraded=False, evidence=classified[best_ip].evidence,
-        likely_unobserved=likely_unobserved(ip_class, confidence, cfg))
+        degraded=False, evidence=evidence,
+        low_confidence=low_confidence_origin(ip_class, confidence, cfg),
+        anonymized_entry_point=anonymized,
+        attribution_confidence=attribution_confidence_of(confidence, anonymized, cfg))
 
 
 def estimate_all(df: pd.DataFrame, intel: IpIntel, cfg: dict | None = None,
                  estimator: str | None = None,
-                 class_weights: bool = True) -> tuple[pd.DataFrame, dict]:
+                 mode: str | None = None) -> tuple[pd.DataFrame, dict]:
+    """`mode` selects the origin-filter configuration (off | combined | split);
+    None uses the configured default."""
     cfg = cfg or config.load()
     n_runner_ups = cfg["engines"]["propagation"]["runner_ups"]
     status = degraded_mode(df)
-    if not class_weights:                    # ablation: no relay/Tor/hosting filter
-        cfg = json.loads(json.dumps(cfg))
-        cfg["engines"]["propagation"]["class_weights"] = {
-            k: 1.0 for k in cfg["engines"]["propagation"]["class_weights"]}
     trees = build_trees(df)
     rows = []
     for tree in trees.values():
-        est = estimate_origin(tree, intel, cfg, estimator)
+        est = estimate_origin(tree, intel, cfg, estimator, mode)
         runners = est.runner_ups[:n_runner_ups]
         rows.append({
             "txid": est.txid, "estimated_origin_ip": est.ip, "ip_class": est.ip_class,
             "estimator_used": est.estimator, "confidence": est.confidence,
+            "attribution_confidence": est.attribution_confidence,
             "runner_up_ips": [ip for ip, _ in runners],
             "runner_up_scores": [round(float(s), 6) for _, s in runners],
             "n_observations": est.n_observations, "degraded": est.degraded,
-            "origin_likely_unobserved": est.likely_unobserved,
+            "low_confidence_origin": est.low_confidence,
+            "anonymized_entry_point": est.anonymized_entry_point,
         })
     return pd.DataFrame(rows, columns=COLUMNS), status

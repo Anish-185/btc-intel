@@ -141,16 +141,41 @@ def test_a_known_relay_seen_slightly_earlier_does_not_outrank_a_central_resident
     assert estimate.ip_class == RESIDENTIAL
 
 
-def test_class_weights_are_applied_in_order_of_how_shared_the_address_is():
+def _mixed_class_tree():
     tree = build_trees(pd.DataFrame([row("tx", "10.0.0.1", "10.0.0.2", 1),
                                      row("tx", "10.0.0.2", "10.0.0.3", 2)]))["tx"]
     intel = intel_with(relay=["10.0.0.1"], tor=["10.0.0.2"], hosting=["10.0.0.3"])
-    flat = {ip: 1.0 for ip in tree.ips}
-    weighted, classified = apply_class_weights(flat, tree, intel, CFG)
-    assert weighted["10.0.0.1"] < weighted["10.0.0.2"] < weighted["10.0.0.3"]
+    return tree, intel, {ip: 1.0 for ip in tree.ips}
+
+
+def test_the_split_filter_penalises_relays_only():
+    """Tor and hosting keep their rank: a masked broadcast really does start there."""
+    tree, intel, flat = _mixed_class_tree()
+    weighted, classified = apply_class_weights(flat, tree, intel, CFG, "split")
+    assert weighted["10.0.0.1"] < weighted["10.0.0.2"] == weighted["10.0.0.3"] == 1.0
     assert classified["10.0.0.1"].ip_class == KNOWN_RELAY
     assert classified["10.0.0.2"].ip_class == TOR_EXIT
     assert classified["10.0.0.3"].ip_class == HOSTING
+
+
+def test_the_old_combined_filter_still_penalises_all_three_in_order():
+    tree, intel, flat = _mixed_class_tree()
+    weighted, _ = apply_class_weights(flat, tree, intel, CFG, "combined")
+    assert weighted["10.0.0.1"] < weighted["10.0.0.2"] < weighted["10.0.0.3"] < 1.0
+
+
+def test_an_anonymized_entry_point_keeps_its_rank_and_loses_attribution_confidence():
+    """The discount moved from the ranking to what correlation may treat as evidence."""
+    tree, intel, _ = _mixed_class_tree()
+    estimate = estimate_origin(tree, intel, CFG, "first_timestamp", "split")
+    assert estimate.ip_class in (TOR_EXIT, HOSTING, RESIDENTIAL, KNOWN_RELAY)
+    if estimate.anonymized_entry_point:
+        factor = CFG["engines"]["propagation"]["origin_filter"]["attribution_confidence_factor"]
+        assert estimate.attribution_confidence == pytest.approx(
+            round(estimate.confidence * factor, 4))
+        assert any("anonymized entry point" in e for e in estimate.evidence)
+    else:
+        assert estimate.attribution_confidence == estimate.confidence
 
 
 # --- confidence -----------------------------------------------------------

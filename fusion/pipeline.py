@@ -24,7 +24,7 @@ import pandas as pd
 import config
 from engines.anomaly.detector import fit_score
 from engines.correlation.scorer import correlate
-from engines.propagation.estimators import estimate_all
+from engines.propagation.estimators import estimate_all, is_anonymized_entry
 from engines.propagation.tree import degraded_mode
 from engines.rules.detectors import FeatureSet, run_all
 from engines.rules.schema import alerts_to_frame
@@ -38,9 +38,11 @@ from .taint import compute_taint, load_watchlist
 
 log = logging.getLogger(__name__)
 
-ALERT_COLUMNS = ["entity_id", "risk_score", "reason", "evidence", "top_signal",
-                 "rule_score", "anomaly_score", "gnn_score", "taint_score",
-                 "leads", "contributions", "wallets", "suspicious_merge"]
+# One alert per entity, so the entity id IS the alert id — the API takes either.
+ALERT_COLUMNS = ["alert_id", "entity_id", "entity_type", "pattern_types", "risk_score",
+                 "reason", "evidence", "top_signal", "rule_score", "anomaly_score",
+                 "gnn_score", "taint_score", "taint_path", "leads", "contributions",
+                 "wallets", "suspicious_merge"]
 
 
 def gnn_scores(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
@@ -130,9 +132,17 @@ def attribution_leads(links: pd.DataFrame, cfg: dict) -> dict[str, list[dict]]:
     for row in ranked.itertuples():
         bucket = out.setdefault(row.entity_id, [])
         if len(bucket) < k:
+            anonymized = is_anonymized_entry(str(row.ip_class), cfg)
             bucket.append({"ip": str(row.ip), "ip_class": str(row.ip_class),
                            "confidence": round(float(row.final_score), 4),
                            "observations": int(row.observation_count),
+                           # A Tor exit or hosting address is where the
+                           # broadcast entered the network, not who sent it —
+                           # said in the lead itself so nobody reads it as an
+                           # attribution.
+                           "anonymized_entry_point": anonymized,
+                           "label": ("anonymized entry point" if anonymized
+                                     else "candidate origin"),
                            "evidence": str(row.reason)})
     return out
 
@@ -146,9 +156,11 @@ def build_alerts(bundle: dict, stacker: Stacker, cfg: dict) -> pd.DataFrame:
 
     reasons_by_entity: dict[str, list[str]] = {}
     evidence_by_entity: dict[str, list[str]] = {}
+    patterns_by_entity: dict[str, list[str]] = {}
     for row in bundle["alerts"].itertuples():
         reasons_by_entity.setdefault(row.entity_id, []).append(row.reason)
         evidence_by_entity.setdefault(row.entity_id, []).extend(list(row.evidence)[:8])
+        patterns_by_entity.setdefault(row.entity_id, []).append(row.rule_name)
     leads_by_entity = attribution_leads(bundle["links"], cfg)
 
     clusters = bundle["features"].clustering.clusters
@@ -162,14 +174,22 @@ def build_alerts(bundle: dict, stacker: Stacker, cfg: dict) -> pd.DataFrame:
         explanation = explain_entity(row, stacker, baseline,
                                      reasons_by_entity.get(entity, []), evidence,
                                      None, list(row.get("taint_path") or []), cfg)
+        members = clusters.get(entity, {entity})
         rows.append({
-            "entity_id": entity, "risk_score": explanation.score,
+            "alert_id": entity, "entity_id": entity,
+            # A coarse type, because that is all an offline pipeline can honestly
+            # say: several wallets provably co-owned, or a lone address. Service
+            # labels (exchange, mixer) need attribution data we do not have.
+            "entity_type": "cluster" if len(members) > 1 else "wallet",
+            "pattern_types": sorted(set(patterns_by_entity.get(entity, []))),
+            "taint_path": list(row.get("taint_path") or []),
+            "risk_score": explanation.score,
             "reason": explanation.reason, "evidence": explanation.evidence,
             "top_signal": explanation.top_signal,
             **{s: float(row.get(s, 0.0) or 0.0) for s in SIGNALS},
             "leads": json.dumps(leads),
             "contributions": json.dumps(explanation.contributions),
-            "wallets": len(clusters.get(entity, {entity})),
+            "wallets": len(members),
             "suspicious_merge": bool(row.get("suspicious_merge", False)),
         })
     df = pd.DataFrame(rows, columns=ALERT_COLUMNS)
