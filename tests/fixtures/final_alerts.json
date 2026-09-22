@@ -1,0 +1,39 @@
+{
+  "generated_from": "tests/fixtures — hand-written, not a pipeline run",
+  "alert_threshold": 0.5,
+  "stacker": {"fitted": true, "auc": 0.68,
+              "warning": "fitted on synthetic labels — refit on NTRO data before production use"},
+  "alerts": [
+    {
+      "alert_id": "C000001", "entity_id": "C000001", "entity_type": "cluster",
+      "pattern_types": ["ransomware_collector", "peel_chain"],
+      "risk_score": 0.91, "reason": "Flagged due to ransomware collector structure.",
+      "evidence": ["tx-a", "tx-b", "bc1qaaa"], "top_signal": "rule_score",
+      "rule_score": 0.88, "anomaly_score": 0.1, "gnn_score": 0.0, "taint_score": 0.5,
+      "taint_path": ["C000009", "C000001"],
+      "leads": "[{\"ip\": \"185.220.9.9\", \"ip_class\": \"tor_exit\", \"confidence\": 0.21, \"observations\": 3, \"anonymized_entry_point\": true, \"label\": \"anonymized entry point\", \"evidence\": \"estimated origin 185.220.9.9\"}]",
+      "contributions": "{\"rule_score\": 0.7, \"taint_score\": 0.2}",
+      "wallets": 12, "suspicious_merge": false
+    },
+    {
+      "alert_id": "C000002", "entity_id": "C000002", "entity_type": "cluster",
+      "pattern_types": ["layering"],
+      "risk_score": 0.64, "reason": "Flagged due to layering fan-out and merge.",
+      "evidence": ["tx-c"], "top_signal": "taint_score",
+      "rule_score": 0.4, "anomaly_score": 0.2, "gnn_score": 0.0, "taint_score": 0.75,
+      "taint_path": ["C000009", "C000002"],
+      "leads": "[]", "contributions": "{\"taint_score\": 0.6}",
+      "wallets": 4, "suspicious_merge": false
+    },
+    {
+      "alert_id": "bc1qsolo", "entity_id": "bc1qsolo", "entity_type": "wallet",
+      "pattern_types": [],
+      "risk_score": 0.52, "reason": "Flagged due to inherited taint only.",
+      "evidence": [], "top_signal": "taint_score",
+      "rule_score": 0.0, "anomaly_score": 0.3, "gnn_score": 0.0, "taint_score": 0.5,
+      "taint_path": ["C000009", "bc1qsolo"],
+      "leads": "[]", "contributions": "{\"taint_score\": 0.5}",
+      "wallets": 1, "suspicious_merge": false
+    }
+  ]
+}

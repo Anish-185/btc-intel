@@ -1,8 +1,17 @@
-"""The propagation endpoint and the degraded-mode flag on /stats."""
+"""Every API endpoint: alerts, entity detail, subgraph, PDF, feedback, stats.
+
+Two fixtures. `client` runs the real pipeline over a small generated dataset,
+because entity detail and the subgraph need a real graph behind them.
+`fixture_client` points the app at tests/fixtures/final_alerts.json, so the
+listing, filtering, pagination and feedback endpoints are tested against known
+rows instead of whatever the generator happened to produce.
+"""
 
 from __future__ import annotations
 
 import json
+
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -31,9 +40,29 @@ def client(tmp_path_factory):
     ingest_run(raw, d / "t.parquet", d / "q.parquet", "csv")
     fusion_run(d / "t.parquet", raw / "ground_truth.json", d / "final.parquet",
                d / "final.json", CFG)
-    app_module.configure(d / "t.parquet", raw, d / "final.json")
+    app_module.configure(d / "t.parquet", raw, d / "final.json", d / "feedback.parquet")
     yield TestClient(app_module.app), d
     app_module.configure()
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "final_alerts.json"
+
+
+@pytest.fixture
+def fixture_client(client, tmp_path):
+    """The same app, reading the hand-written alert fixture."""
+    _, shared = client
+    app_module.configure(shared / "t.parquet", shared / "raw", FIXTURE,
+                         tmp_path / "feedback.parquet")
+    try:
+        yield TestClient(app_module.app), tmp_path / "feedback.parquet"
+    finally:
+        app_module.configure(shared / "t.parquet", shared / "raw",
+                             shared / "final.json", shared / "feedback.parquet")
+
+
+def an_alerted_entity(api) -> str:
+    return api.get("/alerts?limit=1").json()["alerts"][0]["entity_id"]
 
 
 def a_multi_hop_txid(directory) -> str:
@@ -132,3 +161,115 @@ def test_alerts_endpoint_serves_the_fusion_output(client):
     assert len(body["alerts"]) <= 5
     assert body["alerts"] and body["alerts"][0]["reason"].startswith("Flagged due to")
     assert "warning" in body["stacker"]
+
+
+# --- /alerts --------------------------------------------------------------
+def test_alerts_are_ranked_by_risk_score(fixture_client):
+    api, _ = fixture_client
+    body = api.get("/alerts").json()
+    scores = [a["risk_score"] for a in body["alerts"]]
+    assert scores == sorted(scores, reverse=True)
+    assert body["total"] == 3
+
+
+def test_alerts_paginate(fixture_client):
+    api, _ = fixture_client
+    first = api.get("/alerts?limit=2&offset=0").json()
+    second = api.get("/alerts?limit=2&offset=2").json()
+    assert len(first["alerts"]) == 2 and len(second["alerts"]) == 1
+    assert first["total"] == second["total"] == 3
+    ids = [a["alert_id"] for a in first["alerts"] + second["alerts"]]
+    assert len(set(ids)) == 3
+
+
+def test_alerts_filter_by_score_type_and_pattern(fixture_client):
+    api, _ = fixture_client
+    assert {a["alert_id"] for a in api.get("/alerts?min_score=0.6").json()["alerts"]} == \
+        {"C000001", "C000002"}
+    assert {a["alert_id"] for a in api.get("/alerts?entity_type=wallet").json()["alerts"]} == \
+        {"bc1qsolo"}
+    by_pattern = api.get("/alerts?pattern_type=layering").json()
+    assert [a["alert_id"] for a in by_pattern["alerts"]] == ["C000002"]
+    assert by_pattern["filters"]["pattern_type"] == "layering"
+
+
+# --- /entities ------------------------------------------------------------
+def test_entity_detail_carries_features_scores_and_explanation(client):
+    api, _ = client
+    entity_id = an_alerted_entity(api)
+    body = api.get(f"/entities/{entity_id}").json()
+    assert body["entity_id"] == entity_id and body["alerted"]
+    assert body["features"] and "txs" in body["features"]
+    assert set(body["scores"]) >= {"risk_score", "rule_score", "anomaly_score",
+                                   "gnn_score", "taint_score", "contributions"}
+    assert body["reason"] and body["wallets"]
+    assert isinstance(body["taint_path"], list) and isinstance(body["leads"], list)
+    assert body["entity_type"] in ("cluster", "wallet")
+    assert "not cleared" in body["caveat"]
+
+
+def test_an_unknown_entity_is_a_404(client):
+    api, _ = client
+    assert api.get("/entities/nope").status_code == 404
+    assert api.get("/entities/nope/graph").status_code == 404
+
+
+def test_subgraph_is_cytoscape_ready_and_hop_bounded(client):
+    api, _ = client
+    entity_id = an_alerted_entity(api)
+    small = api.get(f"/entities/{entity_id}/graph?hops=1").json()
+    big = api.get(f"/entities/{entity_id}/graph?hops=3").json()
+
+    assert {n["data"]["type"] for n in small["elements"]["nodes"]} <= {"wallet",
+                                                                      "transaction", "ip"}
+    for node in small["elements"]["nodes"]:
+        assert {"id", "label", "type", "hop"} <= set(node["data"])
+        assert node["data"]["hop"] <= 1
+    ids = {n["data"]["id"] for n in small["elements"]["nodes"]}
+    for edge in small["elements"]["edges"]:
+        assert edge["data"]["source"] in ids and edge["data"]["target"] in ids
+        assert edge["data"]["type"]
+    assert len(big["elements"]["nodes"]) >= len(small["elements"]["nodes"])
+    assert any(n["data"]["is_focus"] for n in small["elements"]["nodes"])
+
+
+# --- /report --------------------------------------------------------------
+def test_report_returns_a_one_page_pdf(client):
+    api, _ = client
+    response = api.get(f"/entities/{an_alerted_entity(api)}/report")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF-") and response.content.endswith(b"%%EOF\n")
+    assert b"/Count 1" in response.content            # exactly one page
+    assert len(response.content) > 1500               # it drew something
+
+
+# --- /feedback ------------------------------------------------------------
+def test_feedback_appends_a_row_per_verdict(fixture_client):
+    api, path = fixture_client
+    assert api.post("/alerts/C000001/feedback", json={"status": "confirmed"}).status_code == 200
+    api.post("/alerts/C000002/feedback", json={"status": "false_positive"})
+    api.post("/alerts/C000001/feedback", json={"status": "false_positive"})  # changed mind
+
+    rows = pd.read_parquet(path)
+    assert len(rows) == 3                       # appended, never updated
+    assert list(rows["status"]) == ["confirmed", "false_positive", "false_positive"]
+    assert set(rows["alert_id"]) == {"C000001", "C000002"}
+    assert rows["recorded_at"].is_monotonic_increasing
+
+
+def test_feedback_rejects_an_unknown_alert_and_a_bad_status(fixture_client):
+    api, _ = fixture_client
+    assert api.post("/alerts/nope/feedback", json={"status": "confirmed"}).status_code == 404
+    assert api.post("/alerts/C000001/feedback", json={"status": "maybe"}).status_code == 422
+
+
+# --- /stats ---------------------------------------------------------------
+def test_stats_summarises_the_dashboard_header(fixture_client):
+    api, _ = fixture_client
+    body = api.get("/stats").json()
+    assert body["total_alerts"] == 3
+    assert body["total_entities"] > 0
+    assert body["alerts_by_pattern_type"]["layering"] == 1
+    assert body["alerts_by_pattern_type"]["ransomware_collector"] == 1
+    assert body["avg_confidence"] == pytest.approx((0.91 + 0.64 + 0.52) / 3, abs=1e-3)

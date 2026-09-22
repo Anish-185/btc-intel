@@ -20,7 +20,7 @@ dev = ["pytest>=8.2", "ruff>=0.5"]
 # The GNN engine only. Everything else — ingest, graph, features, rules —
 # runs without torch, which keeps the offline install small when it is not wanted.
 gnn = ["torch>=2.2", "torch-geometric>=2.5"]
-api = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "joblib>=1.4"]
+api = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "joblib>=1.4", "reportlab>=4.1"]
 
 [build-system]
 requires = ["hatchling"]
