@@ -23,10 +23,10 @@ before any of this was measured. Wallet recall is reported as secondary.
 | low_confidence_origin cutoff | 0.35 | — | chosen on seed A, reported on seed B | seed A = 41 |
 | false positive rate, zero-attack | 0.0000 | — | alerts per entity on traffic with nothing planted | 949 entities, 0 alerts |
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
-| red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 6) | 30 injections, shifted set |
-| red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 6 | 50 injections |
-| red-team median time-to-detect | — | 2.26s | inject to alert, incremental re-run, crimes only | 20 detected |
-| attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 5) | 38 / 62 leads |
+| red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 7) | 30 injections, shifted set |
+| red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 7 | 50 injections |
+| red-team median time-to-detect | — | 2.35s | inject to alert, incremental re-run, crimes only | 20 detected |
+| attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 6) | 38 / 62 leads |
 
 
 Origin figures: `first_timestamp`, split filter, standard set, seed 41, observation rate 0.3.
@@ -444,7 +444,93 @@ alert is the system inventing suspicion from ordinary traffic. Read it against
 opposite sides.
 
 
-## 4. Cluster quality
+## 4. Does the ranked queue rank?
+
+A ranked, explainable alert list is a deliverable of the problem statement, and
+a ranking only exists if the scores differ. `docs/demo_script.md` has carried a
+line saying every alert scores 1.000 — if that were true the queue would be a
+set with a number printed on it, and sorting by risk would do nothing.
+
+Three measurements, because they fail in different ways. The **deciles** show
+whether the distribution is spread or spiked. The **count at exactly 1.000** is
+the specific claim. The **distinct values in the top 50** is the one an analyst
+feels: fifty alerts sharing three scores cannot be worked in order, however well
+spread the tail beneath them is. Values are counted at three decimals, because
+that is what the console prints — two alerts differing in the fourth are one
+value to a reader.
+
+Nothing here is tuned. This is what the fitted stacker produces.
+
+
+### Standard set
+
+197 alerts above the 0.5 threshold. Scores run from **0.568** to **1.0** — a spread of **0.432**.
+
+
+**5 alerts score exactly 1.000.** Across the whole queue there are **5 distinct values** at the three decimals the console prints; in the top 50 there are **1**. The most common single value is 0.996, shared by 31.0% of alerts.
+
+
+**Deciles:**
+
+
+| quantile | risk score |
+| --- | --- |
+| 0% | 0.5680 |
+| 10% | 0.7330 |
+| 20% | 0.9229 |
+| 30% | 0.9229 |
+| 40% | 0.9956 |
+| 50% | 0.9956 |
+| 60% | 0.9956 |
+| 70% | 0.9956 |
+| 80% | 1.0000 |
+| 90% | 1.0000 |
+| 100% | 1.0000 |
+
+
+**The head of the queue** — what an analyst sorting by risk actually sees:
+
+
+| risk score | alerts sharing it |
+| --- | --- |
+| 1.000 | 50 |
+
+
+### Shifted set
+
+470 alerts above the 0.5 threshold. Scores run from **0.5277** to **1.0** — a spread of **0.4723**.
+
+
+**3 alerts score exactly 1.000.** Across the whole queue there are **6 distinct values** at the three decimals the console prints; in the top 50 there are **1**. The most common single value is 0.981, shared by 37.4% of alerts.
+
+
+**Deciles:**
+
+
+| quantile | risk score |
+| --- | --- |
+| 0% | 0.5277 |
+| 10% | 0.6586 |
+| 20% | 0.8518 |
+| 30% | 0.8518 |
+| 40% | 0.9808 |
+| 50% | 0.9808 |
+| 60% | 0.9808 |
+| 70% | 0.9808 |
+| 80% | 0.9998 |
+| 90% | 0.9998 |
+| 100% | 1.0000 |
+
+
+**The head of the queue** — what an analyst sorting by risk actually sees:
+
+
+| risk score | alerts sharing it |
+| --- | --- |
+| 1.000 | 50 |
+
+
+## 5. Cluster quality
 
 Every detection number in this report is scored per entity, and an entity is
 whatever `graph/clustering.py` decided. The Adjusted Rand Index compares our
@@ -480,7 +566,7 @@ heuristics are conservative by design, so over-splitting is expected and
 over-merging is not. The numbers say which one is actually happening.
 
 
-## 5. Attribution leads, measured as attribution
+## 6. Attribution leads, measured as attribution
 
 **Why this is not an AUC delta.** The correlation engine is deliberately absent
 from the stacker (`fusion.stacker.signals`), and the reason is not that it
@@ -605,7 +691,7 @@ all is the ceiling on the first number.
 | 5–9 | 10 | 1.000 | 1.000 |
 
 
-## 6. Red team, 50 injections
+## 7. Red team, 50 injections
 
 `eval.redteam_runs` injections driven through `api.redteam.execute` — the same
 function `POST /redteam/runs` calls, not a re-implementation of it. Every
@@ -621,7 +707,7 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.26s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.35s.
 
 
 Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
@@ -648,9 +734,9 @@ a legal privacy tool.
 | typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | yes | 10 | 4 | 0.400 | 2.200 | 5 | 5 |
-| peel_chain | yes | 10 | 7 | 0.700 | 2.260 | 5 | 5 |
-| ransomware_collector | yes | 10 | 9 | 0.900 | 2.270 | 5 | 5 |
+| layering | yes | 10 | 4 | 0.400 | 2.210 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 2.390 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 2.410 | 5 | 5 |
 | same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
@@ -729,7 +815,7 @@ model's verdict on it, not a bug, and it is why the anomaly engine is the first
 place to look if these detection rates need to improve.
 
 
-## 7. Decisions taken in this pass
+## 8. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

@@ -21,7 +21,7 @@ import pandas as pd
 import config
 
 from . import (clustering_eval, correlation_eval, fusion_eval, origin,
-               redteam_batch, zero_attack)
+               redteam_batch, saturation, zero_attack)
 from .datasets import build
 
 
@@ -183,11 +183,11 @@ def summary_table(fusion: dict, origin_rows: dict, cfg: dict, extra: dict) -> pd
          f"{int(extra['clusters'].iloc[1]['wallets_scored'])} wallets"),
         ("red-team detection rate, crimes only", "—",
          fmt(extra["redteam"]["detection_rate"]),
-         "criminal injection raised at least one alert (section 6)",
+         "criminal injection raised at least one alert (section 7)",
          f"{extra['redteam']['crime_runs']} injections, shifted set"),
         ("red-team detection rate, all typologies", "—",
          fmt(extra["redteam"]["all_runs_rate"]),
-         "includes the two patterns that are not crimes — see section 6",
+         "includes the two patterns that are not crimes — see section 7",
          f"{extra['redteam']['completed']} injections"),
         ("red-team median time-to-detect", "—",
          f"{extra['redteam']['median_time_to_detect']}s",
@@ -195,7 +195,7 @@ def summary_table(fusion: dict, origin_rows: dict, cfg: dict, extra: dict) -> pd
          f"{extra['redteam']['crime_detected']} detected"),
         ("attribution leads naming the true IP",
          fmt(extra["leads"]["standard"]), fmt(extra["leads"]["shifted"]),
-         "leads shown beside an alert (not an AUC — see section 5)",
+         "leads shown beside an alert (not an AUC — see section 6)",
          f"{extra['leads']['n_standard']} / {extra['leads']['n_shifted']} leads"),
     ]
     return pd.DataFrame(rows, columns=["metric", f"standard (seed {e['seed']})",
@@ -227,6 +227,9 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
             fusion[name]["bundle"], fusion[name]["alerted"], cfg)
         for name in ("standard", "shifted")}
     redteam = redteam_batch.run_batch(shifted[default_rate], cfg)
+    saturated = {name: saturation.evaluate(fusion[name]["bundle"]["signals"],
+                                           fusion[name]["stacker"], cfg)
+                 for name in ("standard", "shifted")}
 
     origin_results = origin.evaluate(standard, cfg)
     table = origin_results["table"]
@@ -415,8 +418,32 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
         add(md_table(quiet["top"]))
     add("\n" + ZERO_ATTACK_NOTE)
 
-    # --- 4. clustering ---------------------------------------------------
-    add("\n## 4. Cluster quality\n")
+    # --- 3b. saturation --------------------------------------------------
+    add("\n## 4. Does the ranked queue rank?\n")
+    add(SATURATION_PREAMBLE)
+    for name in ("standard", "shifted"):
+        block = saturated[name]
+        add(f"\n### {name.capitalize()} set\n")
+        if not block["alerts"]:
+            add("No alerts fired, so there is nothing to rank.\n")
+            continue
+        add(f"{block['alerts']} alerts above the {block['threshold']} threshold. "
+            f"Scores run from **{block['min']}** to **{block['max']}** — a spread of "
+            f"**{block['spread']}**.\n")
+        add(f"\n**{block['at_exactly_one']} alerts score exactly 1.000.** "
+            f"Across the whole queue there are **{block['distinct_values']} distinct "
+            f"values** at the three decimals the console prints; in the top "
+            f"{block['top_n']} there are **{block['distinct_in_top']}**. The most "
+            f"common single value is {block['most_common_value']:.3f}, shared by "
+            f"{block['share_at_most_common']:.1%} of alerts.\n")
+        add("\n**Deciles:**\n\n")
+        add(md_table(block["deciles"], floats=4))
+        add(f"\n**The head of the queue** — what an analyst sorting by risk actually "
+            f"sees:\n\n")
+        add(md_table(block["top_values"]))
+
+    # --- 5. clustering ---------------------------------------------------
+    add("\n## 5. Cluster quality\n")
     add("Every detection number in this report is scored per entity, and an entity is\n"
         "whatever `graph/clustering.py` decided. The Adjusted Rand Index compares our\n"
         "partition of the wallets against the generator's true one — adjusted for\n"
@@ -425,8 +452,8 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add(md_table(clusters, floats=4))
     add("\n" + CLUSTER_NOTE)
 
-    # --- 5. correlation --------------------------------------------------
-    add("\n## 5. Attribution leads, measured as attribution\n")
+    # --- 6. correlation --------------------------------------------------
+    add("\n## 6. Attribution leads, measured as attribution\n")
     add(CORRELATION_PREAMBLE)
     for name in ("standard", "shifted"):
         block = correlation[name]
@@ -453,8 +480,8 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
         add("\n**By how many distinct transactions the link rests on:**\n\n")
         add(md_table(block["by_observations"]))
 
-    # --- 6. red team -----------------------------------------------------
-    add("\n## 6. Red team, 50 injections\n")
+    # --- 7. red team -----------------------------------------------------
+    add("\n## 7. Red team, 50 injections\n")
     add(REDTEAM_PREAMBLE)
     add(f"\n**{redteam['crime_detected']} of {redteam['crime_runs']} criminal "
         f"injections were detected — {redteam['detection_rate']:.3f}** at threshold "
@@ -559,6 +586,23 @@ all is the ceiling on the first number.
 """
 
 
+SATURATION_PREAMBLE = """A ranked, explainable alert list is a deliverable of the problem statement, and
+a ranking only exists if the scores differ. `docs/demo_script.md` has carried a
+line saying every alert scores 1.000 — if that were true the queue would be a
+set with a number printed on it, and sorting by risk would do nothing.
+
+Three measurements, because they fail in different ways. The **deciles** show
+whether the distribution is spread or spiked. The **count at exactly 1.000** is
+the specific claim. The **distinct values in the top 50** is the one an analyst
+feels: fifty alerts sharing three scores cannot be worked in order, however well
+spread the tail beneath them is. Values are counted at three decimals, because
+that is what the console prints — two alerts differing in the fourth are one
+value to a reader.
+
+Nothing here is tuned. This is what the fitted stacker produces.
+"""
+
+
 NON_ACTOR_NOTE = """**Why the headline excludes two of the five.** `coinjoin` and
 `same_actor_cluster` are pre-registered in `docs/detection_unit_protocol.md` as
 **not actors** — CoinJoin is mixing, which is suspicious but not by itself a
@@ -624,7 +668,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 7. Decisions taken in this pass
+## 8. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker
