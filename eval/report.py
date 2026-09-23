@@ -227,7 +227,7 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
             fusion[name]["bundle"], fusion[name]["alerted"], cfg)
         for name in ("standard", "shifted")}
     redteam = redteam_batch.run_batch(shifted[default_rate], cfg)
-    saturated = {name: saturation.evaluate(fusion[name]["bundle"]["signals"],
+    saturated = {name: saturation.evaluate(fusion[name]["bundle"],
                                            fusion[name]["stacker"], cfg)
                  for name in ("standard", "shifted")}
 
@@ -450,9 +450,21 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
             f"{block['share_at_most_common']:.1%} of alerts.\n")
         add("\n**Deciles:**\n\n")
         add(md_table(block["deciles"], floats=4))
-        add(f"\n**The head of the queue** — what an analyst sorting by risk actually "
-            f"sees:\n\n")
+        add(f"\n**The head of the queue** — the composite values an analyst sorting "
+            f"by risk sees:\n\n")
         add(md_table(block["top_values"]))
+        add(f"\n**What the tiebreakers recover.** The queue no longer sorts on the "
+            f"composite alone (`fusion/ordering.py`). Against "
+            f"{block['distinct_values']} distinct composite value(s), the full sort key "
+            f"gives **{block['queue_distinct_keys']} distinct keys** over "
+            f"{block['alerts']} alerts — a total order by construction, since the entity "
+            f"id ends it. The number that matters is the one before that backstop: "
+            f"**{block['queue_distinct_evidential_keys']} distinct keys from evidence "
+            f"alone**, and **{block['queue_distinct_evidential_in_top']} in the top "
+            f"{block['top_n']}** where the composite gave "
+            f"{block['distinct_in_top']}. "
+            f"{block['queue_resolved_by_id_alone']} of the {block['alerts']} alerts are "
+            f"separated only by the entity id: deterministic, but not meaningful.\n")
 
     # --- 5. clustering ---------------------------------------------------
     add("\n## 5. Cluster quality\n")
@@ -677,6 +689,29 @@ that is what the console prints — two alerts differing in the fourth are one
 value to a reader.
 
 Nothing here is tuned. This is what the fitted stacker produces.
+
+**What was done about it.** The composite is unchanged — no retraining, no
+recalibration, no threshold moved. What changed is that the queue no longer
+sorts on it alone. `fusion/ordering.py` defines a fixed, published sequence of
+tiebreakers, all of them signals already computed, applied in this order:
+
+| # | key | direction | why here |
+| --- | --- | --- | --- |
+| 1 | `risk_score` | desc | the composite still decides |
+| 2 | `rule_typologies` | desc | distinct rule detectors that fired — two agreeing independently is a stronger case than one firing twice, and it is the only tiebreaker counting *separate* evidence |
+| 3 | `taint_hops` | asc | hops from a watchlist seed; one hop is more urgent than four. No path sorts last, not first — absence is not proximity zero |
+| 4 | `lead_confidence` | desc | the strongest attribution lead: of two equal alerts, open the one an ISP request could act on |
+| 5 | `tx_count` | desc | the entity's transaction volume — a bigger operation, all else equal |
+| 6 | `entity_id` | asc | never a judgement, only a guarantee: with this last the order is total, so the same dataset gives the same queue on every run |
+
+The four tiebreak columns and the composed key travel on the alert record, so
+the console, the API and the PDF order identically rather than each re-deriving
+the rule; `tests/test_ordering.py` asserts that the exported key reproduces the
+queue and that the order is unchanged under every rotation of the input.
+
+This is an ordering fix, not a scoring fix. It makes the queue legible and
+stable; it does not make the composite discriminate, and the numbers below say
+how far it gets.
 """
 
 

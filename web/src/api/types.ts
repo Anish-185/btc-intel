@@ -36,6 +36,16 @@ export interface Alert {
   contributions: string;
   wallets: number;
   suspicious_merge: boolean;
+  /** Queue tiebreakers, in the order fusion/ordering.py applies them after the
+   *  composite score. Shown in the queue so the order is legible when several
+   *  alerts read the same risk. */
+  rule_typologies: number;
+  /** Hops from a watchlist seed; 1000000 means no taint path at all. */
+  taint_hops: number;
+  lead_confidence: number;
+  tx_count: number;
+  /** The full key as a JSON array, so any consumer orders identically. */
+  sort_key: string;
 }
 
 export interface AlertsPage {

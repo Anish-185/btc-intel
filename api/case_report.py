@@ -180,11 +180,14 @@ def render_pdf(detail: dict, graph: dict, now: datetime, custody: dict | None = 
     y -= 14
     c.setFont("Helvetica", 9)
     c.setFillColor(MUTED)
+    queue = detail.get("queue_position") or {}
+    rank = (f" · queue rank {queue['rank']} of {queue['of']}" if queue.get("rank") else "")
     c.drawString(MARGIN, y, f"{detail['entity_type']} · {len(detail['wallets'])} wallet(s)"
                  + (f" · top signal {detail['scores']['top_signal']}"
                     if detail["scores"].get("top_signal") else "")
                  + (f" · {', '.join(detail['pattern_types'])}"
-                    if detail.get("pattern_types") else ""))
+                    if detail.get("pattern_types") else "")
+                 + rank)
     y -= 22
 
     y = _heading(c, "reason", y)

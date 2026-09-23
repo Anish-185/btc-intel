@@ -25,7 +25,7 @@ before any of this was measured. Wallet recall is reported as secondary.
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
 | red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 7) | 30 injections, shifted set |
 | red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 7 | 50 injections |
-| red-team median time-to-detect | — | 2.28s | inject to alert, incremental re-run, crimes only | 20 detected |
+| red-team median time-to-detect | — | 2.02s | inject to alert, incremental re-run, crimes only | 20 detected |
 | attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 6) | 38 / 62 leads |
 
 
@@ -473,6 +473,29 @@ value to a reader.
 
 Nothing here is tuned. This is what the fitted stacker produces.
 
+**What was done about it.** The composite is unchanged — no retraining, no
+recalibration, no threshold moved. What changed is that the queue no longer
+sorts on it alone. `fusion/ordering.py` defines a fixed, published sequence of
+tiebreakers, all of them signals already computed, applied in this order:
+
+| # | key | direction | why here |
+| --- | --- | --- | --- |
+| 1 | `risk_score` | desc | the composite still decides |
+| 2 | `rule_typologies` | desc | distinct rule detectors that fired — two agreeing independently is a stronger case than one firing twice, and it is the only tiebreaker counting *separate* evidence |
+| 3 | `taint_hops` | asc | hops from a watchlist seed; one hop is more urgent than four. No path sorts last, not first — absence is not proximity zero |
+| 4 | `lead_confidence` | desc | the strongest attribution lead: of two equal alerts, open the one an ISP request could act on |
+| 5 | `tx_count` | desc | the entity's transaction volume — a bigger operation, all else equal |
+| 6 | `entity_id` | asc | never a judgement, only a guarantee: with this last the order is total, so the same dataset gives the same queue on every run |
+
+The four tiebreak columns and the composed key travel on the alert record, so
+the console, the API and the PDF order identically rather than each re-deriving
+the rule; `tests/test_ordering.py` asserts that the exported key reproduces the
+queue and that the order is unchanged under every rotation of the input.
+
+This is an ordering fix, not a scoring fix. It makes the queue legible and
+stable; it does not make the composite discriminate, and the numbers below say
+how far it gets.
+
 
 ### Standard set
 
@@ -500,12 +523,15 @@ Nothing here is tuned. This is what the fitted stacker produces.
 | 100% | 1.0000 |
 
 
-**The head of the queue** — what an analyst sorting by risk actually sees:
+**The head of the queue** — the composite values an analyst sorting by risk sees:
 
 
 | risk score | alerts sharing it |
 | --- | --- |
 | 1.000 | 50 |
+
+
+**What the tiebreakers recover.** The queue no longer sorts on the composite alone (`fusion/ordering.py`). Against 5 distinct composite value(s), the full sort key gives **197 distinct keys** over 197 alerts — a total order by construction, since the entity id ends it. The number that matters is the one before that backstop: **36 distinct keys from evidence alone**, and **18 in the top 50** where the composite gave 1. 167 of the 197 alerts are separated only by the entity id: deterministic, but not meaningful.
 
 
 ### Shifted set
@@ -534,12 +560,15 @@ Nothing here is tuned. This is what the fitted stacker produces.
 | 100% | 1.0000 |
 
 
-**The head of the queue** — what an analyst sorting by risk actually sees:
+**The head of the queue** — the composite values an analyst sorting by risk sees:
 
 
 | risk score | alerts sharing it |
 | --- | --- |
 | 1.000 | 50 |
+
+
+**What the tiebreakers recover.** The queue no longer sorts on the composite alone (`fusion/ordering.py`). Against 6 distinct composite value(s), the full sort key gives **470 distinct keys** over 470 alerts — a total order by construction, since the entity id ends it. The number that matters is the one before that backstop: **60 distinct keys from evidence alone**, and **32 in the top 50** where the composite gave 1. 416 of the 470 alerts are separated only by the entity id: deterministic, but not meaningful.
 
 
 ## 5. Cluster quality
@@ -719,7 +748,7 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.28s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.02s.
 
 
 Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
@@ -746,9 +775,9 @@ a legal privacy tool.
 | typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | yes | 10 | 4 | 0.400 | 2.220 | 5 | 5 |
-| peel_chain | yes | 10 | 7 | 0.700 | 2.370 | 5 | 5 |
-| ransomware_collector | yes | 10 | 9 | 0.900 | 2.280 | 5 | 5 |
+| layering | yes | 10 | 4 | 0.400 | 1.950 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 2.040 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 2.060 | 5 | 5 |
 | same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
@@ -787,36 +816,36 @@ not in this table — they are not misses.
 
 | run | typology | broadcast | rule | anomaly | gnn | taint | fused | threshold | short by |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| batch003 | layering | residential | 0.000 | 0.141 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch003 | layering | residential | 0.000 | 0.173 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch003 | layering | residential | 0.000 | 0.381 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch007 | peel_chain | tor_exit | 0.000 | 0.798 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch007 | peel_chain | tor_exit | 0.000 | 0.864 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch007 | peel_chain | tor_exit | 0.000 | 0.381 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch023 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch023 | layering | residential | 0.000 | 0.309 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch023 | layering | residential | 0.000 | 0.416 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch032 | peel_chain | hosting | 0.000 | 0.355 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch032 | peel_chain | hosting | 0.000 | 0.213 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch032 | peel_chain | hosting | 0.000 | 0.922 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch033 | layering | hosting | 0.000 | 0.290 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch033 | layering | hosting | 0.000 | 0.248 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch033 | layering | hosting | 0.000 | 0.257 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.289 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.929 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.268 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch038 | layering | relay_heavy | 0.000 | 0.263 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch038 | layering | relay_heavy | 0.000 | 0.285 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch038 | layering | relay_heavy | 0.000 | 0.272 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.691 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.359 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.394 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch043 | layering | residential | 0.000 | 0.795 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch043 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch043 | layering | residential | 0.000 | 0.354 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch048 | layering | tor_exit | 0.000 | 0.202 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch048 | layering | tor_exit | 0.000 | 0.026 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch048 | layering | tor_exit | 0.000 | 0.006 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch003 | layering | residential | 0.000 | 0.141 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch003 | layering | residential | 0.000 | 0.173 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch003 | layering | residential | 0.000 | 0.381 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch007 | peel_chain | tor_exit | 0.000 | 0.798 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch007 | peel_chain | tor_exit | 0.000 | 0.864 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch007 | peel_chain | tor_exit | 0.000 | 0.381 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch023 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch023 | layering | residential | 0.000 | 0.309 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch023 | layering | residential | 0.000 | 0.416 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch032 | peel_chain | hosting | 0.000 | 0.355 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch032 | peel_chain | hosting | 0.000 | 0.213 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch032 | peel_chain | hosting | 0.000 | 0.922 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch033 | layering | hosting | 0.000 | 0.290 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch033 | layering | hosting | 0.000 | 0.248 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch033 | layering | hosting | 0.000 | 0.257 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.289 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.929 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.268 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch038 | layering | relay_heavy | 0.000 | 0.263 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch038 | layering | relay_heavy | 0.000 | 0.285 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch038 | layering | relay_heavy | 0.000 | 0.272 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.691 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.359 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.394 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch043 | layering | residential | 0.000 | 0.795 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch043 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch043 | layering | residential | 0.000 | 0.354 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch048 | layering | tor_exit | 0.000 | 0.202 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch048 | layering | tor_exit | 0.000 | 0.026 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
+| batch048 | layering | tor_exit | 0.000 | 0.006 | 0.000 | 0.000 | 0.369 | 0.500 | 0.131 |
 
 
 One thing this table says loudly: **the fused score does not move with the anomaly
@@ -846,7 +875,7 @@ identical either way; the difference is the constrained refit landing on a
 different optimum once the column is gone, which is worth knowing but is not
 evidence the signal was doing harm.
 
-The red-team misses make it concrete. Two injected entities, one scoring **0.006** on anomaly and one **0.929** — a difference of 0.923 on the signal — both come out of the stacker at **0.354** and **0.354**. The fused score does not move, because nothing is multiplying it.
+The red-team misses make it concrete. Two injected entities, one scoring **0.006** on anomaly and one **0.929** — a difference of 0.923 on the signal — both come out of the stacker at **0.369** and **0.369**. The fused score does not move, because nothing is multiplying it.
 
 **Why it comes out below chance.** IsolationForest finds the population's
 outliers, and on this data the outliers are the exchanges: enormous fan-in,

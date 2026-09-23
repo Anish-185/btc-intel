@@ -42,6 +42,7 @@ from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
 from ingest.ip_intel import load_intel
 
 from fusion import incremental
+from fusion.ordering import NO_TAINT, TIEBREAKERS
 from fusion.pipeline import collect_signals
 
 from . import graph as graph_api
@@ -254,6 +255,32 @@ def stats() -> dict:
     }
 
 
+def queue_position(entity_id: str) -> dict:
+    """This entity's rank in the ranked queue, 1-based, and how long the queue is."""
+    rows = sorted(_alert_rows(), key=queue_key)
+    for rank, row in enumerate(rows, 1):
+        if row.get("entity_id") == entity_id:
+            return {"rank": rank, "of": len(rows)}
+    return {"rank": None, "of": len(rows)}
+
+
+def queue_key(row: dict) -> tuple:
+    """`fusion.ordering.SORT_KEY` as a tuple a Python sort can use.
+
+    Descending fields are negated rather than the list reversed, because the
+    directions differ: risk descends, hops ascend, and the entity id ascends
+    last as the deterministic backstop.
+    """
+    return (
+        -float(row.get("risk_score") or 0.0),
+        -int(row.get("rule_typologies") or 0),
+        int(row["taint_hops"]) if row.get("taint_hops") is not None else NO_TAINT,
+        -float(row.get("lead_confidence") or 0.0),
+        -int(row.get("tx_count") or 0),
+        str(row.get("entity_id") or ""),
+    )
+
+
 @app.get("/alerts")
 def alerts(limit: int | None = None, offset: int = Query(0, ge=0),
            min_score: float | None = Query(None, ge=0.0, le=1.0),
@@ -269,7 +296,10 @@ def alerts(limit: int | None = None, offset: int = Query(0, ge=0),
         rows = [r for r in rows if r.get("entity_type") == entity_type]
     if pattern_type:
         rows = [r for r in rows if pattern_type in (r.get("pattern_types") or [])]
-    rows.sort(key=lambda r: float(r.get("risk_score") or 0.0), reverse=True)
+    # The same order as the queue on screen and the parquet on disk: the
+    # composite first, then the published tiebreakers. Filtering a ranked list
+    # must not silently re-rank it.
+    rows.sort(key=queue_key)
     payload = _alerts()
     return {
         "alert_threshold": payload.get("alert_threshold"),
@@ -313,6 +343,12 @@ def entity(entity_id: str) -> dict:
             if alert.get("contributions") else {},
         },
         "alerted": bool(alert),
+        # Where this case sits in the queue, and the key that put it there —
+        # so a case report printed from this record carries the same ordering
+        # the analyst saw on screen.
+        "queue_position": queue_position(entity_id),
+        "sort_key": json.loads(alert["sort_key"]) if alert.get("sort_key") else None,
+        "tiebreakers": {k: alert.get(k) for k in TIEBREAKERS} if alert else {},
         "pattern_types": alert.get("pattern_types", []),
         "reason": alert.get("reason"),
         "evidence": alert.get("evidence", []),

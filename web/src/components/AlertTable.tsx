@@ -24,9 +24,38 @@ export interface AlertTableProps {
   onSort: (key: SortKey) => void;
 }
 
-/** Sorting is stable and total: ties fall back to the entity id so a re-sort
- *  never shuffles rows that compare equal. */
+/** No taint path at all. Mirrors `fusion.ordering.NO_TAINT`: an entity with no
+ *  route from a watchlist seed is not zero hops away, it is not connected. */
+export const NO_TAINT = 1_000_000;
+
+/** The queue's published order, `fusion/ordering.py` SORT_KEY, evaluated here.
+ *
+ *  The composite score decides; when it cannot — and it usually cannot, since
+ *  the top of the queue all reads 1.000 — these break the tie in a fixed order:
+ *  distinct rule typologies, then hops from a watchlist seed, then the
+ *  strongest attribution lead, then transaction volume, then the entity id as
+ *  a deterministic backstop. The server sends the page in exactly this order;
+ *  this reproduces it so a client-side re-sort lands in the same place.
+ */
+export function compareByQueueOrder(a: Alert, b: Alert): number {
+  return (
+    b.risk_score - a.risk_score ||
+    (b.rule_typologies ?? 0) - (a.rule_typologies ?? 0) ||
+    (a.taint_hops ?? NO_TAINT) - (b.taint_hops ?? NO_TAINT) ||
+    (b.lead_confidence ?? 0) - (a.lead_confidence ?? 0) ||
+    (b.tx_count ?? 0) - (a.tx_count ?? 0) ||
+    a.entity_id.localeCompare(b.entity_id)
+  );
+}
+
+/** Sorting is stable and total: ties fall back to the published queue order, so
+ *  a re-sort never shuffles rows that compare equal and the risk column orders
+ *  exactly as the API and the PDF do. */
 export function sortAlerts(alerts: Alert[], key: SortKey, dir: "asc" | "desc"): Alert[] {
+  if (key === "risk_score") {
+    const ranked = [...alerts].sort(compareByQueueOrder);
+    return dir === "desc" ? ranked : ranked.reverse();
+  }
   const sign = dir === "asc" ? 1 : -1;
   return [...alerts].sort((a, b) => {
     const left = a[key];
@@ -35,7 +64,7 @@ export function sortAlerts(alerts: Alert[], key: SortKey, dir: "asc" | "desc"): 
       typeof left === "number" && typeof right === "number"
         ? left - right
         : String(left).localeCompare(String(right));
-    return cmp !== 0 ? cmp * sign : a.entity_id.localeCompare(b.entity_id);
+    return cmp !== 0 ? cmp * sign : compareByQueueOrder(a, b);
   });
 }
 
@@ -51,6 +80,34 @@ export function filterAlerts(
 }
 
 const ARROW = { asc: "↑", desc: "↓" } as const;
+
+/** The tiebreakers, compactly, in the order they are applied.
+ *
+ *  Without this the queue asks the reader to trust that row 3 outranks row 7
+ *  for a reason, when both print 1.000. `R` is how many distinct rule detectors
+ *  fired, `H` the hops from a watchlist seed (`—` when there is no path), `L`
+ *  the strongest attribution lead. */
+function Tiebreak({ alert }: { alert: Alert }) {
+  const hops = alert.taint_hops ?? NO_TAINT;
+  const parts = [
+    `R${alert.rule_typologies ?? 0}`,
+    hops >= NO_TAINT ? "H—" : `H${hops}`,
+    `L${(alert.lead_confidence ?? 0).toFixed(2)}`,
+  ];
+  return (
+    <span
+      className="mono soft"
+      style={{ fontSize: "var(--fs-small)", whiteSpace: "nowrap" }}
+      title={`${alert.rule_typologies ?? 0} distinct rule detector(s); `
+        + (hops >= NO_TAINT ? "no taint path to a watchlist seed; "
+                            : `${hops} hop(s) from a watchlist seed; `)
+        + `strongest attribution lead ${(alert.lead_confidence ?? 0).toFixed(3)}; `
+        + `${alert.tx_count ?? 0} transactions`}
+    >
+      {parts.join(" ")}
+    </span>
+  );
+}
 
 const ariaSort = (sort: { key: SortKey; dir: "asc" | "desc" }, me: SortKey) =>
   sort.key === me ? (sort.dir === "asc" ? "ascending" : "descending") : "none";
@@ -113,7 +170,9 @@ export function AlertTable({
         }}
       >
         <caption className="sr-only">
-          Alerts, ranked by risk score. Use the arrow keys to move between rows.
+          Alerts, ranked by risk score and then by the published tiebreakers —
+          distinct rule detectors, hops from a watchlist seed, strongest attribution
+          lead, transaction volume, entity id. Use the arrow keys to move between rows.
         </caption>
         <thead>
           <tr>
@@ -124,6 +183,15 @@ export function AlertTable({
             <th scope="col">Pattern</th>
             <th scope="col" style={{ textAlign: "right" }} aria-sort={ariaSort(sort, "risk_score")}>
               <SortButton label="Risk" active={sort} me="risk_score" onSort={onSort} />
+            </th>
+            <th
+              scope="col"
+              style={{ textAlign: "right" }}
+              title={"Why this row sits where it does when several share a risk score: "
+                + "distinct rule detectors fired, then hops from a watchlist seed, then "
+                + "the strongest attribution lead. Applied in that order."}
+            >
+              Tiebreak
             </th>
             <th scope="col">Reason</th>
             <th scope="col" style={{ textAlign: "right" }} aria-sort={ariaSort(sort, "wallets")}>
@@ -167,6 +235,9 @@ export function AlertTable({
                   style={{ viewTransitionName: `score-${cssName(alert.entity_id)}` }}
                 >
                   <RiskMeter score={alert.risk_score} cells={6} />
+                </td>
+                <td className="num-cell">
+                  <Tiebreak alert={alert} />
                 </td>
                 <td className="reason-cell" title={alert.reason}>
                   {alert.reason}

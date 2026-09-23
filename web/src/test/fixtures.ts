@@ -18,6 +18,11 @@ export const alert = (over: Partial<Alert> = {}): Alert => ({
   contributions: "{}",
   wallets: 12,
   suspicious_merge: false,
+  rule_typologies: 1,
+  taint_hops: 1,
+  lead_confidence: 0.42,
+  tx_count: 9,
+  sort_key: "[0.91, 1, 1, 0.42, 9, \"C000001\"]",
   ...over,
 });
 

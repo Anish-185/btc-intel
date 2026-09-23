@@ -20,6 +20,8 @@ produces on the canonical sets.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 #: What counts as "the same score" to a reader. The queue prints three decimals,
@@ -28,8 +30,16 @@ import pandas as pd
 DISPLAYED = 3
 
 
-def evaluate(signals: pd.DataFrame, stacker, cfg: dict, top: int = 50) -> dict:
-    """The spread of composite risk among alerts, at the configured threshold."""
+def evaluate(bundle: dict, stacker, cfg: dict, top: int = 50) -> dict:
+    """The spread of composite risk among alerts, at the configured threshold.
+
+    Also how far the queue's tiebreakers get: the composite's distinct values
+    against the distinct *sort keys*, which is the difference between what the
+    score can rank and what the queue actually ranks.
+    """
+    from fusion.pipeline import build_alerts
+
+    signals = bundle["signals"]
     scored = pd.Series(stacker.score(signals), index=signals.index).round(6)
     threshold = cfg["fusion"]["alert_threshold"]
     alerts = scored[scored >= threshold].sort_values(ascending=False)
@@ -52,6 +62,34 @@ def evaluate(signals: pd.DataFrame, stacker, cfg: dict, top: int = 50) -> dict:
         "share_at_most_common": round(float((shown == shown.mode().iloc[0]).mean()), 3),
         "deciles": deciles(alerts),
         "top_values": top_values(shown, top),
+        **ordering_resolution(build_alerts(bundle, stacker, cfg), top),
+    }
+
+
+def ordering_resolution(queue: pd.DataFrame, top: int) -> dict:
+    """What the tiebreakers recover that the composite could not.
+
+    The composite's distinct values say how finely the score can rank. The
+    distinct sort keys say how finely the queue does rank, once
+    `fusion.ordering.SORT_KEY` has broken the ties. The gap between them is the
+    ordering's whole contribution, and the last column — distinct keys ignoring
+    the entity-id backstop — is how much of it came from evidence rather than
+    from the alphabet.
+    """
+    if queue.empty:
+        return {}
+    keys = [tuple(json.loads(k)) for k in queue["sort_key"]]
+    head = keys[:top]
+    # Drop the entity id: what is left is the part of the order a reader can
+    # justify from the evidence.
+    evidential = [k[:-1] for k in keys]
+    return {
+        "queue_distinct_keys": len(set(keys)),
+        "queue_distinct_keys_in_top": len(set(head)),
+        "queue_distinct_evidential_keys": len(set(evidential)),
+        "queue_distinct_evidential_in_top": len(set(evidential[:top])),
+        "queue_resolved_by_id_alone": sum(
+            1 for k in set(keys) if sum(1 for e in evidential if e == k[:-1]) > 1),
     }
 
 

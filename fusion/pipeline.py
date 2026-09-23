@@ -34,6 +34,7 @@ from graph.entity_graph import build_entity_graph
 from ingest.ip_intel import load_intel
 
 from .explain import explain_entity
+from .ordering import lead_confidence, sort as sort_alerts, sort_key, taint_hops
 from .stacker import SIGNALS, Stacker, default_weights, save, train
 from .taint import compute_taint, load_watchlist
 
@@ -43,7 +44,13 @@ log = logging.getLogger(__name__)
 ALERT_COLUMNS = ["alert_id", "entity_id", "entity_type", "pattern_types", "risk_score",
                  "reason", "evidence", "top_signal", "rule_score", "anomaly_score",
                  "gnn_score", "taint_score", "taint_path", "leads", "contributions",
-                 "wallets", "suspicious_merge"]
+                 "wallets", "suspicious_merge",
+                 # The queue's tiebreakers, and the key they compose into. Carried
+                 # on the record so the console, the PDF and any other consumer
+                 # order identically without re-deriving the rule — see
+                 # fusion/ordering.py for the order and the reasoning.
+                 "rule_typologies", "taint_hops", "lead_confidence", "tx_count",
+                 "sort_key"]
 
 
 def gnn_scores(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
@@ -183,14 +190,21 @@ def build_alerts(bundle: dict, stacker: Stacker, cfg: dict) -> pd.DataFrame:
                                      reasons_by_entity.get(entity, []), evidence,
                                      None, list(row.get("taint_path") or []), cfg)
         members = clusters.get(entity, {entity})
+        patterns = sorted(set(patterns_by_entity.get(entity, [])))
+        path = list(row.get("taint_path") or [])
         rows.append({
             "alert_id": entity, "entity_id": entity,
             # A coarse type, because that is all an offline pipeline can honestly
             # say: several wallets provably co-owned, or a lone address. Service
             # labels (exchange, mixer) need attribution data we do not have.
             "entity_type": "cluster" if len(members) > 1 else "wallet",
-            "pattern_types": sorted(set(patterns_by_entity.get(entity, []))),
-            "taint_path": list(row.get("taint_path") or []),
+            "pattern_types": patterns,
+            "taint_path": path,
+            # Tiebreakers, all from signals already computed above.
+            "rule_typologies": len(patterns),
+            "taint_hops": taint_hops(path),
+            "lead_confidence": lead_confidence(leads),
+            "tx_count": int(row.get("txs", 0) or 0),
             "risk_score": explanation.score,
             "reason": explanation.reason, "evidence": explanation.evidence,
             "top_signal": explanation.top_signal,
@@ -200,8 +214,12 @@ def build_alerts(bundle: dict, stacker: Stacker, cfg: dict) -> pd.DataFrame:
             "wallets": len(members),
             "suspicious_merge": bool(row.get("suspicious_merge", False)),
         })
-    df = pd.DataFrame(rows, columns=ALERT_COLUMNS)
-    return df.sort_values("risk_score", ascending=False, ignore_index=True)
+    df = pd.DataFrame(rows, columns=[c for c in ALERT_COLUMNS if c != "sort_key"])
+    # The composite decides; the tiebreakers order what it called equal. Nothing
+    # here changes a score — see fusion/ordering.py.
+    df = sort_alerts(df)
+    df["sort_key"] = [json.dumps(sort_key(r)) for _, r in df.iterrows()]
+    return df[ALERT_COLUMNS]
 
 
 def run(input_path=None, ground_truth=None, out_parquet=None, out_json=None,
