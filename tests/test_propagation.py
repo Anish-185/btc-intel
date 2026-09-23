@@ -1,8 +1,11 @@
 """Origin estimation: the algorithms, the relay penalty, and degraded mode.
 
-test_estimator_accuracy_table prints top-1 / top-3 for all three estimators at
-three relay-observation rates. It deliberately hard-asserts almost nothing —
-eval/ is where those numbers get reported; this is for tuning.
+The accuracy comparison used to be printed here and quoted from the test output.
+It is now produced by `eval.origin` and published in `eval/results.md`; what
+remains here asserts the invariants that table has to satisfy, **through the
+same functions the report calls**. One implementation, so the published figures
+and the test cannot disagree about what "top-1" means — which they did, with two
+different ceiling definitions in circulation at once.
 """
 
 from __future__ import annotations
@@ -245,50 +248,69 @@ def test_missing_intel_files_degrade_to_config_only():
 # --- end to end -----------------------------------------------------------
 @pytest.fixture(scope="module")
 def datasets(tmp_path_factory):
-    """One generated dataset per relay-observation rate."""
-    from generator.main import build_parser, generate
-    from ingest.pipeline import run as ingest_run
+    """One dataset per relay-observation rate, built by `eval.datasets`.
 
-    out = {}
+    The same builder the report uses, so a change to how evaluation datasets are
+    generated cannot leave the test measuring something else. Smaller than the
+    canonical sizes — this is a test, and the published figures come from
+    `eval/results.md`, not from here.
+    """
+    from eval.datasets import build
+
+    cfg = json.loads(json.dumps(CFG))
+    cfg["eval"].update({"n_actors": 150, "n_transactions": 900})
     base = tmp_path_factory.mktemp("prop")
-    for rate in (0.1, 0.3, 0.6):
-        d = base / str(rate)
-        raw = d / "raw"
-        generate(build_parser().parse_args(
-            ["--n-actors", "150", "--n-transactions", "900", "--output", str(raw),
-             "--seed", "41", "--formats", "csv", "--relay-observation-rate", str(rate)]))
-        ingest_run(raw, d / "t.parquet", d / "q.parquet", "csv")
-        out[rate] = (d, raw)
-    return out
+    return {rate: build(rate, False, CFG["eval"]["seed"], cfg, root=base)
+            for rate in (0.1, 0.3, 0.6)}
 
 
-def test_estimator_accuracy_table(datasets):
-    """Prints the comparison. Asserts only that nothing is catastrophically broken."""
-    from graph.builder import load
+def test_the_published_accuracy_table_holds(datasets):
+    """The invariants `eval/results.md` section 2 depends on.
 
-    print(f"\n  {'rate':<6}{'estimator':<32}{'top-1':>8}{'top-3':>8}{'ceiling':>9}")
-    for rate, (d, raw) in sorted(datasets.items()):
-        gt = json.loads((raw / "ground_truth.json").read_text())
-        truth = {t: m["observed_origin_ip"] for t, m in gt["transactions"].items()}
-        df = load(d / "t.parquet", CFG)
-        intel = load_intel(None, raw, CFG)
-        trees = {k: v for k, v in build_trees(df).items() if not v.is_single_observation}
-        ceiling = sum(truth.get(k) in v.ips for k, v in trees.items()) / max(len(trees), 1)
+    Scored with `eval.origin.score_estimator` and `eval.origin.ceiling` — the
+    functions that generate the published table — rather than a second copy of
+    the arithmetic living in a test. The numbers here are from a smaller
+    dataset than the canonical one and are deliberately not asserted against
+    fixed values: the report owns the figures, this owns the properties they
+    must have.
+    """
+    from eval import origin as origin_eval
+
+    for rate, dataset in sorted(datasets.items()):
+        cap, n_trees = origin_eval.ceiling(dataset)
+        assert n_trees > 0, "no multi-hop transactions to score"
+        assert 0.0 <= cap <= 1.0
         for name in ESTIMATORS:
-            origins, _ = estimate_all(df, intel, CFG, name)
-            origins = origins[~origins["degraded"]]
-            top1 = sum(r.estimated_origin_ip == truth.get(r.txid)
-                       for r in origins.itertuples()) / max(len(origins), 1)
-            top3 = sum(truth.get(r.txid) in [r.estimated_origin_ip] + list(r.runner_up_ips)
-                       for r in origins.itertuples()) / max(len(origins), 1)
-            print(f"  {rate:<6}{name:<32}{top1:>7.1%}{top3:>8.1%}{ceiling:>9.1%}")
-            assert top1 <= ceiling + 1e-9, "cannot beat the ceiling — the origin is absent"
-            assert top3 >= top1
+            result = origin_eval.score_estimator(dataset, name, CFG)
+            assert result["n"] > 0
+            assert result["top1"] <= cap + 1e-9, (
+                f"{name} at rate {rate} beat the ceiling — impossible, the true origin "
+                "is not in the tree for the rest")
+            assert result["top3"] >= result["top1"] - 1e-9
+            assert 0.0 <= result["conditional_top1"] <= 1.0
+            # Conditional accuracy is accuracy over a subset where the answer is
+            # present, so it can only be higher.
+            assert result["conditional_top1"] >= result["top1"] - 1e-9
+
+
+def test_the_rate_filter_cross_covers_every_combination(datasets):
+    """Section 2's full cross is complete and internally consistent."""
+    from eval import origin as origin_eval
+
+    cross = origin_eval.rate_filter_cross(datasets, CFG)
+    assert len(cross) == len(datasets) * len(ESTIMATORS) * len(origin_eval.FILTER_MODES)
+    assert (cross["top-3"] >= cross["top-1"] - 1e-9).all()
+    assert (cross["top-1"] <= cross["ceiling"] + 1e-9).all()
+    # A higher observation rate cannot lower the ceiling: more relays observed
+    # is strictly more chances for the true origin to appear.
+    ceilings = cross.groupby("rate")["ceiling"].first()
+    assert list(ceilings) == sorted(ceilings), "the ceiling fell as observation rose"
 
 
 def test_cli_writes_origins_parquet(datasets, tmp_path):
-    d, raw = datasets[0.3]
-    summary = run(d / "t.parquet", tmp_path / "origins.parquet", node_intel=raw, cfg=CFG)
+    dataset = datasets[0.3]
+    summary = run(dataset.transactions, tmp_path / "origins.parquet",
+                  node_intel=dataset.raw, cfg=CFG)
     origins = pd.read_parquet(tmp_path / "origins.parquet")
     assert len(origins) == summary["transactions"]
     assert set(origins.columns) >= {"txid", "estimated_origin_ip", "ip_class",

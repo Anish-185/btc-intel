@@ -338,6 +338,32 @@ def test_alerts_are_ranked(pipeline):
     assert alerts["risk_score"].is_monotonic_decreasing
 
 
+def test_collect_signals_survives_a_dataset_where_no_rule_fires(tmp_path):
+    """Traffic with no crime in it must not crash the pipeline.
+
+    The empty rule-score series needs its index named `entity_id` or the merge
+    raises KeyError instead of matching nothing. Found by the zero-attack
+    evaluation, which is the only thing that produces a dataset where not one
+    rule fires — and which is exactly the case an operator's quiet Tuesday is.
+    """
+    from fusion.pipeline import collect_signals
+    from generator.main import build_parser, generate
+    from ingest.pipeline import run as ingest_run
+
+    cfg = json.loads(json.dumps(CFG))
+    cfg["generator"]["pattern_mix"] = {"normal": 1.0}       # nothing to find
+    raw = tmp_path / "raw"
+    generate(build_parser().parse_args(
+        ["--n-actors", "40", "--n-transactions", "200", "--output", str(raw),
+         "--seed", "5", "--formats", "csv"]), cfg)
+    ingest_run(raw, tmp_path / "t.parquet", tmp_path / "q.parquet", "csv", cfg=cfg)
+
+    bundle = collect_signals(pd.read_parquet(tmp_path / "t.parquet"), cfg, raw)
+    assert len(bundle["alerts"]) == 0, "a clean dataset raised a rule alert"
+    assert len(bundle["signals"]) > 0
+    assert (bundle["signals"]["rule_score"] == 0.0).all()
+
+
 def test_pipeline_survives_without_a_trained_gnn(pipeline):
     """torch is an optional extra, and the weights may simply not be there.
 

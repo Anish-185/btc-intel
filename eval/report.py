@@ -20,7 +20,8 @@ import pandas as pd
 
 import config
 
-from . import fusion_eval, origin
+from . import (clustering_eval, correlation_eval, fusion_eval, origin,
+               redteam_batch, zero_attack)
 from .datasets import build
 
 
@@ -63,6 +64,41 @@ def choose_default_estimator(table: pd.DataFrame, cfg: dict) -> tuple[str, str]:
         + (f" vs {runner['estimator']} {runner['top1']:.3f}" if runner is not None else ""))
 
 
+def gnn_provenance(cfg: dict) -> dict:
+    """Which dataset the GNN was trained on, and whether that is one of ours.
+
+    The demo dataset in `data/raw` uses the same seed and size as the canonical
+    evaluation set. A GNN trained the obvious way is therefore trained on
+    exactly what this report scores it against, and would post a near-perfect
+    `gnn_score` that means nothing. Older models record no provenance at all,
+    which is treated as unknown rather than as safe.
+    """
+    path = Path(cfg["models"]["gnn"])
+    e = cfg["eval"]
+    reserved = {e["seed"], e["seed_b"]}
+    if not path.exists():
+        return {"status": "absent", "usable": False,
+                "detail": f"no model at {path} — `gnn_score` is 0 everywhere below"}
+    try:
+        import torch
+        trained_on = torch.load(path, map_location="cpu", weights_only=False).get("trained_on")
+    except Exception as exc:
+        return {"status": "unreadable", "usable": False,
+                "detail": f"{path} could not be read ({type(exc).__name__})"}
+    if not trained_on:
+        return {"status": "unknown provenance", "usable": False,
+                "detail": (f"{path} records no training dataset. It predates the check, "
+                           "so it cannot be shown to be held out from these seeds")}
+    seed = trained_on.get("seed")
+    if seed in reserved:
+        return {"status": "LEAKED", "usable": False, "seed": seed,
+                "detail": (f"the model was trained on seed {seed}, which is an evaluation "
+                           f"seed. Retrain on `eval.gnn_train_seed` ({e['gnn_train_seed']}) "
+                           "before any GNN number here means anything")}
+    return {"status": "held out", "usable": True, "seed": seed,
+            "detail": f"trained on seed {seed}; evaluation seeds are {sorted(reserved)}"}
+
+
 def fusion_section(add, result: dict, label: str, dataset) -> None:
     add(f"\n### {label} — {dataset.describe()}\n")
     add(f"{result['entities']} entities, {result['actors']} illicit actors, "
@@ -102,7 +138,7 @@ def fusion_section(add, result: dict, label: str, dataset) -> None:
     add(md_table(result["per_typology_wallets"]))
 
 
-def summary_table(fusion: dict, origin_rows: dict, cfg: dict) -> pd.DataFrame:
+def summary_table(fusion: dict, origin_rows: dict, cfg: dict, extra: dict) -> pd.DataFrame:
     """The numbers that would go on a slide, each with where it came from."""
     e = cfg["eval"]
     std, shift = fusion["standard"], fusion["shifted"]
@@ -137,6 +173,25 @@ def summary_table(fusion: dict, origin_rows: dict, cfg: dict) -> pd.DataFrame:
          "outcome costs +1 / +0.3 / -3 / 0", "split filter"),
         ("low_confidence_origin cutoff", fmt(origin_rows["cutoff"], 2), "—",
          "chosen on seed A, reported on seed B", f"seed A = {e['seed']}"),
+        ("false positive rate, zero-attack", fmt(extra["zero"]["false_positive_rate"], 4),
+         "—", "alerts per entity on traffic with nothing planted",
+         f"{extra['zero']['entities']} entities, {extra['zero']['alerts']} alerts"),
+        ("cluster ARI", fmt(float(extra["clusters"].iloc[0]["adjusted_rand_index"]), 4),
+         fmt(float(extra["clusters"].iloc[1]["adjusted_rand_index"]), 4),
+         "our wallet partition vs the generator's",
+         f"{int(extra['clusters'].iloc[0]['wallets_scored'])} / "
+         f"{int(extra['clusters'].iloc[1]['wallets_scored'])} wallets"),
+        ("red-team detection rate", "—", fmt(extra["redteam"]["detection_rate"]),
+         "injection raised at least one alert",
+         f"{extra['redteam']['completed']} injections, shifted set"),
+        ("red-team median time-to-detect", "—",
+         f"{extra['redteam']['median_time_to_detect']}s",
+         "inject to alert, incremental re-run",
+         f"{extra['redteam']['detected']} detected"),
+        ("attribution leads naming the true IP",
+         fmt(extra["leads"]["standard"]), fmt(extra["leads"]["shifted"]),
+         "leads shown beside an alert (not an AUC — see section 5)",
+         f"{extra['leads']['n_standard']} / {extra['leads']['n_shifted']} leads"),
     ]
     return pd.DataFrame(rows, columns=["metric", f"standard (seed {e['seed']})",
                                        f"shifted (seed {e['seed']})",
@@ -156,6 +211,17 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     fusion = {"standard": fusion_eval.evaluate(standard[default_rate], cfg),
               "shifted": fusion_eval.evaluate(shifted[default_rate], cfg)}
     fusion_b = {name: fusion_eval.evaluate(ds, cfg) for name, ds in seed_b_sets.items()}
+
+    provenance = gnn_provenance(cfg)
+    clusters = clustering_eval.comparison(
+        {"standard": standard[default_rate], "shifted": shifted[default_rate]}, cfg)
+    quiet = zero_attack.evaluate(cfg, fusion["standard"]["stacker"], rebuild=rebuild)
+    correlation = {
+        name: correlation_eval.evaluate(
+            {"standard": standard, "shifted": shifted}[name][default_rate],
+            fusion[name]["bundle"], fusion[name]["alerted"], cfg)
+        for name in ("standard", "shifted")}
+    redteam = redteam_batch.run_batch(shifted[default_rate], cfg)
 
     origin_results = origin.evaluate(standard, cfg)
     table = origin_results["table"]
@@ -179,10 +245,19 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
         "label means. The unit of detection is the **actor** — one ground-truth\n"
         "illicit operation — pre-registered in `docs/detection_unit_protocol.md`\n"
         "before any of this was measured. Wallet recall is reported as secondary.\n")
+    extra = {
+        "zero": quiet, "clusters": clusters, "redteam": redteam,
+        "leads": {
+            "standard": correlation["standard"]["summary"]["leads_naming_the_true_ip"],
+            "shifted": correlation["shifted"]["summary"]["leads_naming_the_true_ip"],
+            "n_standard": correlation["standard"]["summary"]["leads_shown"],
+            "n_shifted": correlation["shifted"]["summary"]["leads_shown"],
+        },
+    }
     add(md_table(summary_table(fusion, {"top1": float(split_row["top1"]),
                                "n": int(split_row["n"]),
                                "cost_weighted_score": float(split_row["cost_weighted_score"]),
-                               "cutoff": cutoff}, cfg)))
+                               "cutoff": cutoff}, cfg, extra)))
     add(f"\nOrigin figures: `{chosen}`, split filter, standard set, seed {seed_a}, "
         f"observation rate {default_rate}.\n")
     add(f"`low_confidence_origin` on **seed {seed_b}** (never used for tuning): "
@@ -208,6 +283,13 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
         abstained_split=int(split_row["abstained"]),
         n=int(split_row["n"]),
         flag_precision=flag_b["precision"]))
+
+    add(f"\n**GNN provenance: {provenance['status']}.** {provenance['detail']}.\n")
+    if not provenance["usable"]:
+        add("Every `gnn_score` below is therefore either zero or not to be trusted, and "
+            "is\nmarked as such rather than quietly folded into the stack. The GNN is "
+            "trained on\n`eval.gnn_train_seed`; the check that enforces it lives in "
+            "`eval.report.gnn_provenance`.\n")
 
     add("\n**Canonical setup.** Seed A = "
         f"{seed_a}, seed B = {seed_b}, {e['n_actors']} actors, "
@@ -274,6 +356,19 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add("\n### Every estimator under every filter\n")
     add(md_table(origin.class_weight_ablation(standard[default_rate], cfg)))
 
+    add("\n### Every estimator, every rate, filter on and off\n")
+    add("The full cross. The table above fixes the rate and varies the filter; the one\n"
+        "at the top of this section fixes the filter and varies the rate. Neither says\n"
+        "whether the filter still earns its place as observation gets sparser, which is\n"
+        "the regime a real deployment is in. `share of ceiling` is top-1 divided by the\n"
+        "fraction of transactions whose true origin was in the tree at all — the only\n"
+        "comparison that is fair across rates.\n\n")
+    add(md_table(origin.rate_filter_cross(standard, cfg)))
+    add("\nThese figures used to exist only as printed output from "
+        "`tests/test_propagation.py`.\nThey are here now, and that test asserts against "
+        "`eval.origin` rather than\nre-deriving them, so the two cannot drift apart "
+        "again.\n")
+
     add("\n### Calibration\n")
     frame = origin_results["frames"].get(chosen)
     if frame is not None:
@@ -294,8 +389,170 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
         "that event is rare.\nThe accuracy split (flag clear vs. raised) is what the "
         "flag is for and what it\ndelivers.\n")
 
+    # --- 3. zero attack --------------------------------------------------
+    add("\n## 3. False positives, on traffic with nothing in it\n")
+    add("The same pipeline, the same threshold, the same fitted stacker — run on the\n"
+        "canonical setup with `generator.pattern_mix` set to `normal` only. Nothing is\n"
+        "planted. Every alert here is a false positive, and this is the number an\n"
+        "operator lives with: recall says what we catch, this says what we cost.\n")
+    add(f"\n{quiet['dataset']}. {quiet['transactions']} transactions, "
+        f"{quiet['entities']} entities, planted patterns: "
+        f"{quiet['planted_patterns'] or 'none'}.\n")
+    add(f"\n**{quiet['alerts']} alerts at threshold {quiet['threshold']} — a false "
+        f"positive rate of {quiet['false_positive_rate']:.4f} per entity.** "
+        f"The rules engine fired {quiet['rule_alerts']} times; "
+        f"{quiet['watchlist_seeds']} entities were watchlist seeds.\n\n")
+    add(md_table(quiet["scores"]))
+    if quiet["alerts"]:
+        add("\n**Which signal put them there:**\n\n")
+        add(md_table(quiet["by_signal"]))
+        add("\n**The worst of them, with the reason the system gave:**\n\n")
+        add(md_table(quiet["top"]))
+    add("\n" + ZERO_ATTACK_NOTE)
+
+    # --- 4. clustering ---------------------------------------------------
+    add("\n## 4. Cluster quality\n")
+    add("Every detection number in this report is scored per entity, and an entity is\n"
+        "whatever `graph/clustering.py` decided. The Adjusted Rand Index compares our\n"
+        "partition of the wallets against the generator's true one — adjusted for\n"
+        "chance, so 0 is what random grouping scores and 1 is exact agreement. Cluster\n"
+        "*names* are arbitrary on both sides, so only the partition can be compared.\n\n")
+    add(md_table(clusters, floats=4))
+    add("\n" + CLUSTER_NOTE)
+
+    # --- 5. correlation --------------------------------------------------
+    add("\n## 5. Attribution leads, measured as attribution\n")
+    add(CORRELATION_PREAMBLE)
+    for name in ("standard", "shifted"):
+        block = correlation[name]
+        summary = block["summary"]
+        add(f"\n### {name.capitalize()} set\n")
+        add(f"{summary['links']} links over {summary['entities_with_a_link']} entities; "
+            f"{summary['leads_shown']} leads shown across "
+            f"{summary['alerts_with_a_lead']} alerts.\n")
+        if summary["leads_shown"]:
+            add(f"\n**Of the leads an analyst is shown, "
+                f"{summary['leads_naming_the_true_ip']:.3f} name the actor's true "
+                f"broadcast address** and "
+                f"{summary['leads_naming_the_observed_ip']:.3f} name the address the "
+                f"broadcast entered the network from. The true address was observable "
+                f"at all for {summary['true_ip_observable']:.3f} of them — that is the "
+                f"ceiling, not a failure of the engine.\n")
+        add("\n**Every scored link, by score band:**\n\n")
+        add(md_table(block["by_score"]))
+        add("\n**Leads actually shown beside an alert, by score band:**\n\n")
+        add(md_table(block["shown_by_score"]))
+        add("\n**By rank within an alert** — rank 1 should beat rank 3, or the "
+            "ordering is decoration:\n\n")
+        add(md_table(block["by_rank"]))
+        add("\n**By how many distinct transactions the link rests on:**\n\n")
+        add(md_table(block["by_observations"]))
+
+    # --- 6. red team -----------------------------------------------------
+    add("\n## 6. Red team, 50 injections\n")
+    add(REDTEAM_PREAMBLE)
+    add(f"\n**{redteam['detected']} of {redteam['completed']} injections were "
+        f"detected — {redteam['detection_rate']:.3f}** at threshold "
+        f"{redteam['threshold']}, median time-to-detect "
+        f"{redteam['median_time_to_detect']}s."
+        + (f" {redteam['failed']} run(s) failed outright.\n" if redteam["failed"]
+           else "\n"))
+    add("\n**Per typology:**\n\n")
+    add(md_table(redteam["per_typology"]))
+    add("\n**By broadcast route** — what the network side could recover:\n\n")
+    add(md_table(redteam["by_broadcast"]))
+    if len(redteam["misses"]):
+        add(f"\n### The misses\n")
+        add("Every engine's score for the injected entities, against the threshold they\n"
+            "did not clear. Up to three entities per missed injection, closest first.\n\n")
+        add(md_table(redteam["misses"].head(40)))
+        add("\nOne thing this table says loudly: **the fused score does not move with the "
+            "anomaly\nscore.** Injections with `anomaly` above 0.9 land on the same fused "
+            "value as ones\nat 0.14, because the stacker's coefficient for "
+            "`anomaly_score` is 0 (see the\nablation in section 1) — the signal is "
+            "carried but not used. That is the fitted\nmodel's verdict on it, not a "
+            "bug, and it is why the anomaly engine is the first\nplace to look if "
+            "these detection rates need to improve.\n")
+        if len(redteam["misses"]) > 40:
+            add(f"\n_({len(redteam['misses'])} rows in total; the first 40 are shown.)_\n")
+    else:
+        add("\nNo injection went undetected.\n")
+    if len(redteam["errors"]):
+        add("\n**Runs that failed:**\n\n")
+        add(md_table(redteam["errors"]))
+
     add(CLOSING)
     return "\n".join(parts)
+
+
+ZERO_ATTACK_NOTE = """A false positive here is not the same kind of error as one on the standard set. On
+a dataset with crime in it, an alert on a victim or a cash-out wallet is at least
+adjacent to something real. On this one there is nothing to be adjacent to: every
+alert is the system inventing suspicion from ordinary traffic. Read it against
+`alert_precision` on the standard set — the two bound the same quantity from
+opposite sides.
+"""
+
+
+CLUSTER_NOTE = """**Read this honestly.** A low ARI does not mean detection is broken — the actor
+metrics above are scored through the same clustering and hold up — but it does
+bound what the entity-level numbers can mean. Two failure modes pull in opposite
+directions:
+
+- **Over-splitting** (many small clusters, a large singleton count) makes an
+  actor's wallets land in several entities. Detection still fires on whichever
+  entity holds the alerting wallet, so `case_detection_rate` survives, but
+  `trace_coverage` has further to walk and the entity an analyst opens shows
+  less of the operation than it should.
+- **Over-merging** is the dangerous one, and it is what the collapse guard
+  exists to catch: one bad change-address guess can fold thousands of unrelated
+  users into a single entity, which then alerts as one case. `collapse_guard_fired`
+  is how often a cluster exceeded `graph.collapse_guard.max_cluster_wallets` and
+  was flagged for review rather than trusted.
+
+The generator's true clusters are per-actor and small; our change-address
+heuristics are conservative by design, so over-splitting is expected and
+over-merging is not. The numbers say which one is actually happening.
+"""
+
+
+CORRELATION_PREAMBLE = """**Why this is not an AUC delta.** The correlation engine is deliberately absent
+from the stacker (`fusion.stacker.signals`), and the reason is not that it
+performed badly. An IP link says something about *who* an entity might be, not
+about *how risky* it is. Adding it as a fifth signal and reporting the change in
+AUC would be asking whether attribution predicts criminality — a question that
+is not what the engine is for, and one nobody should want answered in the
+affirmative, because a system that treats "we know who you are" as evidence of
+guilt is the wrong system.
+
+So it is measured as the claim it actually makes. Each alert carries up to
+`fusion.leads_per_entity` leads: *this entity was seen broadcasting from this
+address, with this confidence*. The test is how often that is true, and whether
+the score attached to it is worth anything — a high-scored lead must be right
+more often than a low-scored one, or the number beside it is decoration.
+
+Two truths are reported because they are different questions. **The true
+broadcast address** is the actor's own; naming it is attribution. **The observed
+address** is where the transaction entered the network — for a masked broadcast
+that is a Tor exit or a hosting address, which is a fact about infrastructure
+and not about a person. The share of leads whose true address was observable at
+all is the ceiling on the first number.
+"""
+
+
+REDTEAM_PREAMBLE = """`eval.redteam_runs` injections driven through `api.redteam.execute` — the same
+function `POST /redteam/runs` calls, not a re-implementation of it. Every
+typology appears equally often, with hops, amounts, wallet counts and broadcast
+routes spread across the ranges the form exposes, so the rate is not an average
+over one corner of the parameter space. The batch runs against a **copy** of the
+shifted set: injection appends to `transactions.csv` and `ground_truth.json`,
+and an evaluation that consumed the canonical dataset would make every other
+number in this file irreproducible.
+
+State is threaded from one injection to the next, as it is on a live server —
+so this measures a system whose dataset is growing under it, which is the
+condition the demo runs in.
+"""
 
 
 WORSE = """**What got worse, and why.**
@@ -333,7 +590,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 3. Decisions taken in this pass
+## 7. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

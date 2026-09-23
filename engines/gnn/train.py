@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import torch
@@ -112,6 +113,14 @@ def train(data, cfg: dict | None = None, epochs: int | None = None, verbose: boo
     return model, artefacts, history
 
 
+def _source_seed(ground_truth: Path) -> int | None:
+    """The generator seed of the dataset this model is about to learn."""
+    try:
+        return json.loads(Path(ground_truth).read_text()).get("seed")
+    except Exception:                       # no ground truth, or not ours
+        return None
+
+
 def save(artefacts: dict, path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -126,6 +135,16 @@ def run(input_path=None, ground_truth=None, model_path=None, epochs=None,
     labels = load_labels(ground_truth or Path(cfg["ingest"]["input_dir"]) / "ground_truth.json", cfg)
     data = build_dataset(graph, labels=labels, cfg=cfg)
     _, artefacts, _ = train(data, cfg, epochs, verbose=verbose)
+    # Provenance, so an evaluation can refuse to score this model against the
+    # data it learned. Without it, training on the demo dataset and evaluating
+    # on the canonical eval set — which share a seed — looks like a good result.
+    source = Path(ground_truth or Path(cfg["ingest"]["input_dir"]) / "ground_truth.json")
+    artefacts["trained_on"] = {
+        "ground_truth": str(source),
+        "seed": _source_seed(source),
+        "input": str(input_path or cfg["ingest"]["output_path"]),
+        "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
     path = save(artefacts, model_path or cfg["models"]["gnn"])
     return {"edges": data.num_edges, "nodes": data.num_nodes,
             "labelled": int(data.labelled.sum()),

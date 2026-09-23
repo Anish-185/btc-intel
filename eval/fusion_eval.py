@@ -79,13 +79,75 @@ def evaluate(dataset: Dataset, cfg: dict) -> dict:
         out["per_typology_cases"] = per_typology_cases(dataset, alerted, features.entity_of,
                                                        bundle["entity_graph"], cfg)
         out["alerted_entities"] = len(alerted)
+        # Handed out so the zero-attack run scores with the same fitted model,
+        # rather than a second one fitted somewhere else.
+        out["stacker"] = block["stacker"]
         block.pop("stacker", None)
     if out["broad"]:
         out["broad"].pop("stacker", None)
 
     out["taint"] = taint_value(signals, bundle, actor_entities, cfg)
     out["per_typology_wallets"] = per_typology_recall(dataset, bundle, cfg)
+    if block:
+        out["confusion"] = confusion(signals, actor_entities, alerted)
+        out["non_actor_patterns"] = non_actor_detection(dataset, features, alerted)
+    out["bundle"] = bundle
+    out["alerted"] = alerted if block else set()
     return out
+
+
+def confusion(signals: pd.DataFrame, illicit: set[str], alerted: set[str]) -> pd.DataFrame:
+    """The 2×2, at the configured threshold, on the actor label.
+
+    Every other detection number here is one cell of this table divided by one
+    of its margins; the table itself is what lets a reader recompute any of
+    them, or spot that a good recall is bought with thousands of false
+    positives.
+    """
+    entities = set(signals["entity_id"])
+    illicit = illicit & entities
+    alerted = alerted & entities
+    tp = len(illicit & alerted)
+    fp = len(alerted - illicit)
+    fn = len(illicit - alerted)
+    tn = len(entities - illicit - alerted)
+    precision = tp / (tp + fp) if tp + fp else None
+    recall = tp / (tp + fn) if tp + fn else None
+    f1 = (2 * precision * recall / (precision + recall)
+          if precision and recall else None)
+    return pd.DataFrame([
+        {"": "illicit (holds an actor's wallet)", "alerted": tp, "not alerted": fn},
+        {"": "not illicit", "alerted": fp, "not alerted": tn},
+        {"": "— precision / recall / F1 —",
+         "alerted": f"{precision:.3f} / {recall:.3f} / {f1:.3f}"
+         if None not in (precision, recall, f1) else "n/a",
+         "not alerted": f"{len(entities)} entities"},
+    ])
+
+
+def non_actor_detection(dataset: Dataset, features: FeatureSet,
+                        alerted: set[str]) -> pd.DataFrame:
+    """coinjoin and same_actor_cluster, reported apart from the actor metrics.
+
+    `docs/detection_unit_protocol.md` pre-registers these as **not actors**:
+    CoinJoin is mixing, which is suspicious but not by itself a crime, and
+    same_actor_cluster is a clustering test rather than an offence. Folding them
+    into the actor numbers would change the pre-registered unit of detection
+    after the fact. They are measured here as what they are — how often the
+    pattern's entities end up alerted — with no claim that alerting on them is
+    correct.
+    """
+    rows = []
+    for pattern in ("coinjoin", "same_actor_cluster", "ransomware_victim", "cashout"):
+        entities = label_entities(dataset, features, {pattern}) - {None}
+        if not entities:
+            continue
+        hit = entities & alerted
+        rows.append({"pattern": pattern, "entities": len(entities),
+                     "alerted": len(hit),
+                     "share alerted": round(len(hit) / len(entities), 3),
+                     "is an actor": "no — see detection_unit_protocol.md"})
+    return pd.DataFrame(rows)
 
 
 def taint_value(signals: pd.DataFrame, bundle: dict, illicit: set[str], cfg: dict) -> dict:
@@ -128,7 +190,7 @@ def per_typology_recall(dataset: Dataset, bundle: dict, cfg: dict) -> pd.DataFra
     seeds = bundle["seed_entities"]
 
     rows = []
-    for pattern in ("ransomware_collector", "layering", "same_actor_cluster",
+    for pattern in ("ransomware_collector", "layering", "coinjoin", "same_actor_cluster",
                     "cashout", "exchange", "normal"):
         entities = label_entities(dataset, features, {pattern})
         if not entities:

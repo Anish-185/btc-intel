@@ -76,8 +76,15 @@ def collect_signals(df: pd.DataFrame, cfg: dict, watchlist_path=None) -> dict:
     origins, propagation_status = estimate_all(df, intel, cfg)
 
     alerts = alerts_to_frame(run_all(graph, features, cfg))
+    # The empty case needs the index named too, not just the series: merging on
+    # `entity_id` reads the index name, and a nameless empty index raises
+    # KeyError rather than producing no matches. A dataset where no rule fires
+    # at all is not hypothetical — it is what traffic with no crime in it looks
+    # like, and it is the one this pipeline has to survive to be measured on.
     rule_score = (alerts.groupby("entity_id")["score"].max().rename("rule_score")
-                  if len(alerts) else pd.Series(dtype=float, name="rule_score"))
+                  if len(alerts) else
+                  pd.Series(dtype=float, name="rule_score",
+                            index=pd.Index([], name="entity_id")))
 
     anomaly = fit_score(features.entities, cfg).rename(columns={"entity_id": "entity_id"})
     # Attribution leads, kept OUT of the risk score: an IP correlation says

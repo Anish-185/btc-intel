@@ -218,6 +218,35 @@ def evaluate(datasets: dict[float, Dataset], cfg: dict) -> dict:
     return {"table": pd.DataFrame(rows), "frames": extras}
 
 
+def rate_filter_cross(datasets: dict[float, Dataset], cfg: dict) -> pd.DataFrame:
+    """Every estimator, at every observation rate, with the filter on and off.
+
+    The main table fixes the filter at whatever is configured and varies the
+    rate; `class_weight_ablation` fixes the rate and varies the filter. Neither
+    answers whether the filter's value holds as observation gets sparser — which
+    is the regime a real deployment is in — so this is the full cross, with
+    top-3 alongside top-1 and the ceiling that bounds both.
+    """
+    rows = []
+    for rate, dataset in sorted(datasets.items()):
+        cap, _ = ceiling(dataset)
+        for name in ESTIMATORS:
+            for mode in FILTER_MODES:
+                result = score_estimator(dataset, name, cfg, mode)
+                if not result.get("n"):
+                    continue
+                rows.append({
+                    "rate": rate, "estimator": name, "filter": mode,
+                    "n": result["n"],
+                    "top-1": round(result["top1"], 3),
+                    "top-3": round(result["top3"], 3),
+                    "top-1 given observed": round(result["conditional_top1"], 3),
+                    "ceiling": round(cap, 3),
+                    "share of ceiling": round(result["top1"] / cap, 3) if cap else None,
+                })
+    return pd.DataFrame(rows)
+
+
 def class_weight_ablation(dataset: Dataset, cfg: dict) -> pd.DataFrame:
     """Every estimator under every filter configuration."""
     rows = []

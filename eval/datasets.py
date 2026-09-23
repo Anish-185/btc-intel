@@ -52,14 +52,21 @@ class Dataset:
 
 
 def build(rate: float | None = None, shifted: bool = False, seed: int | None = None,
-          cfg: dict | None = None, root: Path | None = None, rebuild: bool = False) -> Dataset:
-    """Generate + ingest one dataset, cached on disk by its parameters."""
+          cfg: dict | None = None, root: Path | None = None, rebuild: bool = False,
+          name_prefix: str | None = None) -> Dataset:
+    """Generate + ingest one dataset, cached on disk by its parameters.
+
+    `name_prefix` separates a variant that differs by something not in the name
+    — the zero-attack set is the canonical seed and size with a different
+    `pattern_mix`, and caching it as `standard-r0.3-s41` would serve it in place
+    of the real standard set.
+    """
     cfg = cfg or config.load()
     e = cfg["eval"]
     rate = e["default_rate"] if rate is None else rate
     seed = e["seed"] if seed is None else seed
     root = Path(root or e["work_dir"])
-    name = f"{'shifted' if shifted else 'standard'}-r{rate}-s{seed}"
+    name = f"{name_prefix or ('shifted' if shifted else 'standard')}-r{rate}-s{seed}"
     directory = root / name
     raw = directory / "raw"
 
@@ -73,6 +80,11 @@ def build(rate: float | None = None, shifted: bool = False, seed: int | None = N
             "--relay-observation-rate", str(rate)]
     if shifted:
         argv.append("--shifted")
-    generate(build_parser().parse_args(argv))
-    ingest_run(raw, dataset.transactions, directory / "quarantine.parquet", "csv")
+    # `cfg` is threaded through both stages on purpose. Without it the generator
+    # silently re-reads config.yaml, and a caller that passed a modified config
+    # — the zero-attack set turning every criminal typology off, for instance —
+    # gets the default mix back and a report full of numbers about the wrong
+    # dataset.
+    generate(build_parser().parse_args(argv), cfg)
+    ingest_run(raw, dataset.transactions, directory / "quarantine.parquet", "csv", cfg=cfg)
     return dataset

@@ -281,6 +281,15 @@ eval:
   default_rate: 0.3
   # Seed A chooses thresholds; seed B only ever reports them. Never swapped.
   seed_b: 43
+  # The GNN must never be evaluated on what it was trained on. The demo dataset
+  # in data/raw uses seed 41 — the same as seed A — so a GNN trained the obvious
+  # way would be scored here against its own training set. Train it on this seed
+  # instead; `eval.report` refuses to use a model whose recorded training seed
+  # is one of the eval seeds, and says so in the report.
+  gnn_train_seed: 11
+  # Red-team batch: injections driven through api.redteam.execute, the same code
+  # path POST /redteam/runs uses.
+  redteam_runs: 50
   work_dir: data/processed/eval
   results_path: eval/results.md
   calibration_bins: 5
