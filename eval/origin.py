@@ -30,15 +30,37 @@ def ceiling(dataset: Dataset) -> tuple[float, int]:
     """Fraction of multi-hop transactions whose true origin appears at all.
 
     No estimator can exceed this — it is the share of cases where the answer is
-    present in the evidence.
+    present in the evidence. Multi-hop only, because that is the population the
+    estimators are scored on; `ceiling_both` gives the unconditional figure too.
+    """
+    conditional, _, trees, _ = ceiling_both(dataset)
+    return conditional, trees
+
+
+def ceiling_both(dataset: Dataset) -> tuple[float, float, int, int]:
+    """Both denominators, because they answer different questions.
+
+    * **Multi-hop-conditional** — of the transactions an estimator is actually
+      asked about (those observed at more than one relay), how often is the
+      true origin among the observed addresses. This bounds accuracy.
+    * **Unconditional** — of *every* transaction in the dataset, how often is
+      the true origin observed. Lower, because a transaction seen at a single
+      relay is usually seen somewhere that is not its source. This is the one
+      that describes the evidence an operator actually has.
+
+    Quoting one as the other is how this repo ended up with two different
+    ceiling figures in circulation, so both are returned together and the
+    report prints both.
     """
     truth = truth_of(dataset)
-    trees = {k: v for k, v in build_trees(dataset.frame()).items()
-             if not v.is_single_observation}
-    if not trees:
-        return 0.0, 0
-    hits = sum(truth.get(txid) in tree.ips for txid, tree in trees.items())
-    return hits / len(trees), len(trees)
+    everything = build_trees(dataset.frame())
+    multi = {k: v for k, v in everything.items() if not v.is_single_observation}
+    if not everything:
+        return 0.0, 0.0, 0, 0
+    hit_all = sum(truth.get(txid) in tree.ips for txid, tree in everything.items())
+    hit_multi = sum(truth.get(txid) in tree.ips for txid, tree in multi.items())
+    return ((hit_multi / len(multi)) if multi else 0.0,
+            hit_all / len(everything), len(multi), len(everything))
 
 
 def score_estimator(dataset: Dataset, name: str, cfg: dict,
@@ -207,12 +229,13 @@ def evaluate(datasets: dict[float, Dataset], cfg: dict) -> dict:
     """The full origin table: every estimator at every observation rate."""
     rows, extras = [], {}
     for rate, dataset in sorted(datasets.items()):
-        cap, n_trees = ceiling(dataset)
+        cap, unconditional, n_trees, n_all = ceiling_both(dataset)
         for name in ESTIMATORS:
             result = score_estimator(dataset, name, cfg)
             rows.append({"rate": rate, "estimator": name, "ceiling": cap,
-                         "multi_hop_txs": n_trees, **{k: v for k, v in result.items()
-                                                      if k != "frame"}})
+                         "ceiling_unconditional": unconditional,
+                         "multi_hop_txs": n_trees, "all_txs": n_all,
+                         **{k: v for k, v in result.items() if k != "frame"}})
             if rate == cfg["eval"]["default_rate"]:
                 extras[name] = result["frame"]
     return {"table": pd.DataFrame(rows), "frames": extras}

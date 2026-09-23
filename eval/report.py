@@ -330,14 +330,26 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     # --- origin ----------------------------------------------------------
     add("\n## 2. Origin estimation\n")
     display = table[["rate", "estimator", "n", "top1", "top3", "conditional_top1",
-                     "ceiling", "brier"]].rename(columns={
+                     "ceiling", "ceiling_unconditional", "brier"]].rename(columns={
                          "top1": "top-1", "top3": "top-3",
-                         "conditional_top1": "top-1 given observed", "brier": "Brier"})
+                         "conditional_top1": "top-1 given observed",
+                         "ceiling": "ceiling (multi-hop)",
+                         "ceiling_unconditional": "ceiling (all txs)",
+                         "brier": "Brier"})
     add(md_table(display))
     add("`top-1 given observed` is accuracy restricted to transactions whose true origin "
         "appears\nin the observed tree at all. It separates \"the estimator is wrong\" "
-        "from \"the answer\nwas never in the data\". `ceiling` is the share of "
-        "transactions where it was.\n")
+        "from \"the answer\nwas never in the data\".\n")
+    add("\nThe ceiling has **two denominators and they are not interchangeable** — "
+        "quoting one\nas the other is how two different ceiling figures ended up in "
+        "circulation:\n\n"
+        "* **ceiling (multi-hop)** — of the transactions an estimator is actually asked\n"
+        "  about, those observed at more than one relay, how often the true origin is\n"
+        "  among the observed addresses. This is what bounds the accuracy columns beside\n"
+        "  it.\n"
+        "* **ceiling (all txs)** — of *every* transaction in the dataset. Lower, because\n"
+        "  a transaction seen at a single relay is usually seen somewhere that is not its\n"
+        "  source. This is the one that describes the evidence an operator has.\n")
 
     configured = cfg["engines"]["propagation"]["estimator"]
     add(f"\n**Protocol decision** (`docs/origin_eval_protocol.md`): the default "

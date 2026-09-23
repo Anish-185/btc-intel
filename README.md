@@ -166,9 +166,11 @@ Scores start at `base_score` when a rule only just meets its threshold and climb
 1.0 as evidence accumulates; `min_score` decides what is worth writing. Every
 threshold is under `engines.rules` in `config.yaml`.
 
-Recall against the generator's ground truth is printed by the test suite —
-`pytest -rP tests/test_rules.py` — so thresholds can be tuned against real numbers
-rather than guesses.
+Published recall against the generator's ground truth lives in `eval/results.md`
+§1 (per typology, actor unit). `pytest -rP tests/test_rules.py` prints the same
+shape of number while tuning a threshold, but it is a working tool, not a source
+to quote: figures in this README and the slides come from `python -m eval.report`
+and nowhere else.
 
 ## GNN engine
 
@@ -223,9 +225,14 @@ shared_ip_penalty decays as one IP touches more unrelated clusters
 ```
 
 Observations count *distinct transactions*, not relay rows. CoinJoins are
-excluded — one participant broadcasts for everybody. Measured on generated data:
-links scoring ≥ 0.4 name the true broadcast IP 100% of the time, links below 0.2
-only 9%, and every cluster with 3+ observations was identified correctly.
+excluded — one participant broadcasts for everybody. Measured: links scoring
+≥ 0.4 name the true broadcast IP **100%** of the time; links below 0.2 name it
+**38.6%** (standard set) / **42.6%** (shifted) of the time; every link resting on
+3 or more distinct transactions named it correctly. Of the leads an analyst is
+actually shown beside an alert, **52.6%** (standard) / **61.3%** (shifted) name
+the actor's true broadcast address — against a ceiling of 84.2%, since a
+transaction broadcast through Tor has no observable true origin at all.
+(`eval/results.md` §6.)
 
 ## Origin estimation
 
@@ -246,13 +253,25 @@ kept comparable: `first_timestamp` (first-spy baseline), `rumor_centrality`
 (Fanti & Viswanath, arXiv:1703.08761). Public relays are heavily down-weighted —
 a node that forwards everyone's traffic is the least informative candidate.
 
-**Measured** (`pytest -rP tests/test_propagation.py`): the binding constraint is
-the ceiling — the true origin is present in the observed tree only 20% / 34% /
-63% of the time at relay-observation rates 0.1 / 0.3 / 0.6. Against that ceiling
-`first_timestamp` reaches ~87%, the hybrid ~65%, rumor centrality ~30%. Rumor
-centrality underperforms because our origin is a degree-1 leaf while the
-estimator seeks the tree's centre, a prior that suits complete infected subtrees
-rather than sparse samples. Default is `first_timestamp` on that evidence.
+**Measured** (`eval/results.md` §2): the binding constraint is the ceiling — how
+often the true origin appears in the observed tree at all. It has two
+denominators, and they are not interchangeable:
+
+| relay-observation rate | across every transaction | across the multi-hop transactions an estimator is asked about |
+| --- | --- | --- |
+| 0.1 | 60.8% | 75.1% |
+| 0.3 | 80.2% | 83.7% |
+| 0.6 | 94.1% | 94.2% |
+
+The second is the one that bounds accuracy; the first describes the evidence an
+operator actually holds. At rate 0.3, each estimator's top-1 as a share of that
+ceiling is **0.893** for `first_timestamp`, **0.824** for the hybrid and
+**0.775** for rumor centrality. That is much closer than the figures previously
+quoted here implied — the gap between the three is real but modest, and most of
+what separates raw accuracy is the ceiling, not the estimator. Rumor centrality
+still comes last because our origin is a degree-1 leaf while the estimator seeks
+the tree's centre, a prior that suits complete infected subtrees rather than
+sparse samples. Default is `first_timestamp` on that evidence.
 
 If a dataset has no multi-hop records at all, origin estimation reports
 **degraded mode** and `/stats` says so, rather than implying an estimate was made.
@@ -276,11 +295,13 @@ plain-English reason built from this entity's real numbers.
 
 ⚠️ **The headline AUC used to be circular and no longer is.** Taint was seeded
 from our own rules engine, which fires on the same clusters the labels describe,
-so `taint_score` alone scored ~0.999 AUC — a copy of the label. Seeds now come
-from the analyst watchlist only, and the stacker scores ~0.67 on the actor label
-(`eval/results.md`). Every fitted model still carries an `ablation` block with
+so `taint_score` alone scored ~0.999 AUC. That figure described the pre-fix
+circular setup and is kept here only to say what was wrong; it is not a current
+number. Seeds now come from the analyst watchlist only: taint alone scores
+**0.681** and the stacker **0.668** on the actor label (`eval/results.md` §1). Every fitted model still carries an `ablation` block with
 each signal alone and the stack without it; read it before quoting a number.
-Anomaly comes out *below chance* on our data (~0.18) because exchanges are the
+Anomaly comes out *below chance* on our data (**0.175** standard / **0.178**
+shifted, `eval/results.md` §1 and §9) because exchanges are the
 biggest outliers and our illicit actors use fresh wallets — the non-negative
 constraint clamps its weight to zero rather than learning a negative one that
 would not transfer.
@@ -419,7 +440,11 @@ than a different, faster, wrong detector.
 
 Timings, the stage that dominates, and the optimisation that turned out to be
 slower are in [`docs/redteam_performance.md`](docs/redteam_performance.md):
-**3.45 s median** against a 30-second target, on a CPU-only laptop.
+**3.45 s median** against a 30-second target, on a CPU-only laptop — that is
+profiling on the demo dataset with the bundle already warm. The evaluation
+measures a different thing under different conditions: **2.8 s median
+time-to-detect** over the 30 criminal injections into the shifted set, with the
+dataset growing under each run (`eval/results.md` §7).
 
 ## Running it offline
 

@@ -45,10 +45,14 @@ against.
 
 Open `/alerts`.
 
-- Point at the **saturation notice** if it is showing: every alert scores
-  1.000, so the fused score separates alerts from everything else but cannot
-  rank them against each other. Say it plainly. It is the most honest thing on
-  the screen.
+- Point at the **saturation notice** if it is showing, and say the measured
+  version rather than a rounded one: across 197 alerts the fused score takes
+  only **5 distinct values** at the three decimals the console prints, and
+  **every one of the top 50 displays 1.000** (shifted set: 470 alerts, 6 values,
+  top 50 again a single value). So the score separates alerts from everything
+  else — it runs from 0.568 to 1.000 — and then stops: sorting by risk does
+  nothing for the first fifty rows an analyst would work. Say it plainly. It is
+  the most honest thing on the screen. (`eval/results.md` §4.)
 - Sort by risk, filter by pattern, then narrow with the minimum-risk slider.
 - Confirm one alert and reject another. Both are recorded to
   `feedback.parquet` for recalibration; the rejected row dims and keeps its

@@ -25,7 +25,7 @@ before any of this was measured. Wallet recall is reported as secondary.
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
 | red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 7) | 30 injections, shifted set |
 | red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 7 | 50 injections |
-| red-team median time-to-detect | — | 2.35s | inject to alert, incremental re-run, crimes only | 20 detected |
+| red-team median time-to-detect | — | 2.8s | inject to alert, incremental re-run, crimes only | 20 detected |
 | attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 6) | 38 / 62 leads |
 
 
@@ -243,21 +243,33 @@ the standard-set numbers are a property of the system or of one draw.
 
 ## 2. Origin estimation
 
-| rate | estimator | n | top-1 | top-3 | top-1 given observed | ceiling | Brier |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.100 | first_timestamp | 401 | 0.693 | 0.748 | 0.924 | 0.751 | 0.331 |
-| 0.100 | rumor_centrality | 401 | 0.599 | 0.738 | 0.797 | 0.751 | 0.263 |
-| 0.100 | timestamp_weighted_centrality | 401 | 0.661 | 0.748 | 0.880 | 0.751 | 0.303 |
-| 0.300 | first_timestamp | 1091 | 0.747 | 0.832 | 0.893 | 0.837 | 0.330 |
-| 0.300 | rumor_centrality | 1091 | 0.649 | 0.777 | 0.775 | 0.837 | 0.219 |
-| 0.300 | timestamp_weighted_centrality | 1091 | 0.689 | 0.830 | 0.824 | 0.837 | 0.265 |
-| 0.600 | first_timestamp | 1199 | 0.848 | 0.927 | 0.901 | 0.942 | 0.404 |
-| 0.600 | rumor_centrality | 1199 | 0.721 | 0.845 | 0.765 | 0.942 | 0.205 |
-| 0.600 | timestamp_weighted_centrality | 1199 | 0.758 | 0.924 | 0.805 | 0.942 | 0.286 |
+| rate | estimator | n | top-1 | top-3 | top-1 given observed | ceiling (multi-hop) | ceiling (all txs) | Brier |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0.100 | first_timestamp | 401 | 0.693 | 0.748 | 0.924 | 0.751 | 0.608 | 0.331 |
+| 0.100 | rumor_centrality | 401 | 0.599 | 0.738 | 0.797 | 0.751 | 0.608 | 0.263 |
+| 0.100 | timestamp_weighted_centrality | 401 | 0.661 | 0.748 | 0.880 | 0.751 | 0.608 | 0.303 |
+| 0.300 | first_timestamp | 1091 | 0.747 | 0.832 | 0.893 | 0.837 | 0.802 | 0.330 |
+| 0.300 | rumor_centrality | 1091 | 0.649 | 0.777 | 0.775 | 0.837 | 0.802 | 0.219 |
+| 0.300 | timestamp_weighted_centrality | 1091 | 0.689 | 0.830 | 0.824 | 0.837 | 0.802 | 0.265 |
+| 0.600 | first_timestamp | 1199 | 0.848 | 0.927 | 0.901 | 0.942 | 0.941 | 0.404 |
+| 0.600 | rumor_centrality | 1199 | 0.721 | 0.845 | 0.765 | 0.942 | 0.941 | 0.205 |
+| 0.600 | timestamp_weighted_centrality | 1199 | 0.758 | 0.924 | 0.805 | 0.942 | 0.941 | 0.286 |
 
 `top-1 given observed` is accuracy restricted to transactions whose true origin appears
 in the observed tree at all. It separates "the estimator is wrong" from "the answer
-was never in the data". `ceiling` is the share of transactions where it was.
+was never in the data".
+
+
+The ceiling has **two denominators and they are not interchangeable** — quoting one
+as the other is how two different ceiling figures ended up in circulation:
+
+* **ceiling (multi-hop)** — of the transactions an estimator is actually asked
+  about, those observed at more than one relay, how often the true origin is
+  among the observed addresses. This is what bounds the accuracy columns beside
+  it.
+* **ceiling (all txs)** — of *every* transaction in the dataset. Lower, because
+  a transaction seen at a single relay is usually seen somewhere that is not its
+  source. This is the one that describes the evidence an operator has.
 
 
 **Protocol decision** (`docs/origin_eval_protocol.md`): the default estimator is **`first_timestamp`** — best top-1 at rate 0.3: 0.747 vs timestamp_weighted_centrality 0.689.
@@ -707,7 +719,7 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.35s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.8s.
 
 
 Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
@@ -734,9 +746,9 @@ a legal privacy tool.
 | typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | yes | 10 | 4 | 0.400 | 2.210 | 5 | 5 |
-| peel_chain | yes | 10 | 7 | 0.700 | 2.390 | 5 | 5 |
-| ransomware_collector | yes | 10 | 9 | 0.900 | 2.410 | 5 | 5 |
+| layering | yes | 10 | 4 | 0.400 | 2.670 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 2.840 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 2.820 | 5 | 5 |
 | same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
