@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import {
   redteamApi,
   type Injection,
+  type NonActorOutcome,
   type RunEvent,
   type RunResult,
   type Scoreboard,
@@ -31,6 +32,9 @@ const ANCHORS = [
  *  supplies the labels and the plain-English description. */
 const TYPOLOGIES = ["ransomware_collector", "peel_chain", "layering", "coinjoin",
   "same_actor_cluster"];
+/** Not crimes, per docs/detection_unit_protocol.md. "Not detected" is the right
+ *  outcome for these, so the scoreboard must not draw it as a failure. */
+const NON_ACTOR = new Set(["coinjoin", "same_actor_cluster"]);
 const BROADCASTS = ["residential", "tor_exit", "hosting", "relay_heavy"];
 
 const asOptions = (ids: string[]) => ids.map((id) => ({ id, label: patternLabel(id) }));
@@ -259,6 +263,15 @@ export function RedTeam() {
           </p>
         )}
 
+        {about && about.is_actor === false && (
+          <Notice title="This one is not a crime">
+            {about.expectation ?? "No alert is expected."} It is not an actor under the
+            pre-registered detection protocol, so the run is scored on whether the system
+            handled it correctly — not on whether it raised an alert. An alert here would
+            be a false positive.
+          </Notice>
+        )}
+
         <div className="stack" style={{ flexDirection: "row", gap: "var(--sp-2)", flexWrap: "wrap" }}>
           <button type="button" className="btn btn-primary" onClick={start} disabled={running}>
             {running ? "Running…" : "Inject and re-run"}
@@ -313,6 +326,8 @@ export function RedTeam() {
           <SkeletonRows rows={4} />
         ) : !result ? (
           <p className="soft measure">Nothing injected yet.</p>
+        ) : result.non_actor ? (
+          <NonActor result={result} outcome={result.non_actor} />
         ) : result.detected ? (
           <Detected result={result} />
         ) : (
@@ -395,17 +410,66 @@ function Detected({ result }: { result: RunResult }) {
   );
 }
 
-/** Missed: the honest half. Every engine's number against the bar it did not
- *  clear, so the room can argue with it. */
-function Missed({ result }: { result: RunResult }) {
+/** Not a crime: a third outcome, and the one a judge is most likely to hit by
+ *  pressing "Surprise me". Reporting it as MISSED would be wrong — there was
+ *  nothing to catch — and would need a protocol document to explain, in front
+ *  of an audience. So it says what the system actually did instead. */
+function NonActor({ result, outcome }: { result: RunResult; outcome: NonActorOutcome }) {
+  const passed = outcome.clustering_correct && !outcome.alerted;
   return (
     <>
+      <Notice title={passed ? "Handled correctly — no alert expected" : outcome.outcome}>
+        {patternLabel(result.requested_typology)} is {outcome.reason}. No alert is the
+        right answer here; what the run tests is that {outcome.checked}.
+      </Notice>
+
+      <div className="well">
+        <p className="label">What the system did</p>
+        <p className="soft">{outcome.clustering}</p>
+        <table className="data">
+          <tbody>
+            <tr>
+              <td>Raised an alert</td>
+              <td>{outcome.alerted ? "yes — a false positive" : "no — correct"}</td>
+            </tr>
+            <tr>
+              <td>{outcome.checked}</td>
+              <td>{outcome.clustering_correct ? "yes — correct" : "no"}</td>
+            </tr>
+            <tr>
+              <td>Injected wallets</td>
+              <td className="num">{outcome.wallets}</td>
+            </tr>
+            <tr>
+              <td>Entities they formed</td>
+              <td className="num">{outcome.entities}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="muted measure" style={{ fontSize: "var(--fs-small)" }}>
+        The engine scores for these entities are below, for completeness. They are not
+        a miss: nothing here was supposed to clear the threshold.
+      </p>
+      <Missed result={result} heading={false} />
+    </>
+  );
+}
+
+/** Missed: the honest half. Every engine's number against the bar it did not
+ *  clear, so the room can argue with it. */
+function Missed({ result, heading = true }: { result: RunResult; heading?: boolean }) {
+  return (
+    <>
+      {heading && (
       <Notice title="Not detected">
         The injected {patternLabel(result.requested_typology)} did not raise an alert. It produced{" "}
         {result.entities.length} {result.entities.length === 1 ? "entity" : "entities"}, none of
         which reached the {score3(result.threshold)} alert threshold. Every engine's score is
         below — this is a result to discuss, not a failure to hide.
       </Notice>
+      )}
       <div className="table-wrap">
         <table className="data">
           <thead>
@@ -516,12 +580,18 @@ function Board({ board }: { board: Scoreboard | null }) {
                   wallets · {run.params.window_hours}h
                 </td>
                 <td className="soft">{run.params.broadcast.replace(/_/g, " ")}</td>
-                <td>
+                <td title={NON_ACTOR.has(run.typology)
+                  ? "not an actor under the detection protocol — no alert expected"
+                  : undefined}>
                   {run.status !== "done"
                     ? run.status
-                    : run.detected
-                      ? "yes"
-                      : "no"}
+                    : NON_ACTOR.has(run.typology)
+                      ? run.detected
+                        ? "alerted — false positive"
+                        : "n/a — not a crime"
+                      : run.detected
+                        ? "yes"
+                        : "no"}
                 </td>
                 <td className="num">
                   {run.time_to_detect == null ? "—" : `${run.time_to_detect.toFixed(2)}s`}
@@ -547,11 +617,20 @@ function Board({ board }: { board: Scoreboard | null }) {
           <tbody>
             {Object.entries(board.by_typology).map(([typology, row]) => (
               <tr key={typology}>
-                <td>{patternLabel(typology)}</td>
+                <td>
+                  {patternLabel(typology)}
+                  {NON_ACTOR.has(typology) && (
+                    <span className="muted"> · not a crime</span>
+                  )}
+                </td>
                 <td className="num">{row.runs}</td>
                 <td className="num">{row.detected}</td>
                 <td className="num">
-                  {row.detection_rate == null ? "—" : `${Math.round(row.detection_rate * 100)}%`}
+                  {NON_ACTOR.has(typology)
+                    ? "n/a"
+                    : row.detection_rate == null
+                      ? "—"
+                      : `${Math.round(row.detection_rate * 100)}%`}
                 </td>
               </tr>
             ))}

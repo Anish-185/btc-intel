@@ -181,13 +181,18 @@ def summary_table(fusion: dict, origin_rows: dict, cfg: dict, extra: dict) -> pd
          "our wallet partition vs the generator's",
          f"{int(extra['clusters'].iloc[0]['wallets_scored'])} / "
          f"{int(extra['clusters'].iloc[1]['wallets_scored'])} wallets"),
-        ("red-team detection rate", "—", fmt(extra["redteam"]["detection_rate"]),
-         "injection raised at least one alert",
-         f"{extra['redteam']['completed']} injections, shifted set"),
+        ("red-team detection rate, crimes only", "—",
+         fmt(extra["redteam"]["detection_rate"]),
+         "criminal injection raised at least one alert (section 6)",
+         f"{extra['redteam']['crime_runs']} injections, shifted set"),
+        ("red-team detection rate, all typologies", "—",
+         fmt(extra["redteam"]["all_runs_rate"]),
+         "includes the two patterns that are not crimes — see section 6",
+         f"{extra['redteam']['completed']} injections"),
         ("red-team median time-to-detect", "—",
          f"{extra['redteam']['median_time_to_detect']}s",
-         "inject to alert, incremental re-run",
-         f"{extra['redteam']['detected']} detected"),
+         "inject to alert, incremental re-run, crimes only",
+         f"{extra['redteam']['crime_detected']} detected"),
         ("attribution leads naming the true IP",
          fmt(extra["leads"]["standard"]), fmt(extra["leads"]["shifted"]),
          "leads shown beside an alert (not an AUC — see section 5)",
@@ -451,20 +456,34 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     # --- 6. red team -----------------------------------------------------
     add("\n## 6. Red team, 50 injections\n")
     add(REDTEAM_PREAMBLE)
-    add(f"\n**{redteam['detected']} of {redteam['completed']} injections were "
-        f"detected — {redteam['detection_rate']:.3f}** at threshold "
+    add(f"\n**{redteam['crime_detected']} of {redteam['crime_runs']} criminal "
+        f"injections were detected — {redteam['detection_rate']:.3f}** at threshold "
         f"{redteam['threshold']}, median time-to-detect "
         f"{redteam['median_time_to_detect']}s."
         + (f" {redteam['failed']} run(s) failed outright.\n" if redteam["failed"]
            else "\n"))
+    add(f"\nOver **all {redteam['completed']}** injections including the two "
+        f"non-crime patterns the figure is {redteam['all_runs_detected']} detected, "
+        f"{redteam['all_runs_rate']:.3f} — shown so the exclusion below cannot be "
+        "mistaken for\nsomething being hidden.\n")
+    add("\n" + NON_ACTOR_NOTE)
     add("\n**Per typology:**\n\n")
     add(md_table(redteam["per_typology"]))
     add("\n**By broadcast route** — what the network side could recover:\n\n")
     add(md_table(redteam["by_broadcast"]))
+
+    add("\n### The two patterns that are not crimes\n")
+    add("Scored as what they are. There is nothing to catch, so \"detection rate\" is "
+        "not\nthe question: an alert here is a **false positive**, and the pass is "
+        "silence plus\na clustering that did the right thing — CoinJoin participants "
+        "kept in separate\nentities, one actor's wallets pulled together.\n\n")
+    add(md_table(redteam["non_actor"]))
     if len(redteam["misses"]):
         add(f"\n### The misses\n")
-        add("Every engine's score for the injected entities, against the threshold they\n"
-            "did not clear. Up to three entities per missed injection, closest first.\n\n")
+        add("Criminal injections that raised nothing, with every engine's score for the\n"
+            "injected entities against the threshold they did not clear. Up to three\n"
+            "entities per missed injection, closest first. The two non-crime patterns are\n"
+            "not in this table — they are not misses.\n\n")
         add(md_table(redteam["misses"].head(40)))
         add("\nOne thing this table says loudly: **the fused score does not move with the "
             "anomaly\nscore.** Injections with `anomaly` above 0.9 land on the same fused "
@@ -537,6 +556,21 @@ address** is where the transaction entered the network — for a masked broadcas
 that is a Tor exit or a hosting address, which is a fact about infrastructure
 and not about a person. The share of leads whose true address was observable at
 all is the ceiling on the first number.
+"""
+
+
+NON_ACTOR_NOTE = """**Why the headline excludes two of the five.** `coinjoin` and
+`same_actor_cluster` are pre-registered in `docs/detection_unit_protocol.md` as
+**not actors** — CoinJoin is mixing, which is suspicious but not by itself a
+crime, and `same_actor_cluster` is a test of the clustering rather than an
+offence. That document was written and committed before any of these injections
+were run, so the exclusion is a rule applied, not a choice made after seeing
+which typologies scored badly.
+
+Counting them as misses would score the system for declining to alert on
+something it is right not to alert on, and would make "flag every CoinJoin" look
+like an improvement. It is not one: it is a false-positive generator pointed at
+a legal privacy tool.
 """
 
 

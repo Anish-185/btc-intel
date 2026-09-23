@@ -23,8 +23,9 @@ before any of this was measured. Wallet recall is reported as secondary.
 | low_confidence_origin cutoff | 0.35 | — | chosen on seed A, reported on seed B | seed A = 41 |
 | false positive rate, zero-attack | 0.0000 | — | alerts per entity on traffic with nothing planted | 949 entities, 0 alerts |
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
-| red-team detection rate | — | 0.400 | injection raised at least one alert | 50 injections, shifted set |
-| red-team median time-to-detect | — | 4.05s | inject to alert, incremental re-run | 20 detected |
+| red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 6) | 30 injections, shifted set |
+| red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 6 | 50 injections |
+| red-team median time-to-detect | — | 2.26s | inject to alert, incremental re-run, crimes only | 20 detected |
 | attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 5) | 38 / 62 leads |
 
 
@@ -620,19 +621,37 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 50 injections were detected — 0.400** at threshold 0.5, median time-to-detect 4.05s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.26s.
+
+
+Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
+something being hidden.
+
+
+**Why the headline excludes two of the five.** `coinjoin` and
+`same_actor_cluster` are pre-registered in `docs/detection_unit_protocol.md` as
+**not actors** — CoinJoin is mixing, which is suspicious but not by itself a
+crime, and `same_actor_cluster` is a test of the clustering rather than an
+offence. That document was written and committed before any of these injections
+were run, so the exclusion is a rule applied, not a choice made after seeing
+which typologies scored badly.
+
+Counting them as misses would score the system for declining to alert on
+something it is right not to alert on, and would make "flag every CoinJoin" look
+like an improvement. It is not one: it is a false-positive generator pointed at
+a legal privacy tool.
 
 
 **Per typology:**
 
 
-| typology | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
-| --- | --- | --- | --- | --- | --- | --- |
-| coinjoin | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | 10 | 4 | 0.400 | 3.970 | 5 | 5 |
-| peel_chain | 10 | 7 | 0.700 | 3.880 | 5 | 5 |
-| ransomware_collector | 10 | 9 | 0.900 | 4.180 | 5 | 5 |
-| same_actor_cluster | 10 | 0 | 0.000 | n/a | 5 | 5 |
+| typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
+| layering | yes | 10 | 4 | 0.400 | 2.200 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 2.260 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 2.270 | 5 | 5 |
+| same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
 **By broadcast route** — what the network side could recover:
@@ -646,10 +665,26 @@ condition the demo runs in.
 | tor_exit | 15 | 0.467 | 0.000 | 0.000 |
 
 
+### The two patterns that are not crimes
+
+Scored as what they are. There is nothing to catch, so "detection rate" is not
+the question: an alert here is a **false positive**, and the pass is silence plus
+a clustering that did the right thing — CoinJoin participants kept in separate
+entities, one actor's wallets pulled together.
+
+
+| typology | runs | alerted (a false positive) | clustering correct | handled correctly |
+| --- | --- | --- | --- | --- |
+| coinjoin | 10 | 0 | 10 / 10 | 10 |
+| same_actor_cluster | 10 | 0 | 8 / 10 | 8 |
+
+
 ### The misses
 
-Every engine's score for the injected entities, against the threshold they
-did not clear. Up to three entities per missed injection, closest first.
+Criminal injections that raised nothing, with every engine's score for the
+injected entities against the threshold they did not clear. Up to three
+entities per missed injection, closest first. The two non-crime patterns are
+not in this table — they are not misses.
 
 
 | run | typology | broadcast | rule | anomaly | gnn | taint | fused | threshold | short by |
@@ -657,43 +692,33 @@ did not clear. Up to three entities per missed injection, closest first.
 | batch003 | layering | residential | 0.000 | 0.141 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch003 | layering | residential | 0.000 | 0.173 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch003 | layering | residential | 0.000 | 0.381 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch004 | coinjoin | residential | 0.000 | 0.904 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch004 | coinjoin | residential | 0.000 | 0.232 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch004 | coinjoin | residential | 0.000 | 0.232 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch005 | same_actor_cluster | residential | 0.000 | 0.940 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch005 | same_actor_cluster | residential | 0.000 | 0.301 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch005 | same_actor_cluster | residential | 0.000 | 0.182 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch007 | peel_chain | tor_exit | 0.000 | 0.798 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch007 | peel_chain | tor_exit | 0.000 | 0.864 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch007 | peel_chain | tor_exit | 0.000 | 0.381 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch009 | coinjoin | tor_exit | 0.000 | 0.371 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch009 | coinjoin | tor_exit | 0.000 | 0.806 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch009 | coinjoin | tor_exit | 0.000 | 0.806 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch010 | same_actor_cluster | tor_exit | 0.000 | 0.177 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch010 | same_actor_cluster | tor_exit | 0.000 | 0.605 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch010 | same_actor_cluster | tor_exit | 0.000 | 0.503 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch014 | coinjoin | hosting | 0.000 | 0.728 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch014 | coinjoin | hosting | 0.000 | 0.294 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch014 | coinjoin | hosting | 0.000 | 0.728 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch015 | same_actor_cluster | hosting | 0.000 | 0.410 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch015 | same_actor_cluster | hosting | 0.000 | 0.127 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch015 | same_actor_cluster | hosting | 0.000 | 0.111 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch019 | coinjoin | relay_heavy | 0.000 | 0.273 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch019 | coinjoin | relay_heavy | 0.000 | 0.695 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch019 | coinjoin | relay_heavy | 0.000 | 0.273 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch020 | same_actor_cluster | relay_heavy | 0.000 | 0.670 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch020 | same_actor_cluster | relay_heavy | 0.000 | 0.759 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch020 | same_actor_cluster | relay_heavy | 0.000 | 0.314 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch023 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch023 | layering | residential | 0.000 | 0.309 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 | batch023 | layering | residential | 0.000 | 0.416 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch024 | coinjoin | residential | 0.000 | 0.689 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch024 | coinjoin | residential | 0.000 | 0.375 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch024 | coinjoin | residential | 0.000 | 0.375 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch025 | same_actor_cluster | residential | 0.000 | 0.212 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch025 | same_actor_cluster | residential | 0.000 | 0.913 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch025 | same_actor_cluster | residential | 0.000 | 0.230 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch029 | coinjoin | tor_exit | 0.000 | 0.407 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch032 | peel_chain | hosting | 0.000 | 0.355 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch032 | peel_chain | hosting | 0.000 | 0.213 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch032 | peel_chain | hosting | 0.000 | 0.922 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch033 | layering | hosting | 0.000 | 0.290 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch033 | layering | hosting | 0.000 | 0.248 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch033 | layering | hosting | 0.000 | 0.257 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.289 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.929 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.268 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch038 | layering | relay_heavy | 0.000 | 0.263 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch038 | layering | relay_heavy | 0.000 | 0.285 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch038 | layering | relay_heavy | 0.000 | 0.272 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.691 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.359 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.394 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch043 | layering | residential | 0.000 | 0.795 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch043 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch043 | layering | residential | 0.000 | 0.354 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch048 | layering | tor_exit | 0.000 | 0.202 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch048 | layering | tor_exit | 0.000 | 0.026 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch048 | layering | tor_exit | 0.000 | 0.006 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
 
 
 One thing this table says loudly: **the fused score does not move with the anomaly
@@ -702,9 +727,6 @@ at 0.14, because the stacker's coefficient for `anomaly_score` is 0 (see the
 ablation in section 1) — the signal is carried but not used. That is the fitted
 model's verdict on it, not a bug, and it is why the anomaly engine is the first
 place to look if these detection rates need to improve.
-
-
-_(90 rows in total; the first 40 are shown.)_
 
 
 ## 7. Decisions taken in this pass

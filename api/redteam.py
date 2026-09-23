@@ -53,6 +53,15 @@ router = APIRouter(prefix="/redteam", tags=["redteam"])
 TYPOLOGIES = ("ransomware_collector", "peel_chain", "layering", "coinjoin",
               "same_actor_cluster")
 
+#: Typologies that are crimes, and whose injection the detector is expected to
+#: alert on. The other two are not, and that is pre-registered rather than
+#: decided here: `docs/detection_unit_protocol.md` states that CoinJoin is
+#: mixing — suspicious, not by itself illegal — and that `same_actor_cluster`
+#: is a test of the clustering rather than an offence. Neither is an actor, so
+#: neither is scored as a detection.
+CRIME_TYPOLOGIES = ("ransomware_collector", "peel_chain", "layering")
+NON_ACTOR_TYPOLOGIES = ("coinjoin", "same_actor_cluster")
+
 #: Files that make up "the dataset", for snapshot and reset.
 SNAPSHOT_GLOBS = ("transactions.csv", "transactions.json", "transactions.xml",
                   GROUND_TRUTH, "synthetic_watchlist.json", "node_intel.json")
@@ -388,6 +397,11 @@ def execute(run: Run, state_provider, cfg: dict) -> None:
         run.emit({"type": "stage", "name": "publish", "detail": "updating the console's view"})
         router.commit(bundle)                       # type: ignore[attr-defined]
 
+        if run.request.typology in NON_ACTOR_TYPOLOGIES:
+            result["non_actor"] = non_actor_outcome(
+                run.request.typology, active_wallets, cluster_of, bool(len(hit)),
+                bundle["links"])
+
         result["time_to_detect"] = round(time.perf_counter() - run.started, 2)
         run.result = result
         run.status = "done"
@@ -399,6 +413,76 @@ def execute(run: Run, state_provider, cfg: dict) -> None:
         run.emit({"type": "failed", "error": run.error})
     finally:
         run.events.put({"type": "close"})
+
+
+def non_actor_outcome(typology: str, wallets: list[str], cluster_of,
+                      alerted: bool, links: pd.DataFrame) -> dict:
+    """What "handled correctly" means for a pattern that is not a crime.
+
+    Silence alone is a weak claim — a detector that ignored the injection
+    entirely would also be silent. So something positive is checked as well, and
+    the two patterns are testing different engines:
+
+      * **CoinJoin** participants are unrelated people whose inputs happen to
+        share one transaction. Merging them is the classic common-input-heuristic
+        failure, and `graph/clustering.py` skips CoinJoin-shaped transactions
+        precisely to avoid it. Staying apart is the right answer.
+      * **same-actor cluster** is *not* a clustering test in the co-spend sense,
+        whatever the generator's docstring suggests: it mints one
+        single-input transaction per wallet, so there is no shared input and
+        common-input ownership cannot link them — nor should it. The only
+        evidence tying those wallets together is the IP they all broadcast
+        from, which is the correlation engine's job. So that is what is
+        checked: did correlation put these entities behind one address.
+    """
+    entities = [cluster_of(w) for w in wallets]
+    distinct = {e for e in entities if e}
+    if typology == "coinjoin":
+        correct = len(distinct) == len(wallets) and not alerted
+        did = (f"{len(wallets)} participant wallets stayed in {len(distinct)} separate "
+               "entities — the common-input heuristic was not fooled into merging "
+               "unrelated people")
+        wrong = (f"{len(wallets)} participant wallets collapsed into {len(distinct)} "
+                 "entities — unrelated people were merged")
+    else:
+        shared, covered = _shared_ip(links, distinct)
+        correct = covered >= 2 and not alerted
+        did = (f"correlation tied {covered} of the {len(distinct)} entities to one "
+               f"address ({shared}) — the shared broadcast IP was recovered, which is "
+               "the only evidence linking these wallets")
+        wrong = (f"no address links more than {max(covered, 1)} of the "
+                 f"{len(distinct)} entities — the shared broadcast IP was not recovered")
+    return {
+        "typology": typology,
+        "expected_alert": False,
+        "reason": ("not an actor under docs/detection_unit_protocol.md — "
+                   + ("mixing is suspicious but not by itself a crime"
+                      if typology == "coinjoin"
+                      else "a clustering and correlation test, not an offence")),
+        "checked": ("participants were not merged" if typology == "coinjoin"
+                    else "the shared broadcast IP was recovered"),
+        "alerted": alerted,
+        "wallets": len(wallets),
+        "entities": len(distinct),
+        "clustering_correct": correct,
+        "clustering": did if correct else wrong,
+        # An alert here is a false positive, not a catch. Said explicitly so
+        # nobody reads a fired alert on a CoinJoin as a success.
+        "outcome": ("handled correctly" if correct and not alerted
+                    else "alerted — a false positive on a non-crime" if alerted
+                    else "no alert, but the clustering was wrong"),
+    }
+
+
+def _shared_ip(links: pd.DataFrame, entities: set[str]) -> tuple[str | None, int]:
+    """The address the most of these entities were linked to, and how many."""
+    if links is None or links.empty or not entities:
+        return None, 0
+    ours = links[links["entity_id"].isin(entities)]
+    if ours.empty:
+        return None, 0
+    counts = ours.groupby("ip")["entity_id"].nunique().sort_values(ascending=False)
+    return str(counts.index[0]), int(counts.iloc[0])
 
 
 def register(app, state_provider, commit, invalidate) -> None:
@@ -426,22 +510,28 @@ def typologies() -> dict:
     """What can be injected, and what each control means for it."""
     return {
         "typologies": [
-            {"id": "ransomware_collector",
+            {"id": "ransomware_collector", "is_actor": True,
              "label": "ransomware collector",
              "about": "many victims pay one address, which peels off small cash-outs",
              "uses": ["hops", "total_btc", "wallets"]},
-            {"id": "peel_chain", "label": "peel chain",
+            {"id": "peel_chain", "is_actor": True, "label": "peel chain",
              "about": "a long chain that keeps most of the value and peels a little at each hop",
              "uses": ["hops", "total_btc"]},
-            {"id": "layering", "label": "layering",
+            {"id": "layering", "is_actor": True, "label": "layering",
              "about": "fan out into intermediates, several hops, then fan back in",
              "uses": ["hops", "total_btc", "wallets"]},
             {"id": "coinjoin", "label": "coinjoin",
              "about": "equal-value inputs and outputs from unrelated wallets — mixing, "
                       "which is suspicious but not by itself a crime",
+             "is_actor": False,
+             "expectation": "no alert expected; the test is that the participants are "
+                            "not merged into one entity",
              "uses": ["total_btc", "wallets"]},
             {"id": "same_actor_cluster", "label": "same-actor cluster",
              "about": "one actor, several wallets, one IP, one short window",
+             "is_actor": False,
+             "expectation": "no alert expected; the test is that correlation recovers "
+                            "the shared broadcast IP behind the wallets",
              "uses": ["wallets", "window_hours", "total_btc"]},
         ],
         "broadcast": [

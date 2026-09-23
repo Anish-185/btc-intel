@@ -33,8 +33,9 @@ from fusion.pipeline import collect_signals
 
 from .datasets import Dataset
 
-TYPOLOGIES = ("ransomware_collector", "peel_chain", "layering", "coinjoin",
-              "same_actor_cluster")
+from api.redteam import CRIME_TYPOLOGIES, NON_ACTOR_TYPOLOGIES
+
+TYPOLOGIES = (*CRIME_TYPOLOGIES, *NON_ACTOR_TYPOLOGIES)
 BROADCASTS = ("residential", "tor_exit", "hosting", "relay_heavy")
 
 
@@ -127,6 +128,7 @@ def _row(run: Run) -> dict:
     return {
         "run": run.id,
         "typology": run.request.typology,
+        "is_crime": run.request.typology in CRIME_TYPOLOGIES,
         "broadcast": run.request.broadcast,
         "hops": run.request.hops,
         "wallets": run.request.wallets,
@@ -136,6 +138,7 @@ def _row(run: Run) -> dict:
         "time_to_detect": result.get("time_to_detect"),
         "entities": result.get("entity_count"),
         "origin_rank": origin.get("best_rank"),
+        "clustering_correct": (result.get("non_actor") or {}).get("clustering_correct"),
         "error": run.error,
     }
 
@@ -162,6 +165,13 @@ def _miss_rows(run: Run) -> list[dict]:
 
 def summarise(runs: pd.DataFrame, misses: pd.DataFrame, cfg: dict) -> dict:
     done = runs[runs["status"] == "done"]
+    # The headline is scored over crimes only. Not because the other two did
+    # badly — because `docs/detection_unit_protocol.md` pre-registered them as
+    # not actors before any of this was run, and scoring a detector as having
+    # missed something it was right not to flag measures the wrong thing.
+    crimes = done[done["is_crime"]]
+    non_actor = done[~done["is_crime"]]
+
     per_typology = []
     for typology, group in done.groupby("typology"):
         detected = group[group["detected"]]
@@ -169,6 +179,7 @@ def summarise(runs: pd.DataFrame, misses: pd.DataFrame, cfg: dict) -> dict:
         ranks = [r for r in group["origin_rank"] if r is not None and not pd.isna(r)]
         per_typology.append({
             "typology": typology,
+            "is a crime": "yes" if typology in CRIME_TYPOLOGIES else "no — not an actor",
             "runs": len(group),
             "detected": int(group["detected"].sum()),
             "detection rate": round(float(group["detected"].mean()), 3),
@@ -188,17 +199,48 @@ def summarise(runs: pd.DataFrame, misses: pd.DataFrame, cfg: dict) -> dict:
             if len(group) else 0.0,
         })
 
-    times = [t for t in done[done["detected"]]["time_to_detect"] if t is not None]
+    times = [t for t in crimes[crimes["detected"]]["time_to_detect"] if t is not None]
     return {
         "runs": len(runs),
         "completed": len(done),
         "failed": int((runs["status"] != "done").sum()),
-        "detected": int(done["detected"].sum()) if len(done) else 0,
-        "detection_rate": round(float(done["detected"].mean()), 3) if len(done) else None,
+        # Headline: crimes only.
+        "crime_runs": len(crimes),
+        "crime_detected": int(crimes["detected"].sum()) if len(crimes) else 0,
+        "detection_rate": round(float(crimes["detected"].mean()), 3) if len(crimes) else None,
         "median_time_to_detect": round(statistics.median(times), 2) if times else None,
+        # Kept visible so the exclusion cannot look like something being hidden.
+        "all_runs_detected": int(done["detected"].sum()) if len(done) else 0,
+        "all_runs_rate": round(float(done["detected"].mean()), 3) if len(done) else None,
         "threshold": cfg["fusion"]["alert_threshold"],
         "per_typology": pd.DataFrame(per_typology),
         "by_broadcast": pd.DataFrame(by_broadcast),
-        "misses": misses,
+        "non_actor": non_actor_table(non_actor),
+        "misses": misses[misses["typology"].isin(CRIME_TYPOLOGIES)] if len(misses) else misses,
         "errors": runs[runs["status"] != "done"][["run", "typology", "error"]],
     }
+
+
+def non_actor_table(runs: pd.DataFrame) -> pd.DataFrame:
+    """CoinJoin and same-actor cluster, scored as what they are.
+
+    Not "did we catch it" — there is nothing to catch. An alert on one of these
+    is a false positive; silence with the clustering doing the right thing is
+    the pass. `clustering_correct` is that check: CoinJoin participants should
+    stay in separate entities, one actor's wallets should be pulled together.
+    """
+    if runs.empty:
+        return pd.DataFrame(columns=["typology", "runs"])
+    rows = []
+    for typology, group in runs.groupby("typology"):
+        correct = group["clustering_correct"].dropna()
+        rows.append({
+            "typology": typology,
+            "runs": len(group),
+            "alerted (a false positive)": int(group["detected"].sum()),
+            "clustering correct": f"{int(correct.sum())} / {len(correct)}"
+            if len(correct) else "n/a",
+            "handled correctly": int(((~group["detected"].astype(bool))
+                                      & group["clustering_correct"].fillna(False)).sum()),
+        })
+    return pd.DataFrame(rows)

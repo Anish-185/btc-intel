@@ -18,7 +18,8 @@ const TYPOLOGIES = {
     { id: "ransomware_collector", label: "ransomware collector", about: "many victims",
       uses: ["hops", "total_btc", "wallets"] },
     { id: "coinjoin", label: "coinjoin", about: "equal-value mixing",
-      uses: ["total_btc", "wallets"] },
+      uses: ["total_btc", "wallets"], is_actor: false,
+      expectation: "no alert expected; the test is that the participants are not merged" },
   ],
   broadcast: [{ id: "residential", label: "residential IP", about: "a home connection" }],
 };
@@ -116,6 +117,45 @@ describe("the red-team page", () => {
     const link = screen.getByRole("link", { name: /injected wallets in the graph/i });
     expect(link.getAttribute("href")).toContain("focus=bc1qinjected0001");
     expect(link.getAttribute("href")).toContain("highlight=bc1qinjected0001%2Cbc1qinjected0002");
+  });
+
+  it("never shows MISSED for a pattern that is not a crime", async () => {
+    const events = stubRun(
+      result({
+        detected: false,
+        requested_typology: "coinjoin",
+        non_actor: {
+          typology: "coinjoin", expected_alert: false,
+          reason: "not an actor under docs/detection_unit_protocol.md — mixing is "
+            + "suspicious but not by itself a crime",
+          checked: "participants were not merged",
+          alerted: false, wallets: 8, entities: 8,
+          clustering_correct: true,
+          clustering: "8 participant wallets stayed in 8 separate entities — the "
+            + "common-input heuristic was not fooled into merging unrelated people",
+          outcome: "handled correctly",
+        },
+      }),
+    );
+    draw();
+    await screen.findByText("ransomware collector");
+    await userEvent.click(screen.getByRole("button", { name: /inject and re-run/i }));
+    await waitFor(() => expect(events).toHaveLength(1));
+    events[0]({ type: "done", elapsed: 2.4 } as never);
+
+    // The pass state, not a failure.
+    expect(await screen.findByText(/handled correctly — no alert expected/i)).toBeTruthy();
+    expect(screen.queryByText(/did not raise an alert/i)).toBeNull();
+    // And it says what the system actually did instead.
+    expect(screen.getByText(/stayed in 8 separate entities/i)).toBeTruthy();
+  });
+
+  it("warns before the run that a non-crime typology expects no alert", async () => {
+    stubRun(result());
+    draw();
+    await screen.findByText("ransomware collector");
+    await userEvent.selectOptions(screen.getByLabelText(/typology/i), "coinjoin");
+    expect(await screen.findByText(/this one is not a crime/i)).toBeTruthy();
   });
 
   it("disables the controls the chosen typology does not read", async () => {

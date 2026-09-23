@@ -42,6 +42,22 @@ export interface OriginDetail {
   observed: boolean;
 }
 
+/** Present only for a typology that is not a crime. The run is then scored on
+ *  what the system should actually do — stay silent, and get the structure
+ *  right — rather than on whether it alerted. */
+export interface NonActorOutcome {
+  typology: string;
+  expected_alert: false;
+  reason: string;
+  checked: string;
+  alerted: boolean;
+  wallets: number;
+  entities: number;
+  clustering_correct: boolean;
+  clustering: string;
+  outcome: string;
+}
+
 export interface RunResult {
   /** What the generator was asked to build. */
   typology: string;
@@ -70,6 +86,7 @@ export interface RunResult {
   timing: { stages: { name: string; seconds: number }[]; total_seconds: number };
   time_to_detect: number;
   graph: { nodes: number; entities: number };
+  non_actor?: NonActorOutcome;
 }
 
 export interface RunSummary {
@@ -110,7 +127,16 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 export const redteamApi = {
   typologies: (signal?: AbortSignal) =>
     json<{
-      typologies: { id: string; label: string; about: string; uses: string[] }[];
+      typologies: {
+        id: string;
+        label: string;
+        about: string;
+        uses: string[];
+        /** False for coinjoin and same-actor cluster — not crimes, so an alert
+         *  is not the expected outcome. See detection_unit_protocol.md. */
+        is_actor?: boolean;
+        expectation?: string;
+      }[];
       broadcast: { id: string; label: string; about: string }[];
     }>("/redteam/typologies", { signal }),
 
