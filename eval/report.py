@@ -21,7 +21,7 @@ import pandas as pd
 import config
 
 from . import (clustering_eval, correlation_eval, fusion_eval, origin,
-               redteam_batch, saturation, zero_attack)
+               redteam_batch, saturation, saturation_diagnosis, zero_attack)
 from .datasets import build
 
 
@@ -229,6 +229,9 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     redteam = redteam_batch.run_batch(shifted[default_rate], cfg)
     saturated = {name: saturation.evaluate(fusion[name]["bundle"],
                                            fusion[name]["stacker"], cfg)
+                 for name in ("standard", "shifted")}
+    diagnosis = {name: saturation_diagnosis.evaluate(fusion[name]["bundle"],
+                                                     fusion[name]["stacker"], cfg)
                  for name in ("standard", "shifted")}
 
     origin_results = origin.evaluate(standard, cfg)
@@ -465,6 +468,46 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
             f"{block['distinct_in_top']}. "
             f"{block['queue_resolved_by_id_alone']} of the {block['alerts']} alerts are "
             f"separated only by the entity id: deterministic, but not meaningful.\n")
+
+    add("\n### Where the resolution is lost\n")
+    add(DIAGNOSIS_PREAMBLE)
+    for name in ("standard", "shifted"):
+        d = diagnosis[name]
+        if not d.get("alerts"):
+            continue
+        add(f"\n#### {name.capitalize()} set\n")
+        add(f"{d['alerts']} alerts print **{d['distinct_displayed_scores']} distinct "
+            f"scores** — but they have **{d['distinct_input_vectors']} distinct input "
+            f"vectors**. Only {d['alerts_sharing_an_input_vector']} alerts share their "
+            f"inputs with another (largest identical group: "
+            f"{d['largest_identical_input_group']}). "
+            f"**{d['distinguishable_but_collapsed']} distinct input vectors are "
+            f"collapsed onto a shared displayed score.**\n")
+        add(f"\nThe pre-sigmoid logit runs from **{d['logit_min']}** to "
+            f"**{d['logit_max']}** — a spread of {d['logit_spread']} in log-odds — "
+            f"yet takes only **{d['logit_distinct']} distinct values**. "
+            f"{d['above_flat_logit']} of {d['alerts']} alerts sit above "
+            f"{d['flat_logit']}, where the logistic curve is flat to three decimals.\n")
+        add("\n**Each input signal among the alerts:**\n\n")
+        add(md_table(d["inputs"], floats=4))
+        add("\n**The logit, by decile, and what the sigmoid does with it:**\n\n")
+        add(md_table(d["logit_deciles"], floats=6))
+        if len(d["identical_groups"]):
+            add("\n**Alerts with genuinely identical inputs** — these no "
+                "transformation can separate:\n\n")
+            add(md_table(d["identical_groups"], floats=4))
+    d = diagnosis["standard"]
+    weighted = [r for r in d["inputs"].to_dict("records")
+                if r["signal"] in ("rule_score", "taint_score")]
+    add("\n" + DIAGNOSIS_VERDICT.format(
+        alerts=d["alerts"], vectors=d["distinct_input_vectors"],
+        logits=d["logit_distinct"], spread=d["logit_spread"],
+        flat=d["flat_logit"], displayed=d["distinct_displayed_scores"],
+        anomaly_distinct=next(r["distinct"] for r in d["inputs"].to_dict("records")
+                              if r["signal"] == "anomaly_score"),
+        coarse=" and ".join(f"`{r['signal']}` takes {r['distinct']} distinct values"
+                            for r in weighted),
+        threshold=cfg["fusion"]["alert_threshold"]))
 
     # --- 5. clustering ---------------------------------------------------
     add("\n## 5. Cluster quality\n")
@@ -712,6 +755,62 @@ queue and that the order is unchanged under every rotation of the input.
 This is an ordering fix, not a scoring fix. It makes the queue legible and
 stable; it does not make the composite discriminate, and the numbers below say
 how far it gets.
+"""
+
+
+DIAGNOSIS_PREAMBLE = """There are only two places the composite can lose resolution, and the fix differs
+for each.
+
+* **The sigmoid.** The stacker is a logistic regression: the score is
+  `1 / (1 + exp(-z))` over a linear `z`. Past about z = 7.6 that curve is flat
+  to the three decimals the console prints. Inputs that differ perfectly well in
+  log-odds then arrive at the same displayed score — the information exists in
+  `z` and the display throws it away.
+* **The inputs.** If entities genuinely have identical signal vectors, no
+  transformation of `z` can separate them. That is a detector problem, not a
+  presentation one.
+
+The measurement that distinguishes them is how many alerts share an *identical
+input vector*. Different inputs and the same score is the sigmoid; the same
+inputs were never distinguishable.
+"""
+
+
+DIAGNOSIS_VERDICT = """**The verdict: it is the sigmoid — but fixing it recovers less than it looks.**
+
+Almost every alert has its own input vector ({vectors} of {alerts}), so the
+entities are not indistinguishable; the logistic function is flattening them.
+The log-odds spread is {spread}, and every bit of it above {flat} prints as
+1.000.
+
+The catch is the second number. The logit itself has only **{logits} distinct
+values** across {alerts} alerts, and that is not the sigmoid's fault. Of the
+four signals, `gnn_score` is absent, `anomaly_score` carries
+{anomaly_distinct} distinct values and a coefficient of zero (§8), and the two
+signals that actually have weight are coarse: {coarse}. The composite cannot
+have more resolution than its weighted inputs.
+
+So a calibration change — ranking on `z`, or any monotone rescale of it — would
+take the queue from {displayed} displayed values to **at most {logits}**, not to
+{alerts}. It is a real improvement and a cheap one, and it is not a ranking.
+
+**What it would cost.** Ranking on the logit is monotone, so every ordering and
+every AUC in this report is unchanged by construction. What changes is the
+number on screen: `alert_threshold` is {threshold} on a probability scale and would
+have to be re-derived on whatever scale replaced it, which means the threshold is
+re-registered rather than tuned — a protocol change, not a code change. Every
+score quoted anywhere would move, so this file and the README would need
+regenerating together.
+
+The alternative, retraining with stronger regularisation so the coefficients
+stop diverging, is the textbook fix for a near-separable fit — coefficients on this
+data reach three figures — but it is a retrain, it changes AUC, and it needs
+its own validation pass. Neither was done here.
+
+**The real ceiling is upstream.** {logits} levels is what four signals give when
+two are silent and two are coarse. Finer resolution has to come from the rules
+engine emitting a continuous confidence rather than a handful of bands, or from
+a signal that actually varies — which is the same conversation as §8.
 """
 
 

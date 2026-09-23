@@ -25,7 +25,7 @@ before any of this was measured. Wallet recall is reported as secondary.
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
 | red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 7) | 30 injections, shifted set |
 | red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 7 | 50 injections |
-| red-team median time-to-detect | — | 2.02s | inject to alert, incremental re-run, crimes only | 20 detected |
+| red-team median time-to-detect | — | 2.46s | inject to alert, incremental re-run, crimes only | 20 detected |
 | attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 6) | 38 / 62 leads |
 
 
@@ -571,6 +571,159 @@ how far it gets.
 **What the tiebreakers recover.** The queue no longer sorts on the composite alone (`fusion/ordering.py`). Against 6 distinct composite value(s), the full sort key gives **470 distinct keys** over 470 alerts — a total order by construction, since the entity id ends it. The number that matters is the one before that backstop: **60 distinct keys from evidence alone**, and **32 in the top 50** where the composite gave 1. 416 of the 470 alerts are separated only by the entity id: deterministic, but not meaningful.
 
 
+### Where the resolution is lost
+
+There are only two places the composite can lose resolution, and the fix differs
+for each.
+
+* **The sigmoid.** The stacker is a logistic regression: the score is
+  `1 / (1 + exp(-z))` over a linear `z`. Past about z = 7.6 that curve is flat
+  to the three decimals the console prints. Inputs that differ perfectly well in
+  log-odds then arrive at the same displayed score — the information exists in
+  `z` and the display throws it away.
+* **The inputs.** If entities genuinely have identical signal vectors, no
+  transformation of `z` can separate them. That is a detector problem, not a
+  presentation one.
+
+The measurement that distinguishes them is how many alerts share an *identical
+input vector*. Different inputs and the same score is the sigmoid; the same
+inputs were never distinguishable.
+
+
+#### Standard set
+
+197 alerts print **5 distinct scores** — but they have **194 distinct input vectors**. Only 6 alerts share their inputs with another (largest identical group: 2). **189 distinct input vectors are collapsed onto a shared displayed score.**
+
+
+The pre-sigmoid logit runs from **0.274** to **23.312** — a spread of 23.038 in log-odds — yet takes only **11 distinct values**. 59 of 197 alerts sit above 7.6, where the logistic curve is flat to three decimals.
+
+
+**Each input signal among the alerts:**
+
+
+| signal | min | median | max | distinct | at max | zero |
+| --- | --- | --- | --- | --- | --- | --- |
+| rule_score | 0.0000 | 0.0000 | 1.0000 | 5 | 3 | 188 |
+| anomaly_score | 0.0014 | 0.0443 | 1.0000 | 185 | 1 | 0 |
+| gnn_score | 0.0000 | 0.0000 | 0.0000 | 1 | 197 | 197 |
+| taint_score | 0.0000 | 0.5000 | 1.0000 | 6 | 52 | 5 |
+
+
+**The logit, by decile, and what the sigmoid does with it:**
+
+
+| quantile | logit | sigmoid | displayed |
+| --- | --- | --- | --- |
+| 0% | 0.274000 | 0.567972 | 0.568 |
+| 10% | 1.010000 | 0.732957 | 0.733 |
+| 20% | 2.482000 | 0.922861 | 0.923 |
+| 30% | 2.482000 | 0.922861 | 0.923 |
+| 40% | 5.426000 | 0.995620 | 0.996 |
+| 50% | 5.426000 | 0.995620 | 0.996 |
+| 60% | 5.426000 | 0.995620 | 0.996 |
+| 70% | 5.426000 | 0.995620 | 0.996 |
+| 80% | 11.315000 | 0.999988 | 1.000 |
+| 90% | 11.315000 | 0.999988 | 1.000 |
+| 100% | 23.312000 | 1.000000 | 1.000 |
+
+
+**Alerts with genuinely identical inputs** — these no transformation can separate:
+
+
+| alerts | rule_score | anomaly_score | gnn_score | taint_score |
+| --- | --- | --- | --- | --- |
+| 2 | 0.0000 | 0.0154 | 0.0000 | 0.2500 |
+| 2 | 0.0000 | 0.0443 | 0.0000 | 1.0000 |
+| 2 | 0.0000 | 0.0656 | 0.0000 | 0.1250 |
+
+
+#### Shifted set
+
+470 alerts print **6 distinct scores** — but they have **397 distinct input vectors**. Only 115 alerts share their inputs with another (largest identical group: 9). **391 distinct input vectors are collapsed onto a shared displayed score.**
+
+
+The pre-sigmoid logit runs from **0.111** to **21.978** — a spread of 21.867 in log-odds — yet takes only **12 distinct values**. 135 of 470 alerts sit above 7.6, where the logistic curve is flat to three decimals.
+
+
+**Each input signal among the alerts:**
+
+
+| signal | min | median | max | distinct | at max | zero |
+| --- | --- | --- | --- | --- | --- | --- |
+| rule_score | 0.0000 | 0.0000 | 1.0000 | 6 | 9 | 457 |
+| anomaly_score | 0.0000 | 0.0343 | 1.0000 | 321 | 1 | 1 |
+| gnn_score | 0.0000 | 0.0000 | 0.0000 | 1 | 470 | 470 |
+| taint_score | 0.0000 | 0.5000 | 1.0000 | 6 | 125 | 10 |
+
+
+**The logit, by decile, and what the sigmoid does with it:**
+
+
+| quantile | logit | sigmoid | displayed |
+| --- | --- | --- | --- |
+| 0% | 0.111000 | 0.527699 | 0.528 |
+| 10% | 0.657000 | 0.658568 | 0.659 |
+| 20% | 1.749000 | 0.851819 | 0.852 |
+| 30% | 1.749000 | 0.851819 | 0.852 |
+| 40% | 3.933000 | 0.980791 | 0.981 |
+| 50% | 3.933000 | 0.980791 | 0.981 |
+| 60% | 3.933000 | 0.980791 | 0.981 |
+| 70% | 3.933000 | 0.980791 | 0.981 |
+| 80% | 8.301000 | 0.999752 | 1.000 |
+| 90% | 8.301000 | 0.999752 | 1.000 |
+| 100% | 21.978000 | 1.000000 | 1.000 |
+
+
+**Alerts with genuinely identical inputs** — these no transformation can separate:
+
+
+| alerts | rule_score | anomaly_score | gnn_score | taint_score |
+| --- | --- | --- | --- | --- |
+| 9 | 0.0000 | 0.0008 | 0.0000 | 1.0000 |
+| 6 | 0.0000 | 0.0008 | 0.0000 | 0.2500 |
+| 5 | 0.0000 | 0.0055 | 0.0000 | 0.5000 |
+| 5 | 0.0000 | 0.0055 | 0.0000 | 0.2500 |
+| 4 | 0.0000 | 0.0012 | 0.0000 | 0.1250 |
+| 4 | 0.0000 | 0.0023 | 0.0000 | 0.2500 |
+
+
+**The verdict: it is the sigmoid — but fixing it recovers less than it looks.**
+
+Almost every alert has its own input vector (194 of 197), so the
+entities are not indistinguishable; the logistic function is flattening them.
+The log-odds spread is 23.038, and every bit of it above 7.6 prints as
+1.000.
+
+The catch is the second number. The logit itself has only **11 distinct
+values** across 197 alerts, and that is not the sigmoid's fault. Of the
+four signals, `gnn_score` is absent, `anomaly_score` carries
+185 distinct values and a coefficient of zero (§8), and the two
+signals that actually have weight are coarse: `rule_score` takes 5 distinct values and `taint_score` takes 6 distinct values. The composite cannot
+have more resolution than its weighted inputs.
+
+So a calibration change — ranking on `z`, or any monotone rescale of it — would
+take the queue from 5 displayed values to **at most 11**, not to
+197. It is a real improvement and a cheap one, and it is not a ranking.
+
+**What it would cost.** Ranking on the logit is monotone, so every ordering and
+every AUC in this report is unchanged by construction. What changes is the
+number on screen: `alert_threshold` is 0.5 on a probability scale and would
+have to be re-derived on whatever scale replaced it, which means the threshold is
+re-registered rather than tuned — a protocol change, not a code change. Every
+score quoted anywhere would move, so this file and the README would need
+regenerating together.
+
+The alternative, retraining with stronger regularisation so the coefficients
+stop diverging, is the textbook fix for a near-separable fit — coefficients on this
+data reach three figures — but it is a retrain, it changes AUC, and it needs
+its own validation pass. Neither was done here.
+
+**The real ceiling is upstream.** 11 levels is what four signals give when
+two are silent and two are coarse. Finer resolution has to come from the rules
+engine emitting a continuous confidence rather than a handful of bands, or from
+a signal that actually varies — which is the same conversation as §8.
+
+
 ## 5. Cluster quality
 
 Every detection number in this report is scored per entity, and an entity is
@@ -748,7 +901,7 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.02s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.46s.
 
 
 Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
@@ -775,9 +928,9 @@ a legal privacy tool.
 | typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | yes | 10 | 4 | 0.400 | 1.950 | 5 | 5 |
-| peel_chain | yes | 10 | 7 | 0.700 | 2.040 | 5 | 5 |
-| ransomware_collector | yes | 10 | 9 | 0.900 | 2.060 | 5 | 5 |
+| layering | yes | 10 | 4 | 0.400 | 2.300 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 2.550 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 2.420 | 5 | 5 |
 | same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
