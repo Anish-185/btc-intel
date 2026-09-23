@@ -321,6 +321,28 @@ thresholds:
   medium: 0.6
   high: 0.8
 
+monitor:
+  # Live monitoring watches this directory and scores what lands in it.
+  # Anything an operator can copy a file into works: a share, a USB mount, the
+  # output directory of an upstream capture.
+  inbox_dir: data/inbox
+  # Handled files are moved here, never deleted — the custody ledger points at
+  # them, so removing one would destroy the evidence the record refers to.
+  archive_dir: data/processed/monitor_archive
+  scratch_dir: data/processed/monitor_scratch
+  poll_seconds: 2.0
+  # A file is only read once its size has stopped changing, so a writer still
+  # copying into the directory is not parsed half-written.
+  settle_seconds: 0.4
+
+custody:
+  # The chain-of-custody ledger: append-only, hash-chained, tamper-evident.
+  # See custody.py and docs/chain_of_custody.md.
+  ledger_path: data/processed/custody.jsonl
+  # Who the ledger says did the work. This build has no authentication, so it
+  # says so rather than inventing a name a court would later have to test.
+  actor: "btc-intel (unauthenticated demo build)"
+
 redteam:
   # Where the dataset is copied before the first injection of a session, and
   # what `POST /redteam/reset` restores it from.

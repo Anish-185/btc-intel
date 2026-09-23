@@ -17,6 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 import config
+import custody
 
 from .geoip import COLUMNS as GEO_COLUMNS
 from .geoip import GeoIp, enrich
@@ -50,7 +51,12 @@ def resolve_input(path, fmt: str | None = None, cfg: dict | None = None) -> tupl
 
 
 def run(input_path, output=None, quarantine=None, fmt: str | None = None,
-        geo: GeoIp | None = None, cfg: dict | None = None) -> dict:
+        geo: GeoIp | None = None, cfg: dict | None = None,
+        record_custody: bool = True) -> dict:
+    """`record_custody=False` for a scratch parse whose output is thrown away —
+    the live monitor parses each arrival into a temporary file before deciding
+    to keep it, and a ledger full of temporary files is a ledger nobody reads.
+    """
     cfg = cfg or config.load()
     src, fmt = resolve_input(input_path, fmt, cfg)
     output = Path(output or cfg["ingest"]["output_path"])
@@ -86,6 +92,18 @@ def run(input_path, output=None, quarantine=None, fmt: str | None = None,
     if bad:
         top = pd.Series([b["reason"] for b in bad]).value_counts().head(5)
         summary["quarantine_reasons"] = top.to_dict()
+
+    if not record_custody:
+        return summary
+
+    # Acquisition is the moment that has to be recorded: this is the last point
+    # at which the source file is exactly what the investigator handed over.
+    entry = custody.record("ingest", {
+        "files": [custody.seal(src), custody.seal(output)],
+        "rows": summary["rows"], "transactions": summary["transactions"],
+        "quarantined": summary["quarantined"], "format": fmt}, cfg=cfg)
+    summary["custody"] = {"seq": entry.get("seq"), "hash": entry.get("hash"),
+                          "error": entry.get("error")}
     return summary
 
 

@@ -17,6 +17,7 @@ analyst's identity recorded with the verdict.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -31,6 +32,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 import config
+import custody
 from engines.propagation.estimators import estimate_origin
 from engines.propagation.tree import build_trees, degraded_mode
 from engines.rules.detectors import FeatureSet
@@ -41,6 +43,7 @@ from fusion import incremental
 from fusion.pipeline import collect_signals
 
 from . import graph as graph_api
+from . import monitor as monitor_api
 from . import redteam as redteam_api
 from .case_report import render_pdf
 
@@ -403,9 +406,29 @@ def entity_report(entity_id: str, hops: int | None = Query(None, ge=1, le=4),
     detail = entity(entity_id)
     graph = (_investigation_figure(investigation)
              if investigation else subgraph(entity_id, hops or config.get("api.graph_hops")))
-    pdf = render_pdf(detail, graph, datetime.now(timezone.utc))
+    seal = _evidence_seal()
+    pdf = render_pdf(detail, graph, datetime.now(timezone.utc), custody=seal)
+    # The report cannot contain its own hash, so it carries the ledger head and
+    # the dataset hashes, and the ledger carries the report's hash. Either half
+    # identifies the other: a PDF with no matching entry was not produced here.
+    entry = custody.record("export.case_report", {
+        "files": seal["files"],
+        "entity_id": entity_id, "investigation": investigation,
+        "risk_score": detail["scores"].get("risk_score"),
+        "report_sha256": hashlib.sha256(pdf).hexdigest(),
+        "report_bytes": len(pdf), "sealed_at_head": seal["head"]})
     return Response(pdf, media_type="application/pdf", headers={
-        "Content-Disposition": f'attachment; filename="btc-intel-{entity_id}.pdf"'})
+        "Content-Disposition": f'attachment; filename="btc-intel-{entity_id}.pdf"',
+        "x-custody-entry": str(entry.get("seq") or ""),
+        "x-custody-report-sha256": hashlib.sha256(pdf).hexdigest()})
+
+
+def _evidence_seal() -> dict:
+    """What the data looked like when this export was made."""
+    cfg = config.load()
+    paths = [Path(cfg["ingest"]["output_path"]), Path(cfg["fusion"]["alerts_json"])]
+    return {"head": custody.head(cfg),
+            "files": [custody.seal(p) for p in paths if p.exists()]}
 
 
 def _investigation_figure(investigation_id: str) -> dict:
@@ -463,8 +486,32 @@ def alert_feedback(alert_id: str, body: Feedback) -> dict:
     if path.exists():
         row = pd.concat([pd.read_parquet(path), row], ignore_index=True)
     row.to_parquet(path, index=False)
+    entry = custody.record("verdict", {
+        "files": [custody.seal(path)],
+        "alert_id": alert_id, "entity_id": alert.get("entity_id", alert_id),
+        "status": body.status, "risk_score": float(alert.get("risk_score") or 0.0)})
     return {"alert_id": alert_id, "status": body.status, "recorded": len(row),
-            "path": str(path)}
+            "path": str(path), "custody": {"seq": entry.get("seq")}}
+
+
+# --- chain of custody -----------------------------------------------------
+@app.get("/custody")
+def custody_log(limit: int = 200) -> dict:
+    """The custody ledger, newest last — what this system did, in order."""
+    entries = custody.read()
+    return {"total": len(entries), "actor": config.get("custody.actor"),
+            "head": custody.head(), "entries": entries[-limit:]}
+
+
+@app.get("/custody/verify")
+def custody_verify(files: bool = True) -> dict:
+    """Re-walk the hash chain and re-hash the files it recorded.
+
+    Two separate questions — an edited entry and an edited dataset fail
+    differently — so the answer reports them separately. Honest about what it
+    cannot prove: see the module docstring in `custody.py`.
+    """
+    return custody.verify(check_files=files)
 
 
 # --- propagation ----------------------------------------------------------
@@ -533,3 +580,7 @@ graph_api.register(app, _features, _alerts)
 # Red team shares the same cached bundle, and hands back an updated one so the
 # rest of the console sees an injected pattern immediately.
 redteam_api.register(app, bundle, commit_bundle, invalidate)
+
+# Live monitoring folds arriving files into that same bundle, so it is handed
+# the same accessors — and takes the same lock (fusion.incremental.LOCK).
+monitor_api.register(app, bundle, commit_bundle)

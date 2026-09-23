@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 import networkx as nx
 
@@ -132,8 +133,29 @@ def _draw_graph(c, graph: dict, y_top: float, height: float) -> None:
     c.drawString(MARGIN + 4, y_top - height + 4, legend)
 
 
-def render_pdf(detail: dict, graph: dict, now: datetime) -> bytes:
-    """One page: who, how risky, why, what the evidence is, and the neighbourhood."""
+def _seal_lines(custody: dict) -> list[str]:
+    """The seal, as short fixed-width lines a person can read out or retype.
+
+    Hashes are printed in full: half a hash verifies nothing, and this is the
+    one place on the page where truncating an identifier would be a mistake.
+    """
+    lines = [f"ledger head {custody.get('head', '—')}"]
+    for sealed in custody.get("files", [])[:4]:
+        name = Path(sealed["path"]).name
+        lines.append(f"{name:<24} {sealed['sha256']}")
+    lines.append("verify with:  python -m custody verify")
+    return lines
+
+
+def render_pdf(detail: dict, graph: dict, now: datetime, custody: dict | None = None) -> bytes:
+    """One page: who, how risky, why, what the evidence is, and the neighbourhood.
+
+    `custody` is the evidence seal — the hashes of the data this report was
+    produced from and the head of the custody ledger at the moment it was
+    produced. Printed on the page so the paper can be checked against the
+    system later; the report's own hash goes into the ledger, which is the
+    other half of the same check.
+    """
     buffer = BytesIO()
     c = pdf_canvas.Canvas(buffer, pagesize=A4)
     c.setTitle(f"btc-intel case report — {detail['entity_id']}")
@@ -198,6 +220,17 @@ def render_pdf(detail: dict, graph: dict, now: datetime) -> bytes:
     y = _heading(c, "neighbourhood", y)
     _draw_graph(c, graph, y + 2, min(graph_height, y - MARGIN - 46))
     y = y + 2 - min(graph_height, y - MARGIN - 46) - 14
+
+    if custody:
+        y = max(y, MARGIN + 46)
+        c.setFont("Helvetica-Bold", 7.5)
+        c.setFillColor(MUTED)
+        c.drawString(MARGIN, y, "EVIDENCE SEAL")
+        c.setFont("Courier", 6.5)
+        for line in _seal_lines(custody):
+            y -= 8
+            c.drawString(MARGIN, y, line)
+        y -= 10
 
     _wrap(c, CAVEAT, MARGIN, max(y, MARGIN + 24), width, size=7.5, leading=9.5,
           colour=MUTED, font="Helvetica-Oblique")

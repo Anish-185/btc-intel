@@ -45,6 +45,7 @@ rather than taking that on trust.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -71,6 +72,14 @@ from .stacker import SIGNALS, Stacker, default_weights
 from .taint import compute_taint, load_watchlist
 
 log = logging.getLogger(__name__)
+
+#: Held by anything that reads the shared bundle, updates it, and commits the
+#: result — red-team injections and the live monitor both do. The critical
+#: section is wider than `update()` itself (read, update, publish), so callers
+#: take it rather than this module taking it for them.
+#: ponytail: one process-wide lock. Fine while the console is one process; a
+#: multi-worker deployment needs the state out of memory anyway.
+LOCK = threading.RLock()
 
 
 @dataclass

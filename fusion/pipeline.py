@@ -22,6 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 import config
+import custody
 from engines.anomaly.detector import fit_score
 from engines.correlation.scorer import correlate
 from engines.propagation.estimators import estimate_all, is_anonymized_entry
@@ -228,7 +229,20 @@ def run(input_path=None, ground_truth=None, out_parquet=None, out_json=None,
         "alerts": json.loads(alerts.to_json(orient="records")),
     }
     js.write_text(json.dumps(payload, indent=2))
-    return {"entities": len(bundle["signals"]), "alerts": len(alerts),
+
+    # The analysis itself is an event in the case: which data went in, which
+    # model scored it, and what came out. A reviewer reading the alert list a
+    # year later can tell whether it was produced from the data they hold.
+    entry = custody.record("analysis", {
+        "files": [custody.seal(Path(input_path or cfg["ingest"]["output_path"])),
+                  custody.seal(parquet), custody.seal(js)],
+        "entities": len(bundle["signals"]), "alerts": len(alerts),
+        "alert_threshold": f["alert_threshold"],
+        "stacker_fitted": bool(stacker.metrics.get("fitted", True)),
+        "degraded_mode": bundle["propagation"]["degraded"]}, cfg=cfg)
+
+    return {"custody": {"seq": entry.get("seq"), "hash": entry.get("hash")},
+            "entities": len(bundle["signals"]), "alerts": len(alerts),
             "rule_alerts": len(bundle["alerts"]),
             "watchlist_seeds": len(bundle["seed_entities"]),
             "tainted": int((bundle["signals"]["taint_score"] > 0).sum()),

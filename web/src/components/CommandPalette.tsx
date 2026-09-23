@@ -20,6 +20,8 @@ function targetsFor(query: string): Target[] {
       { label: "Alert queue", hint: "page", to: "/alerts" },
       { label: "Overview", hint: "page", to: "/" },
       { label: "Red team", hint: "page", to: "/redteam" },
+      { label: "Live monitor", hint: "page", to: "/monitor" },
+      { label: "Chain of custody", hint: "page", to: "/custody" },
     ];
   }
   const kind = evidenceKind(value);

@@ -15,6 +15,7 @@ htmlcov/
 # Data — never commit case data or dumps
 data/raw/*
 data/processed/*
+data/inbox/*
 data/geoip/*
 !data/**/.gitkeep
 *.mmdb

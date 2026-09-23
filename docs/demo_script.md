@@ -90,7 +90,31 @@ Press **Investigate →** on the case page, or `Ctrl K` and paste an address.
   (`?investigation=<id>`), so the PDF carries the graph the analyst actually
   built.
 
-## 5. Red team — "make it fail" (2 min, optional)
+## 5. Live monitor — "it is still running" (2 min)
+
+Open `/monitor` and press **Start watching**, then **Simulate an arrival**.
+Within a couple of seconds a file appears in the feed with the rows it
+contributed and any alerts it raised. Press simulate again while the first is
+still on screen: the second arrival lands underneath it.
+
+What to say: the batch pipeline answers *analysis*; this answers *monitoring*.
+It folds the new transactions into the graph already in memory rather than
+re-running everything, and nothing is retrained. Drop the same file in twice
+and it contributes nothing the second time — worth doing if a judge asks.
+
+## 6. Chain of custody — "would this stand up" (2 min)
+
+Open `/custody`. Every action is there in order — the ingest, the pipeline run,
+the arrivals just demonstrated, any verdict given on the alert queue. Press
+**Verify again**: the chain is intact and every sealed file still matches.
+
+What to say: each entry carries the hash of the one before it, so an edited
+entry breaks every later one. Export a case report from any alert and the PDF
+carries the ledger head and the dataset hashes, while the ledger carries the
+PDF's hash. Say the limitation out loud before a judge finds it — this build
+has no authentication, so the ledger records *what* was done, not *who* did it.
+
+## 7. Red team — "make it fail" (2 min, optional)
 
 Open `/redteam` and hand the keyboard over. A judge picks a typology, sets the
 parameters, and injects it; the system re-runs incrementally and reports

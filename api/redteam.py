@@ -40,6 +40,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
+import custody
 from engines.propagation.estimators import estimate_origin
 from engines.propagation.tree import build_trees
 from fusion import incremental
@@ -324,7 +325,8 @@ def execute(run: Run, state_provider, cfg: dict) -> None:
         timing = incremental.Timing(
             on_stage=lambda name, seconds: run.emit(
                 {"type": "stage", "name": name, "seconds": round(seconds, 3)}))
-        bundle = incremental.update(state, new_rows, cfg, directory, timing)
+        with incremental.LOCK:      # the live monitor folds into the same graph
+            bundle = incremental.update(state, new_rows, cfg, directory, timing)
 
         run.emit({"type": "stage", "name": "assess", "detail": "comparing against the threshold"})
         gt = json.loads((directory / GROUND_TRUTH).read_text())
@@ -373,6 +375,16 @@ def execute(run: Run, state_provider, cfg: dict) -> None:
                       "entities": len(bundle["signals"])},
             "entity_count": len(injected_entities),
         }
+        # An injection is a deliberate modification of the dataset. It goes in
+        # the ledger so the file hash that no longer matches has an explanation
+        # sitting next to it, signed into the same chain.
+        custody.record("redteam.inject", {
+            "files": [custody.seal(directory / "transactions.csv")]
+            if (directory / "transactions.csv").exists() else [],
+            "run_id": run.id, "typology": run.request.typology, "generator": typology,
+            "seed": seed, "transactions": injection["transactions"],
+            "detected": result["detected"]}, cfg=cfg)
+
         run.emit({"type": "stage", "name": "publish", "detail": "updating the console's view"})
         router.commit(bundle)                       # type: ignore[attr-defined]
 
@@ -551,19 +563,28 @@ def reset() -> dict:
     if not source.exists():
         raise HTTPException(409, "no snapshot to reset to — nothing has been injected yet")
     target = dataset_dir(cfg)
-    restored = []
+    restored, written = [], []
     for name in SNAPSHOT_GLOBS:
         path = source / name
         if path.exists():
             shutil.copy2(path, target / name)
             restored.append(name)
+            written.append(target / name)
     for path in artefacts(cfg):
         kept = source / path.name
         if kept.exists():
             shutil.copy2(kept, path)
             restored.append(path.name)
+            written.append(path)
         elif path == Path(cfg["ingest"]["output_path"]):
             ingest_run(target, fmt=cfg["ingest"]["format"], cfg=cfg)
+
+    # Restoring is a modification too. Recording it is what lets the next
+    # verification say "these files are back to their acquisition hashes"
+    # rather than "these files changed twice and nobody wrote down why".
+    custody.record("redteam.reset", {
+        "files": [custody.seal(p) for p in written if p.exists()],
+        "restored": restored}, cfg=cfg)
 
     # The files are back; the state built from the injected ones must go too.
     router.invalidate()                             # type: ignore[attr-defined]

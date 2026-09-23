@@ -21,7 +21,8 @@ Runs fully air-gapped: no network calls at any stage (`offline: true` in `config
 | `engines/gnn/` | Graph neural network scoring |
 | `engines/correlation/` | Cross-case / entity correlation |
 | `fusion/` | Combines engine scores into one risk score; `incremental.py` re-runs it over new transactions only |
-| `api/` | Local HTTP API, including the red-team injection endpoints |
+| `api/` | Local HTTP API: alerts, graph, live monitoring, red-team injection |
+| `custody.py` | Hash-chained chain-of-custody ledger |
 | `web/` | Local UI |
 | `eval/` | Metrics, benchmarks, ground-truth comparison |
 | `offline/` | Pipeline orchestration, air-gapped packaging |
@@ -315,6 +316,68 @@ marked `origin`, runner-ups `runner_up`, and an IP-class badge on every node.
 serves synthetic data. A deployment would need auth, per-case authorisation, an
 audit log of who read which entity, and a CORS list that is not a dev-server
 convenience. Said again at the top of `api/app.py`.
+
+## Live monitoring
+
+The rest of this system is a batch pipeline: point it at a dump, get a ranked
+alert list. That is the *analysis* half of the problem. The *monitoring* half
+is that metadata keeps arriving, and an analyst wants to know within seconds
+whether any of it matters.
+
+```sh
+POST /monitor/start        # begin watching data/inbox
+GET  /monitor/events       # server-sent events: every arrival, every alert it raised
+GET  /monitor/status       # files, transactions, alerts, duplicates, errors
+POST /monitor/simulate     # generate one batch of fresh traffic, for a demo
+POST /monitor/stop
+```
+
+Anything copied into `data/inbox` — a collection run, an upstream export,
+another agency's batch — is parsed, validated, folded into the graph the API
+already holds, scored, and pushed to the console at `/monitor`. It reuses the
+incremental path (`fusion/incremental.py`), so an arrival costs the same few
+seconds a red-team injection does and nothing is retrained.
+
+Three behaviours worth knowing:
+
+* **Arrivals are idempotent.** A file dropped twice, or overlapping with one
+  already seen, contributes only its unseen transactions — folding a
+  transaction in twice would double every amount on it.
+* **A file is read only once it stops growing**, so a writer still copying into
+  the directory is never parsed half-written.
+* **A rejected file says so.** A file whose every row fails validation is
+  reported as quarantined with a reason, not drawn the same way as a quiet
+  one — a feed whose upstream has changed format must not look like a feed with
+  nothing to report.
+
+Handled files are moved to `data/processed/monitor_archive/`, never deleted:
+the custody ledger points at them.
+
+```sh
+python -m api.monitor feed --batches 6 --interval 4   # synthetic arrivals
+```
+
+## Chain of custody
+
+Every consequential action is appended to a hash-chained, append-only ledger:
+data acquired, pipeline run, traffic arrived, analyst verdict, case report
+exported, red-team injection, dataset restored. Source files are hashed at
+acquisition; an exported PDF carries the ledger head and the hashes of the data
+it was made from, and the ledger carries the PDF's own hash.
+
+```sh
+python -m custody log       # what happened
+python -m custody verify    # is the chain intact, are the files unchanged
+```
+
+Each entry's hash is computed over its content *and* its predecessor's hash, so
+an edited or deleted entry cannot be made to verify — the record is
+tamper-evident. It does **not** prove who did the work: this build has no
+authentication and says so rather than inventing an actor a court would have to
+test. Full detail, including the four ways `tests/test_custody.py` breaks the
+ledger on purpose, is in
+[`docs/chain_of_custody.md`](docs/chain_of_custody.md). The console draws it at
+`/custody`.
 
 ## Red team
 
