@@ -301,7 +301,7 @@ number. Seeds now come from the analyst watchlist only: taint alone scores
 **0.681** and the stacker **0.668** on the actor label (`eval/results.md` §1). Every fitted model still carries an `ablation` block with
 each signal alone and the stack without it; read it before quoting a number.
 Anomaly comes out *below chance* on our data (**0.175** standard / **0.178**
-shifted, `eval/results.md` §1 and §9) because exchanges are the
+shifted, `eval/results.md` §1 and §8) because exchanges are the
 biggest outliers and our illicit actors use fresh wallets — the non-negative
 constraint clamps its weight to zero rather than learning a negative one that
 would not transfer.

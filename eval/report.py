@@ -539,8 +539,73 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
         add("\n**Runs that failed:**\n\n")
         add(md_table(redteam["errors"]))
 
+    # --- 8. the anomaly engine -------------------------------------------
+    add("\n## 8. The anomaly engine contributes nothing\n")
+    add(anomaly_section(fusion, redteam))
+
     add(CLOSING)
     return "\n".join(parts)
+
+
+def anomaly_section(fusion: dict, redteam: dict) -> str:
+    """State the case against the anomaly engine, with the numbers.
+
+    Not a recommendation to remove it — that is a decision about the
+    architecture, and this file's job is to put the number in writing first.
+    """
+    std, shift = fusion["standard"]["actor"], fusion["shifted"]["actor"]
+    example = ""
+    misses = redteam.get("misses")
+    if misses is not None and len(misses) > 1:
+        # Two injected entities with very different anomaly scores and the same
+        # fused score is the whole argument in one row pair.
+        pair = misses.sort_values("anomaly")
+        low, high = pair.iloc[0], pair.iloc[-1]
+        if abs(high["anomaly"] - low["anomaly"]) > 0.3:
+            example = (
+                f"\nThe red-team misses make it concrete. Two injected entities, one "
+                f"scoring **{low['anomaly']:.3f}** on anomaly and one **{high['anomaly']:.3f}** "
+                f"— a difference of {high['anomaly'] - low['anomaly']:.3f} on the signal — "
+                f"both come out of the stacker at **{low['fused']:.3f}** and "
+                f"**{high['fused']:.3f}**. The fused score does not move, because nothing "
+                "is multiplying it.\n")
+    return f"""The stacker fits `anomaly_score`'s coefficient to **{std['coefficients'].get('anomaly_score', 0):.4f}** on the standard set
+and **{shift['coefficients'].get('anomaly_score', 0):.4f}** on the shifted set. Not small — zero. The signal is computed,
+carried through the pipeline, written into every alert payload, and then
+multiplied by nothing.
+
+That is the fitted model's verdict, and it is consistent with the signal's own
+discrimination: alone, `anomaly_score` scores **{std['signal_auc'].get('anomaly_score')}** AUC on the standard
+set and **{shift['signal_auc'].get('anomaly_score')}** on the shifted one — below 0.5, which is worse than
+guessing. The non-negative constraint on the stacker (`fusion.stacker.non_negative`)
+forbids it from using a signal by inverting it, so a below-chance signal can only
+be given zero weight. Refitting the stack **without** it scores
+{std['ablation'].get('anomaly_score', {}).get('stack_without_it')} on the standard set against {std['auc']} with it —
+slightly *better* without. Since the coefficient is zero the predictions are
+identical either way; the difference is the constrained refit landing on a
+different optimum once the column is gone, which is worth knowing but is not
+evidence the signal was doing harm.
+{example}
+**Why it comes out below chance.** IsolationForest finds the population's
+outliers, and on this data the outliers are the exchanges: enormous fan-in,
+enormous fan-out, thousands of counterparties. Our illicit actors are the
+opposite — fresh wallets, few transactions, unremarkable amounts, deliberately
+shaped to look ordinary. The engine is working; it is answering a question whose
+answer is anti-correlated with the label.
+
+**This is reported, not acted on.** Removing the engine is an architecture
+decision with a cost either way: it is four signals instead of five in every
+diagram and payload, and an unsupervised detector is the one component that
+could in principle flag a typology the rules and the GNN were never shown. Kept
+at zero weight it costs {ANOMALY_COST} and misleads anyone reading the alert
+payload into thinking it contributed. The number is here so that decision can be
+made on it rather than on an impression.
+"""
+
+
+#: Measured in docs/redteam_performance.md — the anomaly refit is the single
+#: slowest stage of an incremental re-run.
+ANOMALY_COST = "about 2.2 s of every red-team re-run (the slowest stage, see docs/redteam_performance.md)"
 
 
 ZERO_ATTACK_NOTE = """A false positive here is not the same kind of error as one on the standard set. On
@@ -680,7 +745,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 8. Decisions taken in this pass
+## 9. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

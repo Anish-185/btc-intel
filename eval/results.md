@@ -25,7 +25,7 @@ before any of this was measured. Wallet recall is reported as secondary.
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
 | red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 7) | 30 injections, shifted set |
 | red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 7 | 50 injections |
-| red-team median time-to-detect | — | 2.8s | inject to alert, incremental re-run, crimes only | 20 detected |
+| red-team median time-to-detect | — | 2.28s | inject to alert, incremental re-run, crimes only | 20 detected |
 | attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 6) | 38 / 62 leads |
 
 
@@ -719,7 +719,7 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.8s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.28s.
 
 
 Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
@@ -746,9 +746,9 @@ a legal privacy tool.
 | typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | yes | 10 | 4 | 0.400 | 2.670 | 5 | 5 |
-| peel_chain | yes | 10 | 7 | 0.700 | 2.840 | 5 | 5 |
-| ransomware_collector | yes | 10 | 9 | 0.900 | 2.820 | 5 | 5 |
+| layering | yes | 10 | 4 | 0.400 | 2.220 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 2.370 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 2.280 | 5 | 5 |
 | same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
@@ -827,7 +827,44 @@ model's verdict on it, not a bug, and it is why the anomaly engine is the first
 place to look if these detection rates need to improve.
 
 
-## 8. Decisions taken in this pass
+## 8. The anomaly engine contributes nothing
+
+The stacker fits `anomaly_score`'s coefficient to **0.0000** on the standard set
+and **0.0000** on the shifted set. Not small — zero. The signal is computed,
+carried through the pipeline, written into every alert payload, and then
+multiplied by nothing.
+
+That is the fitted model's verdict, and it is consistent with the signal's own
+discrimination: alone, `anomaly_score` scores **0.1752** AUC on the standard
+set and **0.0986** on the shifted one — below 0.5, which is worse than
+guessing. The non-negative constraint on the stacker (`fusion.stacker.non_negative`)
+forbids it from using a signal by inverting it, so a below-chance signal can only
+be given zero weight. Refitting the stack **without** it scores
+0.686 on the standard set against 0.6679 with it —
+slightly *better* without. Since the coefficient is zero the predictions are
+identical either way; the difference is the constrained refit landing on a
+different optimum once the column is gone, which is worth knowing but is not
+evidence the signal was doing harm.
+
+The red-team misses make it concrete. Two injected entities, one scoring **0.006** on anomaly and one **0.929** — a difference of 0.923 on the signal — both come out of the stacker at **0.354** and **0.354**. The fused score does not move, because nothing is multiplying it.
+
+**Why it comes out below chance.** IsolationForest finds the population's
+outliers, and on this data the outliers are the exchanges: enormous fan-in,
+enormous fan-out, thousands of counterparties. Our illicit actors are the
+opposite — fresh wallets, few transactions, unremarkable amounts, deliberately
+shaped to look ordinary. The engine is working; it is answering a question whose
+answer is anti-correlated with the label.
+
+**This is reported, not acted on.** Removing the engine is an architecture
+decision with a cost either way: it is four signals instead of five in every
+diagram and payload, and an unsupervised detector is the one component that
+could in principle flag a typology the rules and the GNN were never shown. Kept
+at zero weight it costs about 2.2 s of every red-team re-run (the slowest stage, see docs/redteam_performance.md) and misleads anyone reading the alert
+payload into thinking it contributed. The number is here so that decision can be
+made on it rather than on an impression.
+
+
+## 9. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker
