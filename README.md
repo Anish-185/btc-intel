@@ -421,6 +421,72 @@ Timings, the stage that dominates, and the optimisation that turned out to be
 slower are in [`docs/redteam_performance.md`](docs/redteam_performance.md):
 **3.45 s median** against a 30-second target, on a CPU-only laptop.
 
+## Running it offline
+
+The whole system installs and runs on a machine that has never been online.
+Two halves: one script gathers everything while you still have internet,
+another installs it where you do not.
+
+**On a machine with internet**, from a clone of this repository:
+
+```sh
+offline/build_wheelhouse.sh                        # for this machine's Python
+offline/build_wheelhouse.sh --python-version 3.12  # for the demo machine's
+offline/build_wheelhouse.sh --no-gnn               # skip torch, ~250 MB smaller
+```
+
+That downloads every wheel — including the PyTorch **CPU** build, from
+PyTorch's own index — into `offline/wheelhouse/`, runs `offline/fetch_intel.sh`
+and copies the IP intelligence snapshot and its manifest into the bundle,
+builds the console into `web/dist/`, stages the trained weights into
+`offline/models/`, and writes `offline/bundle.json` recording what was built
+and the hash of every file in it.
+
+Wheels are tagged with the interpreter version: **a wheelhouse built for 3.14
+will not install on 3.12**. Check the target machine's `python3 -V` first.
+
+**On the air-gapped machine**, with the repository copied across:
+
+```sh
+./offline/install.sh          # venv + pip install --no-index --find-links offline/wheelhouse/
+./offline/run_offline.sh      # console and API, one process, http://127.0.0.1:8000/app/
+```
+
+`install.sh` refuses to continue if this machine's Python does not match the
+one the wheels were built for — pip's own error for that names neither cause
+nor fix. It copies the model weights into `models/` and the intel snapshot into
+`data/intel/`, then checks for the GeoIP databases and explains what degrades
+without them (see [`offline/GEOIP_SETUP.md`](offline/GEOIP_SETUP.md) — MaxMind
+requires a free account, so that one step cannot be automated).
+
+FastAPI serves the built console itself, from `web/dist`, so the target machine
+needs **no npm, no node_modules and no second web server**. The console is
+mounted at `/app/` rather than at the root because three of its routes —
+`/alerts`, `/entities/{id}`, `/custody` — are also API paths; `/` redirects.
+
+### Proving it
+
+```sh
+python -m pytest tests/test_offline_guarantee.py -q
+unshare -rn sh -c 'ip link set lo up; ./offline/airgap_check.sh'
+```
+
+The first greps every file we wrote for `requests.get`, `urlopen`, `httpx`,
+sockets, `curl`/`wget` pointed anywhere but this machine, and any `fetch()`,
+`EventSource` or `WebSocket` given a URL that is not same-origin — in the
+source *and* in the built bundle. Two scripts are allowed to use the network,
+both of which run on the online machine, and each is named in the test with its
+reason.
+
+The second runs the whole checklist inside a kernel network namespace that has
+nothing but loopback — a real air gap, no root and without taking your own
+machine off the network: the pipeline, the API, the console's routes and
+assets, the graph, the PDF (checking the custody ledger's hash matches the file
+that was downloaded), the live monitor, and the test suite. 26 checks, PASS or
+FAIL each. [`offline/OFFLINE_CHECKLIST.md`](offline/OFFLINE_CHECKLIST.md) has
+the manual items too — a script cannot tell you whether the graph *looks*
+right.
+
 ## Evaluation
 
 ```sh

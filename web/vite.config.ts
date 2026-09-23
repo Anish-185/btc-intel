@@ -21,6 +21,12 @@ const commit = (() => {
 // server proxies instead of hard-coding a base URL anywhere in the app.
 export default defineConfig({
   plugins: [react()],
+  // The console is served from /app/, not from /. The API's own paths are
+  // /alerts, /entities/… and /custody — which are also the console's routes —
+  // so sharing an origin at the root would mean a hard refresh on the alert
+  // queue returned JSON. A prefix costs one line and removes the whole class
+  // of collision. The router reads it back from import.meta.env.BASE_URL.
+  base: "/app/",
   define: { __APP_COMMIT__: JSON.stringify(commit) },
   server: {
     // In dev the API lives on another port, and its paths (/alerts, /entities)

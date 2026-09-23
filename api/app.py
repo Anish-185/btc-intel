@@ -28,7 +28,9 @@ from pathlib import Path
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 
 import config
@@ -584,3 +586,52 @@ redteam_api.register(app, bundle, commit_bundle, invalidate)
 # Live monitoring folds arriving files into that same bundle, so it is handed
 # the same accessors — and takes the same lock (fusion.incremental.LOCK).
 monitor_api.register(app, bundle, commit_bundle)
+
+
+# --- the console itself ----------------------------------------------------
+# One process serves the API and the built front end, so an offline demo needs
+# no second web server and no npm on the target machine.
+#
+# The console lives under /app/ rather than at the root because three of its
+# routes — /alerts, /entities/{id}, /custody — are also API paths. Sharing the
+# root would mean a hard refresh on the alert queue returned JSON to a browser
+# that asked for a page. The prefix removes that whole class of collision;
+# vite's `base` and the router's `basename` are the same string.
+class SinglePageApp(StaticFiles):
+    """Static files, with a client-side router behind them.
+
+    The browser asks for /app/entities/bc1q…; there is no such file, because
+    that path only means something once React is running. Anything that is not
+    a file is answered with index.html, and the app takes it from there. A
+    missing *asset* still 404s — that is a broken build, and hiding it behind
+    the index page would turn it into a blank screen with no error.
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as missing:
+            # Starlette raises rather than returning, so the fallback has to be
+            # an except clause. A path with a file extension is an asset that
+            # should be there: let that 404 stand, because answering a missing
+            # bundle with index.html turns a broken build into a blank page.
+            if missing.status_code != 404 or Path(path).suffix:
+                raise
+            return await super().get_response("index.html", scope)
+
+
+DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
+if (DIST / "index.html").exists():
+    app.mount("/app", SinglePageApp(directory=DIST, html=True), name="console")
+
+    @app.get("/", include_in_schema=False)
+    def console() -> RedirectResponse:
+        """The address people are given. Everything else is under /app/."""
+        return RedirectResponse("/app/")
+else:                                        # a dev checkout that has not built
+    @app.get("/", include_in_schema=False)
+    def console_missing() -> dict:
+        return {"console": "not built",
+                "detail": f"no {DIST}/index.html — run `npm --prefix web run build`, "
+                          "or use the dev server on :5173 while developing",
+                "api": "/docs"}

@@ -246,8 +246,17 @@ def pipeline(tmp_path_factory):
                                         "--output", str(raw), "--seed", "17",
                                         "--formats", "csv"]))
     ingest_run(raw, d / "t.parquet", d / "q.parquet", "csv")
+
+    # Point the GNN at a path that does not exist, on purpose. These tests are
+    # about how the other four signals stack, and the answer must not depend on
+    # whether whoever ran them happens to have trained a GNN into models/ —
+    # which is exactly how this drifted: the assertions below passed for months
+    # because the file was absent, then failed the moment an offline bundle
+    # shipped with real weights in it.
+    cfg = json.loads(json.dumps(CFG))
+    cfg["models"]["gnn"] = str(d / "no-such-gnn.pt")
     summary = fusion_run(d / "t.parquet", raw / "ground_truth.json",
-                         d / "final.parquet", d / "final.json", CFG, watchlist_path=raw)
+                         d / "final.parquet", d / "final.json", cfg, watchlist_path=raw)
     return d, summary
 
 
@@ -330,8 +339,13 @@ def test_alerts_are_ranked(pipeline):
 
 
 def test_pipeline_survives_without_a_trained_gnn(pipeline):
-    """torch is an optional extra; the other four signals must still stack."""
+    """torch is an optional extra, and the weights may simply not be there.
+
+    The fixture points `models.gnn` at a file that does not exist, so this is
+    the real question: with no GNN to score anything, do the other four signals
+    still stack into a ranked list? An `--no-gnn` bundle depends on the answer.
+    """
     d, summary = pipeline
     alerts = pd.read_parquet(d / "final.parquet")
-    assert (alerts["gnn_score"] == 0.0).all()
-    assert summary["alerts"] > 0
+    assert (alerts["gnn_score"] == 0.0).all(), "a GNN scored something from a missing model"
+    assert summary["alerts"] > 0, "no alerts at all without the GNN"

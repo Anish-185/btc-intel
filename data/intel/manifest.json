@@ -1,23 +1,23 @@
 {
-  "generated_at": "2026-09-21T19:49:41+00:00",
+  "generated_at": "2026-09-23T11:59:46+00:00",
   "files": {
     "known_bitcoin_nodes.json": {
       "source_url": "https://bitnodes.io/api/v1/snapshots/latest/",
-      "downloaded_at": "2026-09-21T19:49:39+00:00",
-      "bytes": 2803251,
-      "sha256": "53283a38ee80aadedfe276d53deddd2b4396577a9df1545492df259d7cccf4cc",
+      "downloaded_at": "2026-09-23T11:59:44+00:00",
+      "bytes": 2754262,
+      "sha256": "a8c8c1a5f971b0ae8205f309a9678bc2f447309aacf92f1d3f2d9f9b9c6ea4f6",
       "status": "ok"
     },
     "tor_exit_nodes.txt": {
       "source_url": "https://check.torproject.org/torbulkexitlist",
-      "downloaded_at": "2026-09-21T19:49:40+00:00",
-      "bytes": 19491,
-      "sha256": "d28c7d4cc38ba73ccdd43c130b93bf180cc213f028ba58744548d30f48074846",
+      "downloaded_at": "2026-09-23T11:59:46+00:00",
+      "bytes": 19436,
+      "sha256": "9a0acf1fcf9ca332f63f96d4a8c472f8e07b7364c9ce7abb58f21975a069cfb8",
       "status": "ok"
     },
     "hosting_asns.txt": {
       "source_url": "https://raw.githubusercontent.com/brianhama/bad-asn-list/master/bad-asn-list.csv",
-      "downloaded_at": "2026-09-21T19:49:41+00:00",
+      "downloaded_at": "2026-09-23T11:59:46+00:00",
       "bytes": 24159,
       "sha256": "0af8e58dc07ba070a10c9083a1a9f5c9fc76be35fab32bb6d144e72caa20a252",
       "status": "ok"

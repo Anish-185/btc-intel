@@ -25,6 +25,13 @@ data/geoip/*
 *.db
 *.sqlite3
 
+# The offline bundle — built by offline/build_wheelhouse.sh, never committed.
+# The wheelhouse alone is ~350 MB, and the intel snapshot is a copy of
+# data/intel/, which is ignored above for the same reason.
+offline/wheelhouse/
+offline/intel/
+offline/bundle.json
+
 # Models
 models/
 *.joblib

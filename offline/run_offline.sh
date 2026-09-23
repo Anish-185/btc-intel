@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# Start btc-intel's API, refusing to start a second one.
+# Start btc-intel: one process serving the API and the console.
 #
-# The failure this prevents: a uvicorn from an earlier session keeps port 8000,
-# the new one exits with "address already in use" somewhere in a log nobody is
-# reading, and the browser spends the next hour talking to a build from before
-# the fix. A demo does not survive that twice.
+# FastAPI serves the built front end from web/dist itself (mounted at /app), so
+# an offline machine needs no second web server, no npm and no node_modules —
+# only the static files the build machine produced.
+#
+# It also refuses to start a second server. The failure that prevents: a
+# uvicorn from an earlier session keeps port 8000, the new one exits with
+# "address already in use" somewhere in a log nobody is reading, and the
+# browser spends the next hour talking to a build from before the fix. A demo
+# does not survive that twice.
 #
 #   offline/run_offline.sh              # start on 127.0.0.1:8000
 #   PORT=8010 offline/run_offline.sh    # somewhere else
+#   HOST=0.0.0.0 offline/run_offline.sh # reachable from another machine
 #   offline/run_offline.sh --check      # check the port and exit
 #
-# Nothing here reaches the network: uvicorn binds to loopback and the pipeline
+# Nothing here reaches the network: uvicorn binds to loopback and every stage
 # reads only what is already on disk.
 set -euo pipefail
 
@@ -59,7 +65,30 @@ if [ "${1:-}" = "--check" ]; then
 fi
 
 commit="$(git -C "$ROOT" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
-echo "btc-intel api — $HOST:$PORT — commit $commit"
-echo "the console compares this commit with its own; a mismatch raises a banner"
+if [ -z "${commit#unknown}" ] && [ -f "$ROOT/offline/bundle.json" ]; then
+  # An installed bundle has no .git directory. The commit it was built from is
+  # in bundle.json, and the console needs it to decide whether it matches.
+  commit="$("$PYTHON" -c 'import json;print(json.load(open("'"$ROOT"'/offline/bundle.json"))["commit"])' 2>/dev/null || echo unknown)"
+fi
+
 cd "$ROOT"
+if [ -f web/dist/index.html ]; then
+  echo "btc-intel — $HOST:$PORT — commit $commit"
+  echo
+  echo "  console   http://$HOST:$PORT/app/     (/ redirects here)"
+  echo "  api docs  http://$HOST:$PORT/docs"
+  echo
+  echo "the console compares this commit with its own; a mismatch raises a banner"
+else
+  cat >&2 <<MSG
+btc-intel api — $HOST:$PORT — commit $commit
+
+web/dist/index.html is missing, so this serves the API only and http://$HOST:$PORT/
+will say so rather than showing a console.
+
+  built bundle:   run offline/build_wheelhouse.sh on the machine with internet
+  developing:     npm --prefix web run build, or npm --prefix web run dev
+
+MSG
+fi
 BTC_INTEL_COMMIT="$commit" exec "$PYTHON" -m uvicorn api.app:app --host "$HOST" --port "$PORT"
