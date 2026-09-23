@@ -37,7 +37,11 @@ from engines.rules.detectors import FeatureSet
 from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
 from ingest.ip_intel import load_intel
 
+from fusion import incremental
+from fusion.pipeline import collect_signals
+
 from . import graph as graph_api
+from . import redteam as redteam_api
 from .case_report import render_pdf
 
 app = FastAPI(title="btc-intel", version="0.1.0",
@@ -83,8 +87,18 @@ def configure(transactions=None, node_intel=None, alerts_json=None,
               feedback=None) -> None:
     STATE.update({"transactions": transactions, "intel_dir": node_intel,
                   "alerts_json": alerts_json, "feedback": feedback})
+    invalidate()
+
+
+def invalidate() -> None:
+    """Forget everything derived from the dataset on disk.
+
+    Called when the artefacts change under us — a red-team injection, or a
+    reset — so the next request rebuilds rather than serving the old case.
+    """
     for cached in (_transactions, _intel, _features):
         cached.cache_clear()
+    BUNDLE.clear()
 
 
 @lru_cache(maxsize=1)
@@ -109,6 +123,50 @@ def _features() -> tuple:
     cfg = config.load()
     graph = build_graph(_transactions(), cfg)
     return graph, FeatureSet.from_graph(graph, cfg)
+
+
+# The full signal bundle: every engine's output for every entity. Built on
+# first use (about three seconds on the demo dataset) because only red team
+# needs it, and kept mutable so an incremental run can extend it in place.
+BUNDLE: dict = {}
+
+
+def bundle() -> dict:
+    if not BUNDLE:
+        cfg = config.load()
+        df = _frame()
+        built = collect_signals(df, cfg, cfg["ingest"]["input_dir"])
+        built["df"] = df
+        built["intel"] = _intel()
+        built["stacker"] = incremental.load_stacker(cfg)
+        BUNDLE.update(built)
+    return BUNDLE
+
+
+def commit_bundle(updated: dict) -> None:
+    """Take the result of an incremental run as the new truth.
+
+    The updated alerts are written where the console reads them, and the
+    cheaper caches are dropped so the queue, the case pages and the graph all
+    show the injected pattern without a restart.
+    """
+    cfg = config.load()
+    alerts = updated.get("alerts_frame")
+    if alerts is not None:
+        parquet = Path(cfg["fusion"]["alerts_parquet"])
+        parquet.parent.mkdir(parents=True, exist_ok=True)
+        alerts.to_parquet(parquet, index=False)
+        payload = {
+            "generated_from": "red-team incremental run",
+            "alert_threshold": cfg["fusion"]["alert_threshold"],
+            "stacker": updated["stacker"].metrics,
+            "alerts": json.loads(alerts.to_json(orient="records")),
+        }
+        Path(cfg["fusion"]["alerts_json"]).write_text(json.dumps(payload, indent=2))
+    for cached in (_transactions, _intel, _features):
+        cached.cache_clear()
+    BUNDLE.clear()
+    BUNDLE.update(updated)
 
 
 def _frame() -> pd.DataFrame:
@@ -471,3 +529,7 @@ def propagation(txid: str) -> dict:
 # The investigation graph endpoints, sharing this module's cached graph and
 # alert list rather than rebuilding either.
 graph_api.register(app, _features, _alerts)
+
+# Red team shares the same cached bundle, and hands back an updated one so the
+# rest of the console sees an injected pattern immediately.
+redteam_api.register(app, bundle, commit_bundle, invalidate)

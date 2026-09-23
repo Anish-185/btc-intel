@@ -20,8 +20,8 @@ Runs fully air-gapped: no network calls at any stage (`offline: true` in `config
 | `engines/anomaly/` | Unsupervised outlier detection |
 | `engines/gnn/` | Graph neural network scoring |
 | `engines/correlation/` | Cross-case / entity correlation |
-| `fusion/` | Combines engine scores into one risk score |
-| `api/` | Local HTTP API |
+| `fusion/` | Combines engine scores into one risk score; `incremental.py` re-runs it over new transactions only |
+| `api/` | Local HTTP API, including the red-team injection endpoints |
 | `web/` | Local UI |
 | `eval/` | Metrics, benchmarks, ground-truth comparison |
 | `offline/` | Pipeline orchestration, air-gapped packaging |
@@ -315,6 +315,48 @@ marked `origin`, runner-ups `runner_up`, and an IP-class badge on every node.
 serves synthetic data. A deployment would need auth, per-case authorisation, an
 audit log of who read which entity, and a CORS list that is not a dev-server
 convenience. Said again at the top of `api/app.py`.
+
+## Red team
+
+A demo surface for the one question an audience actually wants answered: *can I
+make it miss?* Open `/redteam` in the console, pick a laundering typology, set
+its parameters, and inject it into the dataset the detectors have already run
+over. The stack folds the new transactions into the state it already holds —
+`fusion/incremental.py` — and reports what it found.
+
+```sh
+POST /redteam/runs          # start a run, returns a run_id immediately
+GET  /redteam/runs/{id}/events   # server-sent events: stage name + elapsed
+GET  /redteam/runs/{id}     # the finished result
+GET  /redteam/runs          # the scoreboard, with a detection rate per typology
+GET  /redteam/typologies    # what can be injected, and which controls each reads
+POST /redteam/snapshot      # take the reset point before the demo starts
+POST /redteam/reset         # restore the dataset and forget the runs
+```
+
+Three commitments, because a red-team demo that cannot lose proves nothing:
+
+* **Nothing is retrained.** The GNN and the stacker are loaded and scored by
+  inference. A detector refitted around the attack it is being asked to find
+  has been told the answer, not tested.
+* **A miss is reported as fully as a catch.** When nothing alerts, the run
+  returns every engine's score for the injected entities against the threshold
+  they did not clear, and the page shows how far short each one fell.
+* **Origin estimation is scored honestly.** The result gives the rank of the
+  *true* broadcast IP among the estimator's candidates. A null rank means the
+  true origin never appeared in the observed hops — broadcast over Tor, for
+  instance — which no estimator can fix, and which the page says outright.
+
+`POST /redteam/reset` restores the raw dataset *and* everything derived from it
+(the parquet and the alert list), so the console goes back to the case it was
+showing before anyone touched it. `tests/test_redteam.py` checks the restore by
+file hash, and checks that an incremental re-run gives the same scores as a
+full one — which is the only thing that makes "incremental" a speed-up rather
+than a different, faster, wrong detector.
+
+Timings, the stage that dominates, and the optimisation that turned out to be
+slower are in [`docs/redteam_performance.md`](docs/redteam_performance.md):
+**3.45 s median** against a 30-second target, on a CPU-only laptop.
 
 ## Evaluation
 

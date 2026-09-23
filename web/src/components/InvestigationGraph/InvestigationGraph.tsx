@@ -53,6 +53,8 @@ export interface InvestigationGraphProps {
   focusId?: string | null;
   /** Entity ids on the taint path, drawn with moving dashes. */
   taintPath?: string[];
+  /** Node ids to ring — what a red-team run injected, for instance. */
+  highlight?: string[];
   height?: number;
   /** Restore a saved investigation instead of `initial`. */
   investigationId?: string;
@@ -69,6 +71,7 @@ export function InvestigationGraph({
   initial,
   focusId = null,
   taintPath = [],
+  highlight = [],
   height = 560,
   investigationId,
   onNotice,
@@ -359,6 +362,14 @@ export function InvestigationGraph({
     // Re-laying out on selection change would move the graph under the reader.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !highlight.length) return;
+    // ponytail: rings what is on the canvas now — a node pulled in by a later
+    // expansion is not re-checked. Move this into addElements if that matters.
+    for (const id of highlight) cy.getElementById(id).addClass("highlight");
+  }, [cyRef, highlight, initial, ready]);
 
   useEffect(() => {
     const cy = cyRef.current;

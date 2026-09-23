@@ -5,6 +5,7 @@ import { Home } from "./pages/Home";
 import { Alerts } from "./pages/Alerts";
 import { Entity } from "./pages/Entity";
 import { Transaction } from "./pages/Transaction";
+import { RedTeam } from "./pages/RedTeam";
 
 // The investigation graph pulls in Cytoscape and its extensions — the heaviest
 // thing the console loads, and only this route needs it.
@@ -20,6 +21,7 @@ export function App() {
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/entities/:id" element={<Entity />} />
         <Route path="/tx/:txid" element={<Transaction />} />
+        <Route path="/redteam" element={<RedTeam />} />
         <Route
           path="/investigate"
           element={

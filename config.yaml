@@ -239,6 +239,12 @@ engines:
     # on NTRO's real unlabelled data.
     contamination: 0.05
     n_estimators: 200
+    # Cores used to build the forest. Measured, not assumed: on this workload
+    # (a few small peer groups of a few hundred rows) one core is the fastest —
+    # 1.51s against 2.29s on all cores, because joblib's overhead per group
+    # exceeds the work in it. The scores are identical either way, since
+    # random_state is fixed. See docs/redteam_performance.md.
+    n_jobs: 1
     seed: 42
     features: [fan_in_ratio, fan_out_ratio, round_amount_ratio, velocity,
                lifetime_days, counterparties_in, counterparties_out, txs,
@@ -314,6 +320,11 @@ thresholds:
   low: 0.3
   medium: 0.6
   high: 0.8
+
+redteam:
+  # Where the dataset is copied before the first injection of a session, and
+  # what `POST /redteam/reset` restores it from.
+  snapshot_dir: data/processed/redteam_snapshot
 
 api:
   host: 127.0.0.1

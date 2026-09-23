@@ -53,8 +53,12 @@ def peer_groups(entities: pd.DataFrame, cfg: dict | None = None) -> pd.Series:
 
 
 def _score_block(X: pd.DataFrame, a: dict) -> tuple[pd.Series, pd.Series]:
+    # n_jobs only changes how many cores build the trees; with random_state
+    # fixed the forest, and therefore every score, is identical. It is measured
+    # rather than assumed: on our peer groups more cores is slower, so the
+    # configured default is 1 (docs/redteam_performance.md).
     model = IsolationForest(n_estimators=a["n_estimators"], contamination=a["contamination"],
-                            random_state=a["seed"]).fit(X)
+                            random_state=a["seed"], n_jobs=a.get("n_jobs", -1)).fit(X)
     # decision_function: higher is more normal. Flip and squash to [0, 1].
     raw = -model.decision_function(X)
     spread = raw.max() - raw.min()

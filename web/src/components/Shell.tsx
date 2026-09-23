@@ -17,6 +17,7 @@ const PAGES = [
   { to: "/", label: "Overview" },
   { to: "/alerts", label: "Alert queue" },
   { to: "/investigate", label: "Investigation graph" },
+  { to: "/redteam", label: "Red team" },
 ];
 
 export interface Anchor {

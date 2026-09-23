@@ -138,6 +138,23 @@ def shared_ip_penalty(distinct_entities: int, cfg: dict | None = None) -> float:
     return max(s["min_factor"], free / distinct_entities)
 
 
+def asn_index(df: pd.DataFrame) -> dict[str, int]:
+    """ip -> the first ASN seen for it, built once per call.
+
+    This used to be a `df.loc[df["src_ip"] == ip]` scan inside the observation
+    loop: one full pass over every relay row for every observation, which is
+    quadratic in the dataset and was the second-slowest stage of the pipeline.
+    The result is identical — first non-null wins, same as before.
+    """
+    if "asn" not in df.columns or "src_ip" not in df.columns:
+        return {}
+    pairs = df[["src_ip", "asn"]].dropna(subset=["asn"])
+    if pairs.empty:
+        return {}
+    first = pairs.groupby("src_ip", sort=False)["asn"].first()
+    return {str(ip): int(asn) for ip, asn in first.items()}
+
+
 def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | None = None,
                          origins: pd.DataFrame | None = None,
                          intel: IpIntel | None = None) -> list[Observation]:
@@ -161,6 +178,7 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
         origins, _ = estimate_all(df, intel, cfg)
 
     inputs_by_tx = {tx.txid: tx.input_addresses for tx in iter_transactions(df)}
+    asn_by_ip = asn_index(df)
     meta = {}
     for row in df.sort_values("timestamp", kind="stable").itertuples():
         meta.setdefault(str(row.txid), row)          # earliest row, for asn/country/time
@@ -174,7 +192,7 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
         entities = {features.entity_of(a) for a in inputs_by_tx.get(txid, [])}
         ts = pd.Timestamp(row.timestamp).timestamp() if row is not None else 0.0
         ip = str(est.estimated_origin_ip)
-        asn = _asn_of(df, ip)
+        asn = asn_by_ip.get(ip)
         for entity_id in entities:
             observations.append(Observation(
                 entity_id=entity_id, ip=ip, txid=txid, timestamp=ts, asn=asn,
@@ -188,19 +206,6 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
                 origin_confidence=float(getattr(est, "attribution_confidence",
                                                 est.confidence))))
     return observations
-
-
-@lru_cache(maxsize=1)
-def _asn_index(key: int) -> dict:
-    return {}
-
-
-def _asn_of(df: pd.DataFrame, ip: str) -> int | None:
-    match = df.loc[df["src_ip"] == ip, "asn"] if "asn" in df.columns else []
-    for value in match:
-        if not pd.isna(value):
-            return int(value)
-    return None
 
 
 def _text(value) -> str | None:

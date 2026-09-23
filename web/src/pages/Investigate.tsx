@@ -19,6 +19,10 @@ export function Investigate() {
   const [params] = useSearchParams();
   const focus = params.get("focus");
   const investigation = params.get("investigation") ?? undefined;
+  const highlight = useMemo(
+    () => (params.get("highlight") ?? "").split(",").filter(Boolean),
+    [params],
+  );
   const toast = useToast();
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -80,6 +84,7 @@ export function Investigate() {
           <InvestigationGraph
             initial={initial}
             focusId={focus}
+            highlight={highlight}
             investigationId={investigation}
             height={620}
             onNotice={setNotice}
