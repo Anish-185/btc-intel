@@ -36,7 +36,7 @@ export default defineConfig({
     // FastAPI serves the built files and the API from one origin.
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:8010",
         changeOrigin: false,
         rewrite: (path: string) => path.replace(/^\/api/, ""),
       },
