@@ -22,6 +22,7 @@ import config
 
 from . import (clustering_eval, correlation_eval, fusion_eval, origin,
                redteam_batch, saturation, saturation_diagnosis, zero_attack)
+from .ground_truth import score as ground_truth
 from .datasets import build
 
 
@@ -598,6 +599,10 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add("\n## 8. The anomaly engine contributes nothing\n")
     add(anomaly_section(fusion, redteam))
 
+    # --- 9. ground truth on real relay data ------------------------------
+    add("\n## 9. Origin accuracy against known truth\n")
+    ground_truth_section(add, ground_truth.evaluate(cfg, rebuild), cfg)
+
     add(CLOSING)
     return "\n".join(parts)
 
@@ -879,7 +884,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 9. Decisions taken in this pass
+## 10. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker
@@ -913,6 +918,107 @@ an IP correlation says something about *who*, not about whether an entity is
 risky. It is surfaced per alert as attribution leads, each now labelled
 `anonymized entry point` when the candidate is a Tor exit or hosting address.
 """
+
+
+def ground_truth_section(add, result: dict, cfg: dict) -> None:
+    """Section 9. Every other section's origin numbers describe our simulator;
+    this one is the harness for measuring the same thing on real relay data.
+
+    The first line states the data source, because a simulated run and a signet
+    run produce the same table shape and must never be confused for one another.
+    """
+    signet = result["signet"]
+    add(f"\n**Data source: {result['data_source']}.** "
+        + ("A signet capture is present and scored below.\n" if signet else
+           "**No signet capture is present in this run**, so every signet row below is "
+           "marked PENDING and the only measured rows come from the gossip simulation. "
+           "A simulated row is never a statement about Bitcoin.\n"))
+    add("\nProtocol pre-registered in `docs/GROUND_TRUTH.md`, committed with the harness "
+        "and\nbefore any signet number existed. Capture setup, and how each topology "
+        "condition is\nforced and verified, are in the same document.\n")
+    add("\nThe two topology conditions are **separate measurements and are never "
+        "pooled**:\n\n"
+        "* **adjacent** — the broadcaster is directly peered with the observer. The "
+        "trivial\n  upper bound: the first announcement we see really is the source's "
+        "own.\n"
+        "* **non_adjacent** — at least one hop between them. The real result, and the "
+        "only\n  one that says anything about a deployment.\n")
+
+    if result["pending"]:
+        add(f"\n**PENDING: {', '.join(result['pending'])}.** "
+            "No sealed signet bundle for "
+            + ("either condition" if len(result["pending"]) > 1 else "this condition")
+            + " is present. The rows are left in place rather than filled from the "
+            "simulation.\n")
+    if result.get("skipped_bundles"):
+        add("\nBundles present but not scored as signet (their label file does not say "
+            "`source: signet`): "
+            + ", ".join(f"`{b['bundle']}` ({b['source']})" for b in result["skipped_bundles"])
+            + ". Test fixtures live in the same directory and are excluded by that rule.\n")
+
+    for condition in ("adjacent", "non_adjacent"):
+        entry = signet.get(condition)
+        add(f"\n### {condition} — signet\n")
+        if entry is None:
+            add("PENDING — no sealed capture for this condition.\n")
+            continue
+        if entry.get("status") != "scored":
+            add(f"**{entry['status']}**\n")
+            for failure in entry.get("failures", []):
+                add(f"\n* {failure}\n")
+            continue
+        add(f"Bundle `{entry['bundle']}`, manifest verified, "
+            f"{entry['transactions_scored']} transactions scored.\n\n")
+        add(md_table(entry["table"]))
+        add("\n" + md_table(pd.DataFrame([entry["noise_floor"]])))
+        add("\n" + md_table(pd.DataFrame([entry["wtxid_resolution"]])))
+
+    simulated = result["simulated"]
+    add("\n### simulated — `generator/`'s 500-node gossip network\n")
+    add(f"`condition=\"simulated\"`. {simulated['describes']}. Deterministic, always "
+        "available, and **not a stand-in for a signet run**: the simulation is observed "
+        "at many relays, so its trees carry the positional structure a single-observer "
+        "capture does not have.\n\n")
+    add(md_table(simulated["table"]))
+    add("\nRow 1 is the floor — earliest sighting wins, no class weighting, no "
+        "abstention. It is\nwhat naive analysis does, and under the pre-registered cost "
+        "weights it scores\n**negative**: naming the wrong uninvolved address is priced "
+        "at -3, and the floor does it\noften. Rows 2-4 are the three estimators from "
+        "`engines/propagation/` unchanged. Row 5\nis held open for the supervised "
+        "origination model and is marked PENDING rather than\nleft out, so its absence "
+        "is visible.\n")
+    add("\n**Relay-delay noise floor.** How far apart announcements of the same "
+        "transaction\nactually arrive, and what that implies for any timing-based "
+        "estimator:\n\n")
+    add(md_table(pd.DataFrame([simulated["noise_floor"]]), floats=6))
+    add("\n`timing ceiling` is the share of multi-peer transactions where the true "
+        "origin\nannounced *first and by more than the clock resolution*. No estimator "
+        "that reads only\ntiming can exceed it, however it weights what it reads.\n")
+    matrix = result.get("relay_features")
+    if matrix is not None and len(matrix):
+        add("\n### The relay feature matrix\n")
+        add("`features/relay.py`, grain `(txid, peer_ip, capture_id)` — the input the "
+            "supervised\norigination model will read. Every column, its null semantics "
+            "and its causality\nargument are in `docs/FEATURE_SCHEMA_RELAY.md`. The "
+            "`source` column is carried here\nbecause a fixture-derived row must never "
+            "be read as a signet one.\n\n")
+        add(md_table(matrix, floats=4))
+        add("\n`degenerate` is the share of rows whose transaction had 0 or 1 candidate "
+            "— nothing to\nrank. `scope_out` is the share where no candidate could "
+            "plausibly be the sender, which\nis the zero-ceiling case in feature form. "
+            "Both are rows a model must abstain on rather\nthan learn from, which is "
+            "why they are counted before any model exists. `quarantined`\ncounts "
+            "announcements still identified by a wtxid, kept in a separate file and "
+            "never\nmerged into the matrix.\n")
+
+    add("\n**One observer sees a star, not a tree.** A single-observer capture yields "
+        "one edge\nper announcement — peer to observer — so rumor centrality, which "
+        "maximises over tree\nposition, has nothing to rank on once the observer is "
+        "excluded as a candidate for its\nown observations. That is not a defect in "
+        "Shah & Zaman; it is what their estimator\ndoes when the observed topology "
+        "carries no positional information. On the signet\nconditions only timing "
+        "carries signal, which is why the noise floor above is the\nnumber that bounds "
+        "them. A multi-observer capture would restore the topology.\n")
 
 
 def main(argv=None) -> None:

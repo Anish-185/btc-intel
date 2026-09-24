@@ -1,0 +1,21 @@
+{
+  "bundle": "non_adjacent-synthetic",
+  "sealed_at": "2026-09-24T13:32:05+00:00",
+  "note": "SYNTHETIC test fixture, not a signet capture. raw_hex is trimmed to a stub: these transactions were never built, and nothing here may be scored as a measurement of Bitcoin. Committed to exercise the manifest, preflight and scoring path end to end.",
+  "files": [
+    {
+      "path": "capture.btcap",
+      "bytes": 29074,
+      "modified": "2026-09-24T13:32:05+00:00",
+      "sha256": "dd6f6c1e52fae8a5cbd0556a7759a7beb282dd15ff33c4b369b2340849140f99"
+    },
+    {
+      "path": "non_adjacent-synthetic.labels.json",
+      "bytes": 15625,
+      "modified": "2026-09-24T13:32:05+00:00",
+      "sha256": "8defb5254e4006cecaf3ed43c47d42884ecf5d81763d675f1c8a68de089ddb86"
+    }
+  ],
+  "manifest_hash": "fcd1a7ff9b07a49c8afae1b3073473e213f2a405b3462e3e05199da18a540bb1",
+  "ledger_head_at_seal": "dd62f7166ddf0777d3a8f6459fe9b57e4ddbba95d66fed75bb647dec26620d99"
+}

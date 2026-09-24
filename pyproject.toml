@@ -27,7 +27,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["generator", "ingest", "graph", "features", "engines", "fusion", "api", "eval", "offline"]
+# Top-level packages only: hatch ships a declared package's subpackages with it,
+# so `eval/ground_truth/` needs no entry of its own. tests/test_packages.py
+# asserts both halves of that — every top-level package is listed, and every
+# nested package has an __init__.py and a declared parent, so nothing imports
+# from a checkout and then goes missing from the wheel.
+packages = ["generator", "ingest", "graph", "features", "engines", "fusion", "p2p", "api", "eval", "offline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

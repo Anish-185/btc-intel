@@ -93,6 +93,11 @@ graph:
 features:
   entity_path: data/processed/features.parquet
   transaction_path: data/processed/features_tx.parquet
+  # The third grain: one row per candidate peer per txid per capture
+  # (features/relay.py). Rows still identified by a wtxid go to the quarantine
+  # file rather than into the matrix, following ingest/'s convention.
+  relay_path: data/processed/features_relay.parquet
+  relay_quarantine_path: data/processed/features_relay_quarantine.parquet
 
   # "suspiciously round": a multiple of one of these, to within the tolerance
   round_units: [1.0, 0.5, 0.1, 0.05, 0.01]
@@ -294,6 +299,24 @@ eval:
   results_path: eval/results.md
   calibration_bins: 5
 
+  ground_truth:
+    # Origin accuracy against known truth on real relay data (eval/ground_truth/).
+    # Protocol pre-registered in docs/GROUND_TRUTH.md, committed before any
+    # signet number existed.
+    fixtures_dir: tests/fixtures/ground_truth
+    # Preflight thresholds. Each one refuses a capture rather than warning:
+    # a warning in a log is not a number an investigator will decline to quote.
+    min_subsecond_share: 0.5      # logtimemicros=1, or a pcap
+    max_unresolved_wtxid_share: 0.05   # after the label file has resolved what it can
+    wilson_z: 1.96                # 95% intervals; the samples are dozens, not thousands
+    # The observer's clock resolution, used for the timing ceiling: two
+    # announcements closer together than this cannot be ordered at all.
+    clock_resolution_seconds: 0.000001
+    delta_percentiles: [50, 90, 99]
+    # Defaults for a broadcast run on the collection host.
+    n_transactions: 50
+    interval_seconds: 20.0
+
 fusion:
   alerts_parquet: data/processed/final_alerts.parquet
   # Analyst verdicts from the API, for recalibrating fusion/stacker.py later.
@@ -343,6 +366,29 @@ monitor:
   # A file is only read once its size has stopped changing, so a writer still
   # copying into the directory is not parsed half-written.
   settle_seconds: 0.4
+
+p2p:
+  # Real Bitcoin P2P relay observations, read from files (p2p/capture_reader.py).
+  # Nothing here opens a socket: a capture is produced on a collection host by
+  # bitcoind or tcpdump and carried across the air gap — see docs/CAPTURE.md.
+  capture_dir: data/capture
+  port: 8333
+  # Magics we resynchronise a desynchronised TCP stream on: main, testnet3,
+  # signet, regtest. Any other value in a capture is not a stream we understand.
+  network_magics: [f9beb4d9, 0b110907, 0a03cf40, fabfb5da]
+  # The capture host's own addresses, which decide inbound from outbound. Left
+  # empty the reader infers it as the address common to every flow — true for a
+  # capture taken on the node itself, false on a span port or a multi-homed
+  # host, which is exactly when to fill this in.
+  local_ips: []
+  # How much of the `direction` column is evidence rather than assumption. The
+  # direction on a relay event is always inferred — from which end of a pcap
+  # flow was local, or from the verb on a debug.log line — so what varies is how
+  # the observer's own address was established, and that is what is scored here.
+  direction_confidence:
+    explicit: 1.0                 # passed in by the operator running the build
+    label_file: 1.0               # recorded by the broadcaster at capture time
+    "config:p2p.local_ips": 0.9   # a standing statement about the deployment
 
 custody:
   # The chain-of-custody ledger: append-only, hash-chained, tamper-evident.

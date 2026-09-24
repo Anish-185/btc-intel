@@ -81,10 +81,15 @@ class OriginEstimate:
 
 # --- estimators -----------------------------------------------------------
 def first_timestamp(tree: PropagationTree, cfg: dict | None = None) -> dict[str, float]:
-    """Earliest sighting wins; scores decay with reporting order."""
+    """Earliest sighting wins; scores decay with reporting order.
+
+    The ordering, ties included, is `PropagationTree.order()` — every tree ties
+    at its earliest moment because one relay record stamps both ends of a hop,
+    and the tie is resolved on which end was sending. See that method.
+    """
     if not tree.first_seen:
         return {}
-    order = sorted(tree.first_seen, key=tree.first_seen.get)
+    order = tree.order()
     n = len(order)
     return {ip: (n - i) / n for i, ip in enumerate(order)}
 
@@ -98,7 +103,7 @@ def rumor_centrality(tree: PropagationTree, cfg: dict | None = None) -> dict[str
     if n == 1:
         return {next(iter(t.nodes)): 1.0}
 
-    root = tree.earliest() if tree.earliest() in t else next(iter(t.nodes))
+    root = tree.earliest() if tree.earliest() in t else min(t.nodes)
     parent: dict[str, str | None] = {root: None}
     order: list[str] = []
     stack = [root]
@@ -106,7 +111,9 @@ def rumor_centrality(tree: PropagationTree, cfg: dict | None = None) -> dict[str
     while stack:                                   # iterative DFS: trees can be deep
         node = stack.pop()
         order.append(node)
-        for nb in t.neighbors(node):
+        # Sorted, so the traversal — and the subtree sizes the centrality is
+        # computed from — depend on the graph and not on insertion order.
+        for nb in sorted(t.neighbors(node)):
             if nb not in seen:
                 seen.add(nb)
                 parent[nb] = node

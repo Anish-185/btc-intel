@@ -1,0 +1,11 @@
+2026-09-24T10:00:00.000000Z Bitcoin Core version v25.0.0
+2026-09-24T10:00:00.100000Z New outbound peer connected: version: 70016, blocks=840000, peer=1, peeraddr=203.0.113.9:8333 (block-relay-only)
+2026-09-24T10:00:00.110000Z receive version message: /Satoshi:25.0.0/: version 70016, blocks=840000, us=198.51.100.2:8333, peer=1
+2026-09-24T10:00:00.400000Z New outbound peer connected: version: 70016, blocks=840000, peer=2, peeraddr=198.51.100.77:8333 (full-relay)
+2026-09-24T10:00:00.410000Z receive version message: /bitcoinj:0.16.2/: version 70015, blocks=840000, us=198.51.100.2:8333, peer=2
+2026-09-24T10:00:01.250000Z got inv: tx 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b  new peer=1
+2026-09-24T10:00:01.310000Z got inv: wtx 0000000000000000000000000000000000000000000000000000000000000abc  new peer=2
+2026-09-24T10:00:01.420000Z sending inv: tx 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b peer=2
+2026-09-24T10:00:01.500000Z received: tx (223 bytes) peer=1
+2026-09-24T10:00:02.000000Z AcceptToMemoryPool: peer=1: accepted 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b
+2026-09-24T10:00:03.000000Z socket closed for peer=2
