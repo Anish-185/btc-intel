@@ -56,13 +56,108 @@ Each lead's own verdict says how many of its observations were degenerate.
 The DANDELION_STEM thresholds were fixed in config.yaml from the shape a stem
 leaves, before the first result, and were not tuned afterwards.
 
-## Results
+## Metric revision
+
+**Pre-registered.** Written and committed before the evaluation was re-run;
+nothing in this section was changed after the first revised result existed.
+
+### What P6 showed
+
+Enforced as a binary gate, the validity layer lowered the cross-topology cost
+score from 0.057 to 0.034. The per-reason table (P6 results, below) shows why,
+and each reason failed differently:
+
+* **DANDELION_STEM** withheld 230 answers that were correct_actionable against 23
+  wrong. The detector cannot tell an observer that is the sender's *first* stem
+  hop — where the lone first announcer really is the sender — from one further
+  down the stem. It also fired on 4.2% of the base corpus, which has no stems.
+  And the condition it guards against does not occur on Bitcoin's network:
+  BIP-156 (Dandelion) was never merged into Bitcoin Core, and no Core release
+  has a stem phase. A gate for a condition the deployed network does not
+  produce, with 0.43 precision, costs answers and protects nothing.
+* **TOR_OR_V2** fired mostly on v2. BIP-324 encrypts a link; it hides neither
+  the peer's address nor its timing from the node at the other end, and the
+  simulator models no v2 timing effect at all, so every v2 abstention withheld
+  an answer the evidence did not question. What v2 does remove is a *passive*
+  observer's view: a packet capture cannot read a v2 link, so its candidate set
+  can be missing the v2 peers. That is a statement about the capture, not
+  about the answer.
+* **COINJOIN** withheld 167 right answers against 12 wrong — but the metric
+  scored "naming the broadcaster of a mix" exactly like naming the sender of
+  a payment. An unqualified answer about a CoinJoin claims more than the
+  evidence supports: it reads as "this address sent these coins", and the
+  inputs belong to 5–12 unrelated participants. P6's cost function had no
+  outcome for that claim, so it could not price what abstaining avoided.
+* **TOR (onion)** answers were already scored correct_infrastructure (+0.3)
+  after the onion classification fix, not correct_actionable. The onion
+  clause had precision 1.0; the question is what the answer may *say*, not
+  whether to give one.
+
+### Verdict tiers
+
+Every detector still runs, and every reason that fires is reported. The
+verdict's tier is the most severe tier among them:
+
+| tier | reasons | what happens to the answer |
+| --- | --- | --- |
+| **ABSTAIN** | `DEGENERATE`, `NOT_REACHABLE` | withheld through `low_confidence_origin` / `eval.origin.flagged_at`, as before. Already free: both were abstentions by construction in P6. |
+| **QUALIFIED** | `TOR_ONION`, `COINJOIN` | given, with its meaning restricted. TOR_ONION: the answer is an onion identity and is never presented as an IP. COINJOIN: the answer is the broadcasting peer only; input ownership is explicitly non-attributable; taint still terminates at the mix. Neither becomes a correlation lead. |
+| **ANNOTATE** | `DANDELION_STEM`, `V2_PASSIVE_TAP` | given unchanged, with the flag and its evidence attached. DANDELION_STEM leaves the abstention path because Dandelion is not deployed in Bitcoin Core. V2_PASSIVE_TAP replaces the v2 clause and fires only on a pcap capture in which port-8333 flows could not be decoded — the evidence that v2 peers are missing from the candidate set. A debug.log or .btcap capture is written by the node, a session endpoint that decrypts, so v2 never fires there. (A pcap taken on the node's own host is no better than a span port: tcpdump does not hold the session keys. "Endpoint" here means the node process, not the host.) |
+| **PASS** | none | unchanged. |
+
+`validity.enforce: false` stays the off switch. `validity.mode: binary`
+reproduces P6's gate (every non-PASS verdict abstains) so P6's policy can be
+scored under the new metric.
+
+### Cost-function outcomes
+
+`eval.origin`'s outcome vocabulary is extended, not forked. Each estimate gets
+exactly one outcome, decided in this order; the weights go in
+`engines.propagation.origin_filter.cost_weights`.
+
+| order | outcome | when | weight | rationale |
+| --- | --- | --- | --- | --- |
+| 1 | `abstained` | the policy withholds it (ABSTAIN tier; any non-PASS under `binary`; the cutoff; a relay at the top) | 0.0 | unchanged |
+| 2 | `coinjoin_input_misattribution` | the transaction is a CoinJoin by ground truth, it is answered, and the answer is not qualified COINJOIN (layer off, `binary`, or the detector missed it) | **−3.0** | An unqualified answer about a mix asserts ownership of other participants' inputs: a false claim that points follow-up at people it should not. That is the harm `wrong_uninvolved_third_party` prices, so it carries the same weight. It is not scaled by the number of participants: the harm is the claim, and scaling would let the generator's participant-count distribution set the number. It applies whether or not the named broadcaster is right, because the ownership claim is wrong either way. |
+| 3 | `qualified_correct` | QUALIFIED tier, answered, the named peer is the true origin | **+0.3** | Equal to `correct_infrastructure`: a right answer that cannot support IP-level follow-up (an onion identity) or supports it only for the broadcaster and never for input ownership (a CoinJoin). |
+| 4 | `qualified_wrong` | QUALIFIED tier, answered, the named peer is not the true origin | **−1.0** | Qualification scales the cost of a wrong answer by the same factor it scales the value of a right one: 0.3 / 1.0 for right answers, −1.0 / −3.0 for wrong ones. Not −3: the qualification removes the claim that makes a wrong answer expensive (a wrong onion identity names no IP; a wrong CoinJoin broadcaster is presented without input ownership). Not 0: it still sends an investigator to the wrong node. |
+| 5 | `correct_actionable`, `correct_infrastructure`, `wrong_uninvolved_third_party` | everything else, ANNOTATE tier included | +1.0, +0.3, −3.0 | unchanged |
+
+The **P6 metric** is outcomes 1 and 5 only, with P6's weights. Every row of the
+revised report shows the P6 metric and the revised metric side by side.
+
+### Protocol
+
+* Three policies are scored on the same test transactions: **off**
+  (`enforce: false`), **binary** (P6's gate, current detectors), **tiered**
+  (the revision). Each is scored under both metrics.
+* Each (policy, metric) row's abstention cutoff is chosen on the calibration
+  captures under that policy and that metric, by `eval.origin.choose_cutoff_for`.
+* Base and variant corpora, within- and cross-topology.
+* **Decision rule:** the revision beats no-validity if and only if the tiered
+  policy's cross-topology cost score on the **revised** metric exceeds the off
+  policy's on the same metric. Reported plainly either way. The weights above
+  are not changed after the result.
+* **Known bias, stated in advance.** Outcome 2 can only lower the off policy's
+  score: it prices a claim the off policy makes and the tiered policy does not.
+  It is justified on its own terms above, not by its effect; the P6 metric is
+  reported beside it on every row so the share of any difference that comes
+  from the metric rather than from the policy is visible. The tiered policy
+  must also beat off on the P6 metric for the revision to be called an
+  improvement *without* qualification; beating it only on the revised metric
+  will be reported as exactly that.
+* Red-team time-to-detect is re-run on an otherwise idle machine to settle
+  whether P6's 2.22 s → 4.44 s was load.
+
+## P6 results (frozen)
+
+The binary layer as committed in `3a1752a`: every non-PASS verdict abstained, v2 fired on every v2 link. Kept verbatim; the numbers below are the ones the metric revision responds to, and they are never regenerated.
 
 `condition="simulated"`. **What the simulator omits:** The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
 
 Corpus variant `efc5a443edf54d56`, deterministic from `origination/manifest_validity.json`: the base manifest's captures, each drawing four independent toggles. The model is fitted, calibrated and scored on it exactly as in section 9. Captures with each toggle on: dandelion 1029, onion 1037, v2 1101, coinjoin 1071, of 2160.
 
-### Ground-truth prevalence
+#### Ground-truth prevalence
 
 | condition | measure | transactions | share of broadcast |
 | --- | --- | --- | --- |
@@ -76,7 +171,7 @@ Corpus variant `efc5a443edf54d56`, deterministic from `origination/manifest_vali
 
 *`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
 
-### Detector precision and recall against the generator's labels
+#### Detector precision and recall against the generator's labels
 
 Each detector run on its own over every observed test transaction. TOR_OR_V2 depends on which peer is named; the model's choice is used.
 
@@ -97,7 +192,7 @@ Each detector run on its own over every observed test transaction. TOR_OR_V2 dep
 
 On the base corpus `945261fe69e264d6` (cross-topology test set), where no transaction has a stem, DANDELION_STEM fires on 815 of 19414 transactions (0.042): every one a false alarm.
 
-### The system with and without the validity layer
+#### The system with and without the validity layer
 
 The supervised model on the same test transactions; each row's cutoff chosen on the calibration captures by `eval.origin.choose_cutoff_for`, with the layer on and off respectively. **The headline is `cost_weighted_score` and `acc if answered`.**
 
@@ -112,7 +207,7 @@ The supervised model on the same test transactions; each row's cutoff chosen on 
 
 **Verdict (cross-topology): the validity layer does not improve the cost score** — 0.034 with it against 0.057 without. That means its detectors abstain on transactions the model was getting right more often than on ones it was getting wrong; the ablation shows which. Accuracy-given-answered is 0.874 with the layer and 0.9 without; abstention 0.932 against 0.885.
 
-### What each reason withholds
+#### What each reason withholds
 
 At the layer-off cutoff: how many transactions each reason withholds that the layer-off system would have answered, what those answers would have been, and the cost score with only that reason enforced. DEGENERATE and NOT_REACHABLE were already abstentions by construction and cost nothing new.
 
@@ -131,7 +226,7 @@ At the layer-off cutoff: how many transactions each reason withholds that the la
 
 *`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
 
-### Verdicts issued on the test sets
+#### Verdicts issued on the test sets
 
 | verdict | within-topology | cross-topology |
 | --- | --- | --- |
@@ -144,7 +239,7 @@ At the layer-off cutoff: how many transactions each reason withholds that the la
 
 *`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
 
-### The variant's section-9 table (cross-topology), validity enforced
+#### The variant's section-9 table (cross-topology), validity enforced
 
 | condition | test set | estimator | n | top1 | top1 95% CI | top3 | top3 95% CI | abstention rate | acc if answered | acc if answered 95% CI | ceiling (origin observed) | cost_weighted_score | wrong_uninvolved_third_party | cutoff (chosen on calibration) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
