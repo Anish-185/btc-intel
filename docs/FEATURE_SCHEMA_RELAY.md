@@ -144,7 +144,8 @@ really aimed at.
 | `non_standard_port` | bool | never | — | Not `p2p.port`. A node on a non-default port is not running a stock listener. |
 | `is_ipv6` | bool | never | — | Address contains `:`. |
 | `is_onion` | bool | never | — | `.onion` address. A peer reached over Tor has no meaningful arrival timing relative to clearnet peers. |
-| `transport_v2` | bool | never (`False` when unknown) | — | The event arrived over BIP-324 encrypted transport, as recorded by the capture reader. Read by `analysis.validity` (TOR_OR_V2), not by the model. |
+| `transport_v2` | bool | never (`False` when unknown) | — | The event arrived over BIP-324 encrypted transport, as recorded by the capture reader. Informational; the model does not read it. |
+| `unreadable_flows` | Int64 | null unless the capture is a pcap | capture-wide | Port-8333 flows in the pcap that carried payload and never decoded — consistent with BIP-324 v2. Read by `analysis.validity` (V2_PASSIVE_TAP). |
 | `user_agent` | object | null when no handshake was captured | capture-wide | The peer's subver string. **The one deliberate exception to causality**: a client version does not change within a capture, so learning it from a handshake logged after an announcement reveals nothing about that announcement's timing or origin. |
 | `user_agent_class` | str | never (`unknown`) | capture-wide | Family: `core`, `btcd`, `bcoin`, `libbitcoin`, `bitcoinj`, `knots`, `gocoin`, `other`, `unknown`. |
 | `ip_class` | str | never | — | From `ingest.ip_intel`: `known_bitcoin_relay`, `tor_exit`, `hosting_vpn`, `residential_or_unknown`. |

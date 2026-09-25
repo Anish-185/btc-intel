@@ -1,31 +1,31 @@
-"""The validity layer: when an origin attribution is invalid, say so and abstain.
+"""The validity layer: when an origin attribution is invalid, or means less than
+it appears to, say so — and say which.
 
-Calibration answers "how often is a 0.8 right?". This module answers a prior
-question — "is this a transaction origin attribution can be about at all?" —
-and when the answer is no, the attribution is withheld with a reason code and
-the evidence behind it. docs/VALIDITY.md is the taxonomy.
+Calibration answers "how often is a 0.8 right?". This module answers prior
+questions: can an attribution be about this transaction at all, and if so,
+what may it claim? docs/VALIDITY.md is the taxonomy and the pre-registered
+metric revision. Every reason that fires is reported; the verdict's tier is
+the most severe among them:
 
-    DEGENERATE      candidate_count 0 or 1: nothing to rank.
-    NOT_REACHABLE   every candidate is a known public relay (the matrix's
-                    `scope_out`): the sender is not among what this observer
-                    can see, which is the zero-ceiling case.
-    COINJOIN        one broadcaster, many owners: naming whoever broadcast it
-                    attributes nobody else's inputs.
-    TOR_OR_V2       the named peer is a .onion address, or reached us over
-                    BIP-324 encrypted transport.
-    DANDELION_STEM  the first announcement stands alone before a burst: the
-                    shape a stem-phase relay leaves, where the first announcer
-                    is one hop of a serial chain, not the sender.
+  ABSTAIN    DEGENERATE      candidate_count 0 or 1: nothing to rank.
+             NOT_REACHABLE   every candidate is a known public relay (the
+                             matrix's `scope_out`): the zero-ceiling case.
+  QUALIFIED  COINJOIN        the answer is the broadcasting peer only; the
+                             inputs' ownership is not attributable.
+             TOR_ONION       the answer is an onion identity, never an IP.
+  ANNOTATE   DANDELION_STEM  the first announcement stands alone before a
+                             burst, the shape a stem leaves. Flag only:
+                             Dandelion is not deployed in Bitcoin Core.
+             V2_PASSIVE_TAP  a pcap capture held port-8333 flows it could not
+                             decode (BIP-324 v2): v2 peers may be missing from
+                             the candidates. Never on debug.log/.btcap, which
+                             the node — a session endpoint — writes.
 
-A failed check does not open a second abstention path. It sets
-`low_confidence_origin` (engines.propagation) and is read by
-`eval.origin.flagged_at`, the one rule every origin output already abstains
-through; `validity.enforce: false` in config.yaml switches it off there, which
-is how the with/without comparison and the no-abstention floor are scored.
-
-Each detector returns a `Verdict` (reason code, confidence the condition is
-present, evidence) or None. `assess` runs them in the order above and reports
-the first that fires.
+Only ABSTAIN withholds an answer, and it does so through the existing rule —
+`low_confidence_origin` (engines.propagation) and `eval.origin.flagged_at` —
+not a second path. `validity.enforce: false` switches the layer off there;
+`validity.mode: binary` restores P6's gate, where every non-PASS verdict
+abstained, so that policy can still be scored.
 """
 
 from __future__ import annotations
@@ -43,31 +43,46 @@ PASS = "PASS"
 DEGENERATE = "DEGENERATE"
 NOT_REACHABLE = "NOT_REACHABLE"
 COINJOIN = "COINJOIN"
-TOR_OR_V2 = "TOR_OR_V2"
+TOR_ONION = "TOR_ONION"
 DANDELION_STEM = "DANDELION_STEM"
-REASONS = (DEGENERATE, NOT_REACHABLE, COINJOIN, TOR_OR_V2, DANDELION_STEM)
+V2_PASSIVE_TAP = "V2_PASSIVE_TAP"
+#: Most severe first; `assess` reports them in this order.
+REASONS = (DEGENERATE, NOT_REACHABLE, COINJOIN, TOR_ONION, DANDELION_STEM, V2_PASSIVE_TAP)
+
+ABSTAIN, QUALIFIED, ANNOTATE = "ABSTAIN", "QUALIFIED", "ANNOTATE"
+TIER = {DEGENERATE: ABSTAIN, NOT_REACHABLE: ABSTAIN,
+        COINJOIN: QUALIFIED, TOR_ONION: QUALIFIED,
+        DANDELION_STEM: ANNOTATE, V2_PASSIVE_TAP: ANNOTATE}
 
 #: The columns a frame of origins carries.
-COLUMNS = ["validity", "validity_confidence", "validity_evidence"]
+COLUMNS = ["validity", "validity_tier", "validity_reasons", "validity_confidence",
+           "validity_evidence"]
 
 
 @dataclass(frozen=True)
 class Verdict:
-    reason: str = PASS
-    confidence: float | None = None       # that the condition is present; None on PASS
+    reason: str = PASS                    # the most severe reason that fired
+    confidence: float | None = None       # that it is present; None on PASS
     evidence: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()         # every reason that fired, in REASONS order
 
     @property
     def passed(self) -> bool:
         return self.reason == PASS
 
+    @property
+    def tier(self) -> str:
+        return TIER.get(self.reason, PASS if self.passed else self.reason)
+
     def as_dict(self) -> dict:
-        return {"status": "PASS" if self.passed else "INCONCLUSIVE",
-                "reason": None if self.passed else self.reason,
-                "confidence": self.confidence, "evidence": list(self.evidence)}
+        return {"tier": self.tier, "reason": None if self.passed else self.reason,
+                "reasons": list(self.reasons), "confidence": self.confidence,
+                "evidence": list(self.evidence)}
 
     def columns(self) -> dict:
-        return {"validity": self.reason, "validity_confidence": self.confidence,
+        return {"validity": self.reason, "validity_tier": self.tier,
+                "validity_reasons": list(self.reasons),
+                "validity_confidence": self.confidence,
                 "validity_evidence": list(self.evidence)}
 
 
@@ -76,11 +91,43 @@ VALID = Verdict(PASS, None, ("no invalidating condition detected",))
 #: Not a detector: what an output stored before this layer existed carries, so
 #: that it is never served without a verdict and never passed off as PASS.
 NOT_ASSESSED = Verdict("NOT_ASSESSED", None, (
-    "produced before the validity layer existed; rerun the pipeline to assess it",))
+    "produced before the validity layer existed; rerun the pipeline to assess it",),
+    ("NOT_ASSESSED",))
 
 
 def enforced(cfg: dict) -> bool:
     return bool(cfg.get("validity", {}).get("enforce", True))
+
+
+def tiered(cfg: dict) -> bool:
+    """Qualifications are in force: the layer is on and not in P6's binary mode."""
+    return enforced(cfg) and cfg.get("validity", {}).get("mode", "tiered") == "tiered"
+
+
+def withholds(tier: str, cfg: dict) -> bool:
+    """Whether a verdict of this tier abstains under the configured policy."""
+    if not enforced(cfg):
+        return False
+    return tier == ABSTAIN if tiered(cfg) else tier != PASS
+
+
+def answer(peer: str | None, verdict: Verdict, cfg: dict) -> dict | None:
+    """What an origin answer may claim. A QUALIFIED answer is never shaped like
+    an IP attribution: an onion identity has no `ip`, and a CoinJoin
+    broadcaster carries an explicit `input_ownership: not attributable`."""
+    if peer is None or withholds(verdict.tier, cfg):
+        return None
+    qualified = tiered(cfg)
+    if qualified and TOR_ONION in verdict.reasons:
+        out = {"kind": "onion_identity", "onion": peer,
+               "actionable": "not for IP-level follow-up"}
+    elif qualified and COINJOIN in verdict.reasons:
+        out = {"kind": "broadcasting_peer", "ip": peer}
+    else:
+        return {"kind": "ip_attribution", "ip": peer}
+    if COINJOIN in verdict.reasons:
+        out["input_ownership"] = "not attributable: a CoinJoin's inputs have many owners"
+    return out
 
 
 # --- the detectors ----------------------------------------------------------
@@ -111,20 +158,30 @@ def coinjoin(tx: Tx | None, cfg: dict) -> Verdict | None:
     return Verdict(COINJOIN, round(min(1.0, len(group) / target), 3), (
         f"{len(group)} of {len(tx.outputs)} outputs pay {value:.8f} BTC, from "
         f"{len(tx.inputs)} inputs",
-        "a CoinJoin has one broadcaster and many owners: whoever broadcast it says "
-        "nothing about who owns the other inputs"))
+        "a CoinJoin has one broadcaster and many owners: the answer names who "
+        "broadcast it, never who owns its inputs"))
 
 
-def tor_or_v2(peer: str | None, transport: str | None) -> Verdict | None:
-    if peer and str(peer).endswith(".onion"):
-        return Verdict(TOR_OR_V2, 1.0, (
-            f"{peer} is a Tor hidden service: its timing includes a Tor circuit and "
-            "its address names nobody",))
-    if transport == "v2":
-        return Verdict(TOR_OR_V2, 1.0, (
-            f"{peer} announced over BIP-324 encrypted transport: a passive capture "
-            "cannot read that link, so this view of the peer may be incomplete",))
-    return None
+def tor_onion(peer: str | None) -> Verdict | None:
+    if not (peer and str(peer).endswith(".onion")):
+        return None
+    return Verdict(TOR_ONION, 1.0, (
+        f"{peer} is a Tor hidden service: the answer is that onion identity, which "
+        "names no IP and supports no IP-level follow-up",))
+
+
+def v2_passive_tap(capture_source: str | None, unreadable_flows) -> Verdict | None:
+    """Only a packet capture is blind to BIP-324: bitcoind's own log, and a
+    .btcap its collector writes, come from the node, which decrypts."""
+    if not (capture_source and str(capture_source).startswith("pcap:")):
+        return None
+    if not unreadable_flows or pd.isna(unreadable_flows) or int(unreadable_flows) <= 0:
+        return None
+    n = int(unreadable_flows)
+    return Verdict(V2_PASSIVE_TAP, 1.0, (
+        f"this packet capture held {n} port-8333 flow{'s' if n != 1 else ''} it could not "
+        "decode, consistent with BIP-324 v2 encryption: peers on those links are missing "
+        "from the candidates",))
 
 
 def dandelion_stem(times, cfg: dict) -> Verdict | None:
@@ -150,23 +207,31 @@ def dandelion_stem(times, cfg: dict) -> Verdict | None:
     return Verdict(DANDELION_STEM, round(1.0 - 0.5 * d["isolation_ratio"] / ratio, 3), (
         f"the first announcement stood alone for {gaps[0] * 1000:.0f} ms, "
         f"{ratio:.1f}x the median gap between the {len(t) - 1} that followed",
-        "a Dandelion stem forwards to one peer at a time before broadcast, so the "
-        "first announcer may be a stem relay, not the sender"))
+        "consistent with a Dandelion stem, where the first announcer may be a relay; "
+        "a flag only — Bitcoin Core has no stem phase"))
 
 
 # --- one origin --------------------------------------------------------------
+def combine(fired: list[Verdict]) -> Verdict:
+    """Every verdict that fired -> one: the most severe leads, all are listed."""
+    fired = sorted(fired, key=lambda v: REASONS.index(v.reason))
+    if not fired:
+        return VALID
+    return Verdict(fired[0].reason, fired[0].confidence,
+                   tuple(line for v in fired for line in v.evidence),
+                   tuple(v.reason for v in fired))
+
+
 def assess(candidate_count: int, scope_out: bool = False, peer: str | None = None,
-           transport: str | None = None, times=(), tx: Tx | None = None,
-           cfg: dict | None = None) -> Verdict:
-    """Every detector, in `REASONS` order; the first that fires is the verdict."""
+           times=(), tx: Tx | None = None, cfg: dict | None = None,
+           capture_source: str | None = None, unreadable_flows=None) -> Verdict:
     cfg = cfg or config.load()
-    checks = (lambda: degenerate(candidate_count), lambda: not_reachable(scope_out),
-              lambda: coinjoin(tx, cfg), lambda: tor_or_v2(peer, transport),
-              lambda: dandelion_stem(times, cfg))
-    for check in checks:
-        if (verdict := check()) is not None:
-            return verdict
-    return VALID
+    fired = [v for v in (degenerate(candidate_count), not_reachable(scope_out),
+                         coinjoin(tx, cfg), tor_onion(peer),
+                         dandelion_stem(times, cfg),
+                         v2_passive_tap(capture_source, unreadable_flows))
+             if v is not None]
+    return combine(fired)
 
 
 def assess_tree(tree, peer: str | None, intel, cfg: dict | None = None,
@@ -182,7 +247,7 @@ def assess_tree(tree, peer: str | None, intel, cfg: dict | None = None,
     scope_out = bool(candidates) and all(
         intel.classify(ip, tree.graph.nodes.get(ip, {}).get("asn")).ip_class in relay
         for ip in candidates)
-    return assess(count, scope_out, peer, None,
+    return assess(count, scope_out, peer,
                   [ts for ip, ts in announced.items() if ip not in exclude], tx, cfg)
 
 
@@ -205,12 +270,11 @@ def assess_matrix(matrix: pd.DataFrame, named: pd.DataFrame,
     rows = []
     for (capture_id, txid), group in matrix.groupby(key, sort=False):
         peer = chosen.get((capture_id, txid))
-        mine = group[group["peer_ip"] == peer]
-        v2 = bool(mine["transport_v2"].any()) if "transport_v2" in group and len(mine) else False
         shape = (shape_of.loc[(capture_id, txid)]
                  if shape_of is not None and (capture_id, txid) in shape_of.index else None)
-        verdict = assess(int(group["candidate_count"].iloc[0]),
-                         bool(group["scope_out"].iloc[0]), peer, "v2" if v2 else None,
-                         group["delta_vs_first_s"].to_numpy(), tx_of(txid, shape), cfg)
+        first = group.iloc[0]
+        verdict = assess(int(first["candidate_count"]), bool(first["scope_out"]), peer,
+                         group["delta_vs_first_s"].to_numpy(), tx_of(txid, shape), cfg,
+                         first.get("capture_source"), first.get("unreadable_flows"))
         rows.append({"capture_id": capture_id, "txid": txid, **verdict.columns()})
     return pd.DataFrame(rows, columns=key + COLUMNS)

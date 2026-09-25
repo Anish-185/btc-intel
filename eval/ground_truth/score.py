@@ -88,7 +88,8 @@ def rank(tree, intel, cfg: dict, estimator: str, exclude: set[str]) -> list[tupl
 
 
 def score_estimator(frame: pd.DataFrame, truth: dict[str, str], estimator: str,
-                    cfg: dict, exclude: set[str], intel=None) -> dict:
+                    cfg: dict, exclude: set[str], intel=None,
+                    coinjoins: set[str] = frozenset()) -> dict:
     """One estimator over one condition's capture.
 
     Produces the same columns `eval.origin`'s cost and flag machinery reads, so
@@ -124,6 +125,7 @@ def score_estimator(frame: pd.DataFrame, truth: dict[str, str], estimator: str,
             "correct": best == truth[txid],
             "top3": truth[txid] in [ip for ip, _ in ranked[:1 + runner_ups]],
             "origin_observed": truth[txid] in tree.ips,
+            "coinjoin_truth": txid in coinjoins,   # ground truth, for the cost metric only
         })
     return {"estimator": estimator, "frame": pd.DataFrame(rows)}
 
@@ -162,6 +164,7 @@ def summarise(estimator: str, frame: pd.DataFrame, cfg: dict,
     kept = frame[~flagged]
     kept_correct = int(kept["correct"].sum())
     cost = origin.cost_score(frame, scoring_cfg)
+    p6 = origin.cost_score(frame, scoring_cfg, metric="p6")
     observed = int(frame["origin_observed"].sum())
     return {
         "estimator": estimator, "n": str(n),
@@ -174,7 +177,12 @@ def summarise(estimator: str, frame: pd.DataFrame, cfg: dict,
             else "n/a — the floor never abstains" if not abstains else "n/a"),
         "ceiling (origin observed)": round(observed / n, 3),
         "cost_weighted_score": cost.get("cost_weighted_score"),
+        # the metric before the revision in docs/VALIDITY.md, beside it on every row
+        "cost (P6 metric)": p6.get("cost_weighted_score"),
         "wrong_uninvolved_third_party": cost.get("wrong_uninvolved_third_party"),
+        "qualified right / wrong": f"{cost.get('qualified_correct', 0)} / "
+                                   f"{cost.get('qualified_wrong', 0)}",
+        "coinjoin_input_misattribution": cost.get("coinjoin_input_misattribution"),
     }
 
 

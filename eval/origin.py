@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from analysis.validity import PASS, enforced
+from analysis import validity
 from engines.propagation.estimators import ESTIMATORS, estimate_all
 from engines.propagation.tree import build_trees
 from ingest.ip_intel import load_intel
@@ -19,7 +19,11 @@ from .datasets import Dataset
 
 FILTER_MODES = ("off", "combined", "split")
 OUTCOMES = ("correct_actionable", "correct_infrastructure",
-            "wrong_uninvolved_third_party", "abstained")
+            "wrong_uninvolved_third_party", "abstained",
+            # the metric revision, pre-registered in docs/VALIDITY.md
+            "qualified_correct", "qualified_wrong", "coinjoin_input_misattribution")
+#: `metric="p6"` is the outcome vocabulary before the revision: the first four.
+METRICS = ("revised", "p6")
 
 
 def truth_of(dataset: Dataset) -> dict[str, str]:
@@ -82,7 +86,10 @@ def score_estimator(dataset: Dataset, name: str, cfg: dict,
     observable = [observed[r.txid] for r in origins.itertuples()]
 
     conditional = [c for c, o in zip(correct, observable) if o]
-    frame = origins.assign(correct=correct, origin_observed=observable)
+    mixes = {txid for txid, meta in dataset.ground_truth()["transactions"].items()
+             if meta.get("pattern") == "coinjoin"}
+    frame = origins.assign(correct=correct, origin_observed=observable,
+                           coinjoin_truth=origins["txid"].isin(mixes))
     return {
         "estimator": name, "n": len(origins), "filter": mode or cfg["engines"]["propagation"]["origin_filter"]["mode"],
         "top1": sum(correct) / len(correct),
@@ -121,38 +128,64 @@ def flagged_at(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> p
     """`low_confidence_origin` recomputed at an arbitrary cutoff.
 
     Same rule as engines.propagation.low_confidence_origin: a public relay at
-    the top, confidence below the cutoff, or — when the frame carries one and
-    `validity.enforce` is on — a failed validity check (analysis.validity).
+    the top, confidence below the cutoff, or — when the frame carries a verdict
+    — a validity tier the configured policy withholds (analysis.validity: the
+    ABSTAIN tier, or every non-PASS tier in P6's binary mode).
     """
     p = cfg["engines"]["propagation"]
     cut = p["low_confidence_cutoff"] if cutoff is None else cutoff
     flagged = frame["ip_class"].isin(p["low_confidence_classes"]) | (frame["confidence"] < cut)
-    if "validity" in frame and enforced(cfg):
-        flagged |= frame["validity"] != PASS
+    if "validity_tier" in frame:
+        flagged |= frame["validity_tier"].map(lambda t: validity.withholds(t, cfg))
     return flagged
 
 
-def outcomes(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> pd.Series:
-    """One outcome per estimate, per docs/detection_unit_protocol.md.
+def outcomes(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None,
+             metric: str = "revised") -> pd.Series:
+    """One outcome per estimate, per docs/detection_unit_protocol.md and the
+    metric revision in docs/VALIDITY.md, decided in this order:
 
-    Abstention (the flag raised) is free; naming an uninvolved address is the
-    expensive error; naming the right anonymized entry point is worth something
-    but not as much as a residential address an ISP request can act on.
+      abstained                      the policy withholds it; free
+      coinjoin_input_misattribution  (revised) a true CoinJoin answered without
+                                     the COINJOIN qualification: it claims
+                                     ownership of other people's inputs
+      qualified_correct / _wrong     (revised) a QUALIFIED answer, right or wrong
+      correct_actionable / correct_infrastructure / wrong_uninvolved_third_party
+
+    `metric="p6"` skips the two revised steps. A frame without verdicts or
+    CoinJoin labels scores exactly as before the revision.
     """
     anonymized = frame["ip_class"] != "residential_or_unknown"
     flagged = flagged_at(frame, cfg, cutoff)
-    return pd.Series(
-        [OUTCOMES[3] if f else OUTCOMES[1] if (c and a) else OUTCOMES[0] if c else OUTCOMES[2]
-         for f, c, a in zip(flagged, frame["correct"], anonymized)],
-        index=frame.index)
+    revised = metric == "revised"
+    qualifies = revised and validity.tiered(cfg) and "validity_tier" in frame
+    n = len(frame)
+    tiers = frame["validity_tier"] if "validity_tier" in frame else [validity.PASS] * n
+    reasons = frame["validity_reasons"] if "validity_reasons" in frame else [()] * n
+    mixes = frame["coinjoin_truth"] if "coinjoin_truth" in frame else [False] * n
+    labels = []
+    for f, c, a, tier, why, mix in zip(flagged, frame["correct"], anonymized, tiers,
+                                       reasons, mixes):
+        qualified = qualifies and tier == validity.QUALIFIED
+        if f:
+            labels.append("abstained")
+        elif revised and mix and not (qualified and validity.COINJOIN in list(why)):
+            labels.append("coinjoin_input_misattribution")
+        elif qualified:
+            labels.append("qualified_correct" if c else "qualified_wrong")
+        else:
+            labels.append("correct_infrastructure" if (c and a) else
+                          "correct_actionable" if c else "wrong_uninvolved_third_party")
+    return pd.Series(labels, index=frame.index)
 
 
-def cost_score(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> dict:
+def cost_score(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None,
+               metric: str = "revised") -> dict:
     """Accuracy, the outcome mix, and the cost-weighted score."""
     if frame.empty:
         return {}
     weights = cfg["engines"]["propagation"]["origin_filter"]["cost_weights"]
-    labels = outcomes(frame, cfg, cutoff)
+    labels = outcomes(frame, cfg, cutoff, metric)
     counts = labels.value_counts()
     out = {"n": len(frame), "accuracy": round(float(frame["correct"].mean()), 3)}
     out.update({name: int(counts.get(name, 0)) for name in OUTCOMES})
@@ -189,7 +222,8 @@ def choose_cutoff(dataset: Dataset, cfg: dict, estimator: str | None = None,
     return choose_cutoff_for(score_estimator(dataset, name, cfg, mode)["frame"], cfg)
 
 
-def choose_cutoff_for(frame: pd.DataFrame, cfg: dict) -> tuple[float, pd.DataFrame]:
+def choose_cutoff_for(frame: pd.DataFrame, cfg: dict,
+                      metric: str = "revised") -> tuple[float, pd.DataFrame]:
     """The same rule on any frame of estimates, whatever produced them.
 
     Split out so the supervised origination model's cutoff is chosen by this
@@ -198,7 +232,7 @@ def choose_cutoff_for(frame: pd.DataFrame, cfg: dict) -> tuple[float, pd.DataFra
     rows = []
     for step in range(2, 19):
         cutoff = round(step * 0.05, 2)
-        scored = cost_score(frame, cfg, cutoff)
+        scored = cost_score(frame, cfg, cutoff, metric)
         rows.append({"cutoff": cutoff, "flagged": int(flagged_at(frame, cfg, cutoff).sum()),
                      **{k: scored[k] for k in ("abstained", "correct_actionable",
                                                "correct_infrastructure",

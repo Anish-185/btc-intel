@@ -7,12 +7,23 @@ export type IpClass =
   | "hosting_vpn"
   | "known_bitcoin_relay";
 
-/** analysis/validity.py's verdict on an origin: PASS, or why it is withheld. */
+/** analysis/validity.py's verdict. ABSTAIN withholds the answer, QUALIFIED
+ *  restricts what it may claim, ANNOTATE only flags it. */
 export interface Validity {
-  status: "PASS" | "INCONCLUSIVE";
+  tier: "PASS" | "ABSTAIN" | "QUALIFIED" | "ANNOTATE" | "NOT_ASSESSED";
   reason: string | null;
+  reasons: string[];
   confidence: number | null;
   evidence: string[];
+}
+
+/** What an origin answer may claim. Only `ip_attribution` is an IP attribution. */
+export interface Answer {
+  kind: "ip_attribution" | "onion_identity" | "broadcasting_peer";
+  ip?: string;
+  onion?: string;
+  actionable?: string;
+  input_ownership?: string;
 }
 
 export interface Lead {
@@ -139,6 +150,7 @@ export interface Propagation {
   probability: number;
   calibration_basis: string;
   validity: Validity;
+  answer: Answer | null;
   n_observations: number;
   runner_ups: { ip: string; score: number }[];
   caveat: string;

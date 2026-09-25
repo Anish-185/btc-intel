@@ -8,7 +8,8 @@ import { useApi } from "../lib/useApi";
 import { ipClass } from "../lib/format";
 import { formatId } from "../lib/formatId";
 import { token } from "../lib/tokens";
-import { Chip, ErrorNote, Label, SkeletonRows, ValidityChip } from "../components/ui";
+import { Chip, ErrorNote, Label, SkeletonRows, ValidityChip, validityLabel } from "../components/ui";
+import type { Propagation } from "../api/types";
 import { Shell } from "../components/Shell";
 
 const FieldGraph = lazy(() =>
@@ -81,13 +82,7 @@ export function Transaction() {
         ) : (
           <>
             <div className="stat-grid" style={{ marginBottom: "var(--sp-4)" }}>
-              <div className="stat">
-                <h3>Estimated origin</h3>
-                <Label>{ipClass(data.ip_class).label}</Label>
-                <p className="num" style={{ marginTop: "var(--sp-3)", fontSize: "var(--fs-h2)" }}>
-                  {data.estimated_origin ?? "—"}
-                </p>
-              </div>
+              <OriginStat data={data} />
               <div className="stat">
                 <h3>Confidence</h3>
                 <Label>{data.calibration_basis}</Label>
@@ -104,7 +99,7 @@ export function Transaction() {
               </div>
               <div className="stat">
                 <h3>Validity</h3>
-                <Label>{data.validity.status === "PASS" ? "pass" : data.validity.reason}</Label>
+                <Label>{validityLabel(data.validity)}</Label>
                 <ul className="soft" style={{ marginTop: "var(--sp-3)", fontSize: "var(--fs-small)" }}>
                   {data.validity.evidence.map((line) => (
                     <li key={line}>{line}</li>
@@ -131,5 +126,49 @@ export function Transaction() {
         )}
       </section>
     </Shell>
+  );
+}
+
+/** The origin, shaped by what it may claim. A QUALIFIED answer is never shown
+ *  as an IP attribution: an onion identity has no IP class, and a CoinJoin's
+ *  broadcaster says in words that the inputs' owners are not attributable. */
+function OriginStat({ data }: { data: Propagation }) {
+  const { answer } = data;
+  const big = { marginTop: "var(--sp-3)", fontSize: "var(--fs-h2)" } as const;
+  if (answer === null) {
+    return (
+      <div className="stat">
+        <h3>Origin withheld</h3>
+        <Label>{validityLabel(data.validity)}</Label>
+        <p className="num" style={big}>—</p>
+      </div>
+    );
+  }
+  if (answer.kind === "onion_identity") {
+    return (
+      <div className="stat">
+        <h3>Onion identity</h3>
+        <Label>Tor hidden service · not for IP-level follow-up</Label>
+        <p className="mono" style={{ ...big, fontSize: "var(--fs-body)", wordBreak: "break-all" }}>
+          {answer.onion}
+        </p>
+      </div>
+    );
+  }
+  if (answer.kind === "broadcasting_peer") {
+    return (
+      <div className="stat">
+        <h3>Broadcasting peer</h3>
+        <Label>CoinJoin · input ownership not attributable</Label>
+        <p className="num" style={big}>{answer.ip}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="stat">
+      <h3>Estimated origin</h3>
+      <Label>{ipClass(data.ip_class).label}</Label>
+      <p className="num" style={big}>{answer.ip}</p>
+    </div>
   );
 }

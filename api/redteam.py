@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field
 
 import config
 import custody
+from analysis import validity
 from engines.propagation.estimators import CALIBRATION_BASIS, estimate_origin
 from engines.propagation.tree import build_trees
 from fusion import incremental
@@ -271,6 +272,7 @@ def _origin_report(new_rows: pd.DataFrame, txids: list[str], truth: dict,
         if tree is None or not true_ip:
             continue
         estimate = estimate_origin(tree, intel, cfg)
+        answer = validity.answer(estimate.ip, estimate.validity, cfg)
         ordered = [ip for ip, _ in estimate.ranked]
         rank = ordered.index(true_ip) + 1 if true_ip in ordered else None
         if rank:
@@ -278,7 +280,10 @@ def _origin_report(new_rows: pd.DataFrame, txids: list[str], truth: dict,
         details.append({
             "txid": txid,
             "true_origin_ip": true_ip,
-            "estimated_origin_ip": estimate.ip,
+            # An onion identity is never put in an IP field.
+            "estimated_origin_ip": (None if (answer or {}).get("kind") == "onion_identity"
+                                    else estimate.ip),
+            "answer": answer,
             "ip_class": estimate.ip_class,
             "confidence": estimate.confidence,
             "low_confidence_origin": estimate.low_confidence,

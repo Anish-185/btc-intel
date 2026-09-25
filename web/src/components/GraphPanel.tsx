@@ -13,7 +13,7 @@ import { ipClass } from "../lib/format";
 import { formatId } from "../lib/formatId";
 import { token } from "../lib/tokens";
 import { FieldGraph } from "./FieldGraph";
-import { Chip } from "./ui";
+import { Chip, validityLabel } from "./ui";
 
 const nodeColour = (type: string) =>
   token(
@@ -162,9 +162,9 @@ export function GraphPanel({
             {ipClass(tree.ip_class).label} · confidence {tree.confidence.toFixed(2)}
             {tree.low_confidence_origin && " · ⚠ low confidence origin"}
             {tree.anonymized_entry_point && " · ⚠ anonymized entry point"}
-            {tree.validity.status === "PASS"
+            {tree.validity.tier === "PASS"
               ? " · validity pass"
-              : ` · ⚠ inconclusive: ${(tree.validity.reason ?? "").replace(/_/g, " ").toLowerCase()}`}
+              : ` · ⚠ ${validityLabel(tree.validity)}`}
           </span>
         </div>
       ) : (

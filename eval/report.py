@@ -615,7 +615,12 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     from analysis import evaluate as validity_eval
 
     validity = validity_eval.run(cfg, rebuild, base=origination)
-    add(validity_eval.section(validity, md_table))
+    # The pre-registration and P6's frozen numbers first, verbatim, one level down.
+    add("\n" + validity_eval.preserved(cfg["validity"]["results_doc"])
+        .replace("\n### ", "\n#### ").replace("\n## ", "\n### ")
+        .replace("## Metric revision", "### Metric revision", 1))
+    add("\n### Results — metric revision\n\n")
+    add(validity_eval.section(validity, md_table).replace("\n### ", "\n#### "))
     validity_eval.write_doc(validity, md_table, cfg["validity"]["results_doc"])
 
     add(CLOSING)

@@ -50,7 +50,7 @@ from pathlib import Path
 import pandas as pd
 
 import config
-from analysis.validity import DEGENERATE, PASS, enforced
+from analysis.validity import ANNOTATE, COINJOIN, NOT_REACHABLE, PASS, TOR_ONION, enforced
 from engines.propagation.estimators import estimate_all
 from engines.rules.detectors import FeatureSet
 from graph.builder import build_graph, iter_transactions, load
@@ -61,7 +61,7 @@ COLUMNS = ["entity_id", "ip", "ip_class", "asn", "asn_org", "geo_country", "high
            "observation_count", "effective_observations", "origin_confidence",
            "distinct_entities", "raw_confidence", "asn_penalty", "shared_ip_penalty",
            "final_score", "first_seen", "last_seen", "reason", "validity",
-           "validity_evidence"]
+           "validity_reasons", "validity_evidence"]
 
 HOUR = 3600.0
 DAY = 86400.0
@@ -80,7 +80,7 @@ class Observation:
     country: str | None = None
     ip_class: str = RESIDENTIAL
     origin_confidence: float = 1.0
-    validity: str = PASS
+    validity: tuple[str, ...] = ()       # every reason the origin's verdict gave
 
 
 def raw_confidence(observation_count: float, cfg: dict | None = None) -> float:
@@ -191,13 +191,14 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
         txid = str(est.txid)
         if txid in mixes or not est.estimated_origin_ip:
             continue
-        # An origin the validity layer found invalid (a mix, Tor/v2, a
-        # Dandelion stem, only relays in view) is not evidence about anybody.
-        # DEGENERATE is kept: one transaction offering nothing to compare is
-        # exactly what aggregating many of them, each weighted by its low
-        # confidence, exists for — and the lead's own verdict says so.
-        verdict = str(getattr(est, "validity", PASS) or PASS)
-        if verdict not in (PASS, DEGENERATE) and enforced(cfg):
+        # A lead says "this IP broadcast for this cluster's inputs". So no lead
+        # is built from an answer that may not say that: a CoinJoin's (input
+        # ownership is not attributable), an onion identity (no IP), or one
+        # with only relays in view. DEGENERATE is kept: one transaction offering
+        # nothing to compare is exactly what aggregating many of them, each
+        # weighted by its low confidence, exists for. ANNOTATE flags ride along.
+        reasons = tuple(getattr(est, "validity_reasons", ()) or ())
+        if enforced(cfg) and {COINJOIN, TOR_ONION, NOT_REACHABLE} & set(reasons):
             continue
         row = meta.get(txid)
         entities = {features.entity_of(a) for a in inputs_by_tx.get(txid, [])}
@@ -216,7 +217,7 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
                 # engines.propagation.attribution_confidence_of.
                 origin_confidence=float(getattr(est, "attribution_confidence",
                                                 est.confidence)),
-                validity=verdict))
+                validity=reasons))
     return observations
 
 
@@ -303,12 +304,17 @@ def score_observations(observations: list[Observation], cfg: dict | None = None)
         link["final_score"] = (link["raw_confidence"] * link["asn_penalty"]
                                * link["shared_ip_penalty"])
         link["reason"] = build_reason(link)
-        degenerate = sum(v != PASS for v in link["verdicts"])
-        link["validity"] = DEGENERATE if degenerate else PASS
+        flagged: dict[str, int] = {}
+        for reasons in link["verdicts"]:
+            for reason in reasons:
+                flagged[reason] = flagged.get(reason, 0) + 1
+        link["validity"] = ANNOTATE if flagged else PASS
         link["validity_evidence"] = (
-            f"{degenerate} of {count} contributing origin estimates had a single "
-            "candidate (DEGENERATE); the lead rests on their repetition, not on any one"
-            if degenerate else f"all {count} contributing origin estimates passed validity")
+            "; ".join(f"{n} of {count} contributing origin estimates flagged {reason}"
+                      for reason, n in sorted(flagged.items()))
+            + " — the lead rests on their repetition, not on any one"
+            if flagged else f"all {count} contributing origin estimates passed validity")
+        link["validity_reasons"] = sorted(flagged)
         link["first_seen"] = pd.Timestamp(link["first_seen"], unit="s", tz="UTC")
         link["last_seen"] = pd.Timestamp(link["last_seen"], unit="s", tz="UTC")
         rows.append({c: link[c] for c in COLUMNS})

@@ -86,11 +86,12 @@ def _baseline_job(args) -> dict[str, pd.DataFrame]:
     """The floor and the three estimators on one capture, through
     `eval.ground_truth.score.score_estimator` unchanged, with the intel the
     capture was featurised with rebuilt from its spec."""
-    spec, relay, truth, observers, cfg = args
+    spec, relay, truth, observers, cfg, coinjoins = args
     intel = corpus._intel(corpus.build_graph(spec, cfg), cfg)
     out = {}
     for name in (score.FIRST_SPY, *ESTIMATORS):
-        frame = score.score_estimator(relay, truth, name, cfg, observers, intel)["frame"]
+        frame = score.score_estimator(relay, truth, name, cfg, observers, intel,
+                                      coinjoins)["frame"]
         out[name] = frame.assign(capture_id=spec["capture_id"])
     return out
 
@@ -101,8 +102,10 @@ def baselines(data: dict, capture_ids: list[str], cfg: dict,
     relay = dict(tuple(data["relay"].groupby("capture_id")))
     truth = {cid: dict(zip(g["txid"], g["origin_ip"]))
              for cid, g in data["truth"].groupby("capture_id")}
+    mixes = coinjoins_of(data)
     jobs = [({**_plain(specs.loc[cid].to_dict()), "capture_id": cid}, relay[cid], truth[cid],
-             set(specs.at[cid, "observers"].split(",")), cfg)
+             set(specs.at[cid, "observers"].split(",")), cfg,
+             {txid for c, txid in mixes if c == cid})
             for cid in capture_ids if cid in relay]
     workers = workers or min(len(jobs), os.cpu_count() or 1) or 1
     if workers > 1:
@@ -143,7 +146,8 @@ def run(cfg: dict | None = None, rebuild: bool = False, workers: int | None = No
 
     model = OriginationModel.fit(part["train"], cfg)
     model.meta.update(corpus=directory.name, split=split)
-    model.calibrate(part["calibration"], cfg, shapes)
+    mixes = coinjoins_of(data)
+    model.calibrate(part["calibration"], cfg, shapes, mixes)
 
     # Every estimator's cutoff is chosen the way the model's is: on the
     # calibration captures, by the same rule. The configured cutoff was chosen
@@ -159,7 +163,7 @@ def run(cfg: dict | None = None, rebuild: bool = False, workers: int | None = No
     for role, label in TEST_SETS.items():
         rows = []
         tested = baselines(data, ids[role], cfg, workers)
-        decided = model.decide(part[role], truth, cfg, shapes)
+        decided = label_coinjoins(model.decide(part[role], truth, cfg, shapes), mixes)
         n = len(decided)
         for name, frame in tested.items():
             if len(frame) != n:
@@ -176,6 +180,7 @@ def run(cfg: dict | None = None, rebuild: bool = False, workers: int | None = No
             "summary": _read_summary(directory),
             # for analysis.evaluate's with/without-validity comparison
             "decided": frames, "parts": part, "truth": truth, "shapes": shapes,
+            "truth_frame": data["truth"],
             "baselines_cfg": cfg,
             "split": split, "cutoffs": cutoffs, "tables": tables,
             "reliability": reliability, "verdict": best,
@@ -249,6 +254,21 @@ def examples(model: OriginationModel, matrix: pd.DataFrame, decided: pd.DataFram
                          "txid": r.txid[:12],
                          "explanation": text})
     return pd.DataFrame(rows)
+
+
+def coinjoins_of(data: dict) -> set[tuple[str, str]]:
+    """(capture_id, txid) of every true CoinJoin — ground truth, read only to
+    score `coinjoin_input_misattribution`, never by a detector or the model."""
+    truth = data["truth"]
+    if "shape" not in truth:
+        return set()
+    mixes = truth[truth["shape"] == "coinjoin"]
+    return set(zip(mixes["capture_id"], mixes["txid"]))
+
+
+def label_coinjoins(frame: pd.DataFrame, mixes: set) -> pd.DataFrame:
+    return frame.assign(coinjoin_truth=[k in mixes for k in
+                                        zip(frame["capture_id"], frame["txid"])])
 
 
 def shapes_of(data: dict) -> pd.DataFrame | None:

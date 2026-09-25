@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 import config
 import custody
+from analysis import validity
 from analysis.validity import NOT_ASSESSED
 from engines.propagation.estimators import CALIBRATION_BASIS, estimate_origin
 from graph.builder import iter_transactions
@@ -581,7 +582,9 @@ def propagation(txid: str) -> dict:
 
     tree = build_trees(rows)[txid]
     tx = next(iter_transactions(rows), None) if "input_addresses" in rows else None
-    estimate = estimate_origin(tree, _intel(), config.load(), tx=tx)
+    cfg = config.load()
+    estimate = estimate_origin(tree, _intel(), cfg, tx=tx)
+    answer = validity.answer(estimate.ip, estimate.validity, cfg)
     runner_ups = {ip: score for ip, score in estimate.runner_ups[:3]}
     ranked = dict(estimate.ranked)
 
@@ -616,8 +619,12 @@ def propagation(txid: str) -> dict:
         "probability": estimate.confidence,
         "calibration_basis": CALIBRATION_BASIS,
         # PASS, or the reason the origin is withheld and the evidence for it.
-        # An INCONCLUSIVE verdict also sets low_confidence_origin.
+        # An ABSTAIN-tier verdict also sets low_confidence_origin.
         "validity": estimate.validity.as_dict(),
+        # What the answer may claim: an IP attribution, an onion identity (no
+        # IP), or a CoinJoin's broadcasting peer (no input ownership). None
+        # when the verdict withholds it.
+        "answer": answer,
         "n_observations": estimate.n_observations,
         "runner_ups": [{"ip": ip, "score": round(float(s), 6)} for ip, s in runner_ups.items()],
         "caveat": ("estimated origin is a probabilistic lead, not an attribution — "

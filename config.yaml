@@ -213,6 +213,11 @@ engines:
         correct_infrastructure: 0.3
         wrong_uninvolved_third_party: -3.0
         abstained: 0.0
+        # The metric revision, pre-registered with a rationale for each in
+        # docs/VALIDITY.md §"Metric revision" before any rerun. Not tuned.
+        qualified_correct: 0.3              # = correct_infrastructure: right, not IP-actionable
+        qualified_wrong: -1.0               # the same ~1/3 scaling as 0.3 / 1.0
+        coinjoin_input_misattribution: -3.0 # = wrong_uninvolved_third_party: a false ownership claim
 
     single_row_confidence: 0.15   # one observation is a guess, not an estimate
 
@@ -342,6 +347,9 @@ validity:
   # eval.origin.flagged_at; `enforce: false` switches it off there (the
   # no-abstention floor, and the "without validity" comparison).
   enforce: true
+  # tiered: only ABSTAIN withholds; QUALIFIED restricts what the answer claims;
+  # ANNOTATE flags. binary: P6's gate, every non-PASS verdict abstains.
+  mode: tiered
   results_doc: docs/VALIDITY.md
   dandelion:
     # Fixed before the first result, from the shape a stem leaves rather than

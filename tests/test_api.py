@@ -322,11 +322,11 @@ def origins_in(payload, found=None) -> list[dict]:
 def assert_verdict(origin: dict) -> None:
     verdict = origin.get("validity")
     assert isinstance(verdict, dict), f"origin without a validity verdict: {origin}"
-    assert verdict["status"] in ("PASS", "INCONCLUSIVE")
-    if verdict["status"] == "INCONCLUSIVE":
-        assert verdict["reason"] and verdict["evidence"], origin
-    else:
+    assert verdict["tier"] in ("PASS", "ABSTAIN", "QUALIFIED", "ANNOTATE", "NOT_ASSESSED")
+    if verdict["tier"] == "PASS":
         assert verdict["reason"] is None
+    else:
+        assert verdict["reason"] and verdict["evidence"], origin
 
 
 def test_no_origin_leaves_the_api_without_a_validity_verdict(client):
@@ -336,8 +336,9 @@ def test_no_origin_leaves_the_api_without_a_validity_verdict(client):
     for txid in df["txid"].drop_duplicates().head(40):
         body = api.get(f"/transactions/{txid}/propagation").json()
         assert "probability" in body and body["calibration_basis"]
-        if body["validity"]["status"] == "INCONCLUSIVE":
+        if body["validity"]["tier"] == "ABSTAIN":
             assert body["low_confidence_origin"], "a withheld origin must abstain"
+            assert body["answer"] is None
         seen += origins_in(body)
     listing = api.get("/alerts?limit=50").json()
     seen += origins_in(listing)
@@ -355,5 +356,52 @@ def test_a_lead_stored_before_the_validity_layer_is_never_served_as_pass(fixture
     assert leads
     for lead in leads:
         assert_verdict(lead)
-        assert lead["validity"]["status"] == "INCONCLUSIVE"
-        assert lead["validity"]["reason"] == "NOT_ASSESSED"
+        assert lead["validity"]["tier"] == "NOT_ASSESSED"
+
+
+def test_no_coinjoin_answer_attributes_input_ownership(client):
+    api, d = client
+    truth = json.loads((d / "raw" / "ground_truth.json").read_text())["transactions"]
+    mixes = [t for t, meta in truth.items() if meta["pattern"] == "coinjoin"]
+    df = pd.read_parquet(d / "t.parquet")
+    mixes = [t for t in mixes if (df["txid"] == t).sum() > 1][:10]
+    assert mixes, "the generated dataset has no multi-hop CoinJoin"
+    for txid in mixes:
+        body = api.get(f"/transactions/{txid}/propagation").json()
+        assert "COINJOIN" in body["validity"]["reasons"]
+        answer = body["answer"]
+        if answer is not None:                  # withheld is fine too
+            assert answer["kind"] != "ip_attribution"
+            assert answer["input_ownership"].startswith("not attributable")
+
+
+ONION = "pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion"
+
+
+def test_no_tor_onion_answer_exposes_an_ip(client, tmp_path):
+    import ipaddress
+    api, d = client
+    df = pd.read_parquet(d / "t.parquet")
+    counts = df.groupby("txid").size()
+    source = df[df["txid"] == counts[counts > 3].index[0]].sort_values("timestamp").copy()
+    first = source["src_ip"].iloc[0]
+    source["txid"] = "0" * 63 + "1"
+    source["src_ip"] = source["src_ip"].replace(first, ONION)
+    source["dst_ip"] = source["dst_ip"].replace(first, ONION)
+    pd.concat([df, source], ignore_index=True).to_parquet(tmp_path / "t.parquet")
+    app_module.configure(tmp_path / "t.parquet", d / "raw", d / "final.json",
+                         tmp_path / "feedback.parquet")
+    try:
+        body = TestClient(app_module.app).get(f"/transactions/{'0' * 63 + '1'}/propagation").json()
+    finally:
+        app_module.configure(d / "t.parquet", d / "raw", d / "final.json", d / "feedback.parquet")
+    assert body["estimated_origin"] == ONION
+    assert "TOR_ONION" in body["validity"]["reasons"]
+    answer = body["answer"]
+    assert answer["kind"] == "onion_identity" and "ip" not in answer
+    for value in answer.values():
+        try:
+            ipaddress.ip_address(str(value))
+        except ValueError:
+            continue
+        raise AssertionError(f"an onion answer carries an IP: {answer}")

@@ -238,14 +238,15 @@ def low_confidence_origin(ip_class: str, confidence: float, cfg: dict | None = N
     ones (right ~54% of the time when raised against ~81% when clear), and it is
     now named for that.
 
-    A failed validity check (analysis.validity) raises it too: that is how an
-    invalid attribution abstains, through this flag and not beside it.
+    A validity verdict the policy withholds (analysis.validity: the ABSTAIN
+    tier) raises it too: that is how an invalid attribution abstains, through
+    this flag and not beside it. QUALIFIED and ANNOTATE answers are given.
     """
     cfg = cfg or config.load()
     p = cfg["engines"]["propagation"]
     return bool(ip_class in p["low_confidence_classes"]
                 or confidence < p["low_confidence_cutoff"]
-                or (verdict is not None and not verdict.passed and validity.enforced(cfg)))
+                or (verdict is not None and validity.withholds(verdict.tier, cfg)))
 
 
 def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = None,

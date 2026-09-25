@@ -162,7 +162,8 @@ class OriginationModel:
         return model
 
     def calibrate(self, calibration: pd.DataFrame, cfg: dict | None = None,
-                  shapes: pd.DataFrame | None = None) -> "OriginationModel":
+                  shapes: pd.DataFrame | None = None,
+                  coinjoins: set | None = None) -> "OriginationModel":
         """Isotonic on the calibration captures, then the abstention cutoff on
         the same captures by the pre-registered rule. Never on a test capture."""
         cfg = cfg or config.load()
@@ -173,6 +174,9 @@ class OriginationModel:
                             calibration.loc[fit_on, "originated"].astype(float))
         truth = calibration[calibration["originated"]].set_index(KEY)["peer_ip"]
         frame = self.decide(calibration, truth, cfg, shapes)
+        if coinjoins:       # ground truth, so the cutoff is chosen on the full metric
+            frame["coinjoin_truth"] = [k in coinjoins for k in
+                                       zip(frame["capture_id"], frame["txid"])]
         self.cutoff, self.cutoff_table = origin_eval.choose_cutoff_for(frame, cfg)
         return self
 

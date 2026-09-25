@@ -23,7 +23,7 @@ import pandas as pd
 
 import config
 import custody
-from analysis.validity import NOT_ASSESSED, PASS
+from analysis.validity import NOT_ASSESSED
 from engines.anomaly.detector import fit_score
 from engines.correlation.scorer import correlate
 from engines.propagation.estimators import estimate_all, is_anonymized_entry
@@ -138,13 +138,14 @@ LEAD_CALIBRATION_BASIS = ("uncalibrated: evidence-weighted count of origin estim
 
 
 def _lead_validity(row) -> dict:
-    """Correlation drops invalid origins; what remains is PASS or DEGENERATE."""
-    reason = getattr(row, "validity", None)
-    if reason is None or pd.isna(reason):
+    """A lead's verdict. Correlation builds no lead from a QUALIFIED answer, so
+    a lead is PASS, or ANNOTATE naming the flags its observations carried."""
+    tier = getattr(row, "validity", None)
+    if tier is None or (isinstance(tier, float) and pd.isna(tier)):
         return NOT_ASSESSED.as_dict()
-    return {"status": "PASS" if reason == PASS else "INCONCLUSIVE",
-            "reason": None if reason == PASS else reason, "confidence": None,
-            "evidence": [str(row.validity_evidence)]}
+    reasons = list(getattr(row, "validity_reasons", []) or [])
+    return {"tier": tier, "reason": reasons[0] if reasons else None, "reasons": reasons,
+            "confidence": None, "evidence": [str(row.validity_evidence)]}
 
 
 def attribution_leads(links: pd.DataFrame, cfg: dict) -> dict[str, list[dict]]:

@@ -1,6 +1,6 @@
 /** The red-team endpoints: inject, watch, score, reset. */
 import { API_BASE } from "./client";
-import type { Validity } from "./types";
+import type { Answer, Validity } from "./types";
 
 export interface Injection {
   typology: string;
@@ -42,6 +42,7 @@ export interface OriginDetail {
   probability: number;
   calibration_basis: string;
   validity: Validity;
+  answer: Answer | null;
   rank: number | null;
   observed: boolean;
 }

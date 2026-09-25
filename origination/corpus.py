@@ -543,7 +543,7 @@ def build(cfg: dict | None = None, manifest: dict | None = None, root: Path | No
     features = pd.concat([r["features"] for r in results], ignore_index=True)
     # Object columns that are all-null in the simulation (user agents, real
     # connection age) would otherwise be typed differently from run to run.
-    for column in ("user_agent", "peer_port", "est_first_timestamp_rank",
+    for column in ("user_agent", "peer_port", "unreadable_flows", "est_first_timestamp_rank",
                    "est_rumor_centrality_rank", "est_timestamp_weighted_centrality_rank"):
         if column in features:
             features[column] = features[column].astype("object" if column == "user_agent"

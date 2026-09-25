@@ -71,12 +71,16 @@ class RelayEvent:
     direction: str                       # inbound | outbound
     capture_source: str                  # "<format>:<file name>"
     transport: str | None = None         # v1 | v2 (BIP-324) | None when unknown
+    unreadable_flows: int | None = None  # pcap only: port-8333 flows never decoded
 
 
 #: `transport` is known from bitcoind's connect line ("transport: v2", Core
 #: >= 26), from a .btcap field, and is always "v1" for pcap: a BIP-324 stream is
 #: encrypted, so every message we could decode from a pcap came over v1. It is
-#: what `analysis.validity`'s TOR_OR_V2 detector reads.
+#: what `analysis.validity` reads. A pcap cannot see *which* peers speak v2 —
+#: their bytes never decode — so it records `unreadable_flows` instead: flows
+#: on the P2P port that carried payload and never yielded a message. That count
+#: is the evidence behind V2_PASSIVE_TAP.
 #:
 #: `monotonic_or_derived_ts` is the capture's own clock: a monotonic reading when
 #: the source supplies one (.btcap may), otherwise seconds since the first event
@@ -433,6 +437,7 @@ def parse_pcap(path: Path, cfg: dict | None = None,
     # Two passes: the first decodes messages per flow, the second decides which
     # end of each flow is us — which needs every flow before it can be answered.
     buffers: dict[tuple, bytearray] = {}
+    readable: set[tuple] = set()
     decoded: list[tuple[float, tuple, str, bytes]] = []
     for ts, frame, linktype in records:
         parsed = _ip_payload(frame, linktype)
@@ -451,6 +456,7 @@ def parse_pcap(path: Path, cfg: dict | None = None,
         buffer += payload
         for command, message in _messages(buffer, magics):
             decoded.append((ts, flow, command, message))
+            readable.add(flow)
 
     ours = _local_ip(buffers.keys(), local_ips)
     events: list[RelayEvent] = []
@@ -475,6 +481,9 @@ def parse_pcap(path: Path, cfg: dict | None = None,
             events.append(RelayEvent(txid, peer_ip, peer_port, None, None, ts, None,
                                      "tx", direction, source, "v1"))
 
+    unreadable = len(set(buffers) - readable)
+    for event in events:
+        event.unreadable_flows = unreadable
     _resolve_wtxids(events, pairs)
     _derive_clock(events)
     return events
