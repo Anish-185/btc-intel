@@ -5,7 +5,10 @@ The repo uses a flat layout — packages sit beside `config.py` rather than unde
 a checkout and is silently absent from the built wheel, because `pyproject.toml`
 lists them by hand. `p2p/` was the fourth-from-last package added and the first
 where an omission would have shipped a console that imports a module the
-air-gapped install does not have.
+air-gapped install does not have. `origination/` followed it as a flat
+sibling on the same convention, and is the first package whose runtime reads a
+data file of its own (`origination/manifest.json`), so that file is asserted
+to live inside the package directory, where the wheel picks it up.
 
 So the list is asserted against the directories instead of trusted.
 """
@@ -89,3 +92,13 @@ def test_no_directory_of_ours_is_an_accidental_namespace_package():
             if any(directory.glob("*.py")) and not (directory / "__init__.py").exists():
                 offenders.append(str(directory.relative_to(ROOT)))
     assert not offenders, f"directories with .py files but no __init__.py: {offenders}"
+
+
+def test_package_data_the_runtime_reads_ships_inside_its_package():
+    """`origination.corpus` reads its manifest from beside itself. Outside the
+    package directory it would work from a checkout and be missing from the
+    wheel — the same failure as an undeclared package, one level down."""
+    from origination import corpus
+
+    assert corpus.MANIFEST.resolve().parent == (ROOT / "origination").resolve()
+    assert corpus.MANIFEST.exists()

@@ -601,7 +601,14 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
 
     # --- 9. ground truth on real relay data ------------------------------
     add("\n## 9. Origin accuracy against known truth\n")
-    ground_truth_section(add, ground_truth.evaluate(cfg, rebuild), cfg)
+    # Imported here: origination imports eval, not the other way round.
+    from origination import evaluate as origination_eval
+    from origination import report as origination_report
+
+    origination = origination_eval.run(cfg, rebuild)
+    ground_truth_section(add, ground_truth.evaluate(cfg, rebuild), cfg,
+                         origination_report.section(origination, md_table))
+    origination_report.write_doc(origination, md_table, cfg["origination"]["results_doc"])
 
     add(CLOSING)
     return "\n".join(parts)
@@ -920,7 +927,7 @@ risky. It is surfaced per alert as attribution leads, each now labelled
 """
 
 
-def ground_truth_section(add, result: dict, cfg: dict) -> None:
+def ground_truth_section(add, result: dict, cfg: dict, origination: str = "") -> None:
     """Section 9. Every other section's origin numbers describe our simulator;
     this one is the harness for measuring the same thing on real relay data.
 
@@ -984,9 +991,10 @@ def ground_truth_section(add, result: dict, cfg: dict) -> None:
         "abstention. It is\nwhat naive analysis does, and under the pre-registered cost "
         "weights it scores\n**negative**: naming the wrong uninvolved address is priced "
         "at -3, and the floor does it\noften. Rows 2-4 are the three estimators from "
-        "`engines/propagation/` unchanged. Row 5\nis held open for the supervised "
-        "origination model and is marked PENDING rather than\nleft out, so its absence "
-        "is visible.\n")
+        "`engines/propagation/` unchanged. Row 5\nis the supervised origination model, "
+        "which cannot be scored here: it reads one observer's\nrelay matrix, and hop "
+        "records sampled at many relays do not make one. It is measured on\nthe capture "
+        "corpus at the end of this section, beside these four baselines on one split.\n")
     add("\n**Relay-delay noise floor.** How far apart announcements of the same "
         "transaction\nactually arrive, and what that implies for any timing-based "
         "estimator:\n\n")
@@ -998,7 +1006,7 @@ def ground_truth_section(add, result: dict, cfg: dict) -> None:
     if matrix is not None and len(matrix):
         add("\n### The relay feature matrix\n")
         add("`features/relay.py`, grain `(txid, peer_ip, capture_id)` — the input the "
-            "supervised\norigination model will read. Every column, its null semantics "
+            "supervised\norigination model reads. Every column, its null semantics "
             "and its causality\nargument are in `docs/FEATURE_SCHEMA_RELAY.md`. The "
             "`source` column is carried here\nbecause a fixture-derived row must never "
             "be read as a signet one.\n\n")
@@ -1007,7 +1015,7 @@ def ground_truth_section(add, result: dict, cfg: dict) -> None:
             "— nothing to\nrank. `scope_out` is the share where no candidate could "
             "plausibly be the sender, which\nis the zero-ceiling case in feature form. "
             "Both are rows a model must abstain on rather\nthan learn from, which is "
-            "why they are counted before any model exists. `quarantined`\ncounts "
+            "why they are counted here and why the model below never scores them.\n`quarantined` counts "
             "announcements still identified by a wtxid, kept in a separate file and "
             "never\nmerged into the matrix.\n")
 
@@ -1019,6 +1027,7 @@ def ground_truth_section(add, result: dict, cfg: dict) -> None:
         "carries no positional information. On the signet\nconditions only timing "
         "carries signal, which is why the noise floor above is the\nnumber that bounds "
         "them. A multi-observer capture would restore the topology.\n")
+    add(origination)
 
 
 def main(argv=None) -> None:

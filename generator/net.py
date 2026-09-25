@@ -86,16 +86,23 @@ class GossipNet:
                 break
         return peers
 
-    def diffuse(self, origin: Ip, t0: float, rng: random.Random) -> list[tuple[float, Ip, Ip]]:
+    def diffuse(self, origin: Ip, t0: float, rng: random.Random,
+                entries: list[int] | None = None) -> list[tuple[float, Ip, Ip]]:
         """Bitcoin-ish diffusion: exponential per-hop delay, breadth over peers.
 
         Returns hops as (timestamp, from_ip, to_ip). The origin announces to
         each of its own peers first, so it sits at the centre of its immediate
         neighbourhood rather than dangling off a single edge.
+
+        `entries` pins the origin's peers. A sender keeps its connections from
+        one transaction to the next, so a caller simulating several
+        transactions from one sender passes the same list each time; left out,
+        a fresh set is drawn per transaction, which is what `generator.main`
+        has always done.
         """
         mean = self.cfg["delay_mean_ms"] / 1000.0
         budget = self.cfg["max_hops_per_tx"]
-        entries = self.origin_peers(rng)
+        entries = self.origin_peers(rng) if entries is None else entries
         hops = []
         seen: set[int] = set()
         queue = []

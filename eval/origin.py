@@ -181,7 +181,15 @@ def choose_cutoff(dataset: Dataset, cfg: dict, estimator: str | None = None,
     ties go to the lower cutoff, which abstains less.
     """
     name = estimator or cfg["engines"]["propagation"]["estimator"]
-    frame = score_estimator(dataset, name, cfg, mode)["frame"]
+    return choose_cutoff_for(score_estimator(dataset, name, cfg, mode)["frame"], cfg)
+
+
+def choose_cutoff_for(frame: pd.DataFrame, cfg: dict) -> tuple[float, pd.DataFrame]:
+    """The same rule on any frame of estimates, whatever produced them.
+
+    Split out so the supervised origination model's cutoff is chosen by this
+    rule and these weights rather than by a copy of them.
+    """
     rows = []
     for step in range(2, 19):
         cutoff = round(step * 0.05, 2)

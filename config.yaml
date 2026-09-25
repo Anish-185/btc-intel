@@ -317,6 +317,25 @@ eval:
     n_transactions: 50
     interval_seconds: 20.0
 
+origination:
+  # The supervised per-(txid, peer) model. Corpus: origination/manifest.json;
+  # results: docs/ORIGINATION_RESULTS.md and eval/results.md section 9.
+  corpus_dir: data/processed/eval/origination
+  model_path: data/processed/origination_model.pkl
+  output_path: data/processed/tx_origination.parquet
+  results_doc: docs/ORIGINATION_RESULTS.md
+  # Fixed before any result existed and not tuned afterwards. Tuning these
+  # until the cross-topology row looked better would turn the test set into a
+  # validation set.
+  gbm:
+    max_iter: 300
+    learning_rate: 0.05
+    max_leaf_nodes: 15
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+  ece_bins: 10
+  explain_top_features: 3
+
 fusion:
   alerts_parquet: data/processed/final_alerts.parquet
   # Analyst verdicts from the API, for recalibrating fusion/stacker.py later.

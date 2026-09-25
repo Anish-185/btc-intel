@@ -181,6 +181,25 @@ def pending_row(reason: str = "not yet implemented — see docs/REFRAME_PLAN.md 
             "wrong_uninvolved_third_party": None}
 
 
+def corpus_row() -> dict:
+    """Row 5 of the canonical simulated table, which the model cannot fill.
+
+    That dataset is NTRO-shaped hop records sampled at many relays, not one
+    observer's capture, so there is no relay matrix to score. The model is
+    measured on `origination`'s capture corpus instead, beside these same four
+    baselines on the same split, and this row says where.
+    """
+    note = "see the capture-corpus tables below"
+    return {"estimator": PENDING_MODEL, "n": "n/a", "top1": None, "top1 95% CI": note,
+            "top3": None, "top3 95% CI": note, "abstention rate": None,
+            "acc if answered": None,
+            "acc if answered 95% CI": ("not applicable: hop records seen at many relays "
+                                       "are not a single-vantage capture, so this dataset "
+                                       "has no relay matrix to score"),
+            "ceiling (origin observed)": None, "cost_weighted_score": None,
+            "wrong_uninvolved_third_party": None}
+
+
 # --- the relay-delay noise floor -----------------------------------------
 def noise_floor(frame: pd.DataFrame, truth: dict[str, str], cfg: dict) -> dict:
     """How far apart announcements of the same transaction actually arrive.
@@ -228,7 +247,7 @@ def noise_floor(frame: pd.DataFrame, truth: dict[str, str], cfg: dict) -> dict:
 # --- a whole condition ---------------------------------------------------
 def score_condition(frame: pd.DataFrame, truth: dict[str, str], condition: str,
                     cfg: dict, exclude: set[str] | None = None,
-                    intel=None) -> dict:
+                    intel=None, model_row: dict | None = None) -> dict:
     """Every row of one condition's table, plus its noise floor."""
     cfg = cfg or config.load()
     exclude = exclude or set()
@@ -238,7 +257,7 @@ def score_condition(frame: pd.DataFrame, truth: dict[str, str], condition: str,
         frames[estimator] = result["frame"]
         rows.append(summarise(estimator, result["frame"], cfg,
                               abstains=estimator != FIRST_SPY))
-    rows.append(pending_row())
+    rows.append(model_row or pending_row())
     return {
         "condition": condition,
         "table": pd.DataFrame(rows),
@@ -265,7 +284,7 @@ def simulated(cfg: dict, rebuild: bool = False) -> dict:
     frame = dataset.frame()
     truth = origin.truth_of(dataset)
     intel = load_intel(None, dataset.raw, cfg)
-    result = score_condition(frame, truth, "simulated", cfg, set(), intel)
+    result = score_condition(frame, truth, "simulated", cfg, set(), intel, corpus_row())
     result["source"] = "simulated"
     result["describes"] = dataset.describe()
     return result
