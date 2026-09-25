@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from analysis.validity import PASS, enforced
 from engines.propagation.estimators import ESTIMATORS, estimate_all
 from engines.propagation.tree import build_trees
 from ingest.ip_intel import load_intel
@@ -120,11 +121,15 @@ def flagged_at(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> p
     """`low_confidence_origin` recomputed at an arbitrary cutoff.
 
     Same rule as engines.propagation.low_confidence_origin: a public relay at
-    the top, or confidence below the cutoff.
+    the top, confidence below the cutoff, or — when the frame carries one and
+    `validity.enforce` is on — a failed validity check (analysis.validity).
     """
     p = cfg["engines"]["propagation"]
     cut = p["low_confidence_cutoff"] if cutoff is None else cutoff
-    return frame["ip_class"].isin(p["low_confidence_classes"]) | (frame["confidence"] < cut)
+    flagged = frame["ip_class"].isin(p["low_confidence_classes"]) | (frame["confidence"] < cut)
+    if "validity" in frame and enforced(cfg):
+        flagged |= frame["validity"] != PASS
+    return flagged
 
 
 def outcomes(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> pd.Series:

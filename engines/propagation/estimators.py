@@ -44,6 +44,8 @@ import networkx as nx
 import pandas as pd
 
 import config
+from analysis import validity
+from graph.builder import Tx, iter_transactions
 from ingest.ip_intel import IpIntel, IpClassification
 
 from .tree import PropagationTree, build_trees, degraded_mode
@@ -51,7 +53,12 @@ from .tree import PropagationTree, build_trees, degraded_mode
 COLUMNS = ["txid", "estimated_origin_ip", "ip_class", "estimator_used", "confidence",
            "attribution_confidence", "runner_up_ips", "runner_up_scores",
            "n_observations", "degraded", "low_confidence_origin",
-           "anonymized_entry_point"]
+           "anonymized_entry_point", "calibration_basis", *validity.COLUMNS]
+
+#: What `confidence` is, stated beside every estimate: it ranks, it is not a
+#: probability. The supervised model's is (origination/, isotonic).
+CALIBRATION_BASIS = ("uncalibrated: the winner's share of the estimator's score vector, "
+                     "damped by observation count")
 
 
 @dataclass
@@ -73,6 +80,7 @@ class OriginEstimate:
     # its rank and its stated confidence, and only the share of it that the
     # correlation engine may treat as evidence is reduced.
     attribution_confidence: float = 0.0
+    validity: validity.Verdict = validity.VALID
 
     @property
     def runner_ups(self) -> list[tuple[str, float]]:
@@ -214,7 +222,8 @@ def confidence_of(ranked: list[tuple[str, float]], n_observations: int) -> float
     return round(min(1.0, max(0.0, share * observed)), 4)
 
 
-def low_confidence_origin(ip_class: str, confidence: float, cfg: dict | None = None) -> bool:
+def low_confidence_origin(ip_class: str, confidence: float, cfg: dict | None = None,
+                          verdict: validity.Verdict | None = None) -> bool:
     """"Do not lean on this estimate" — nothing stronger.
 
     Set when the best candidate is a public relay — a node that forwards other
@@ -228,14 +237,22 @@ def low_confidence_origin(ip_class: str, confidence: float, cfg: dict | None = N
     absence is rare. What it actually separates is weak estimates from strong
     ones (right ~54% of the time when raised against ~81% when clear), and it is
     now named for that.
+
+    A failed validity check (analysis.validity) raises it too: that is how an
+    invalid attribution abstains, through this flag and not beside it.
     """
-    p = (cfg or config.load())["engines"]["propagation"]
+    cfg = cfg or config.load()
+    p = cfg["engines"]["propagation"]
     return bool(ip_class in p["low_confidence_classes"]
-                or confidence < p["low_confidence_cutoff"])
+                or confidence < p["low_confidence_cutoff"]
+                or (verdict is not None and not verdict.passed and validity.enforced(cfg)))
 
 
 def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = None,
-                    estimator: str | None = None, mode: str | None = None) -> OriginEstimate:
+                    estimator: str | None = None, mode: str | None = None,
+                    tx: Tx | None = None) -> OriginEstimate:
+    """`tx`, when the caller has the transaction's structure, lets the
+    validity layer see a CoinJoin; without it that one check cannot fire."""
     cfg = cfg or config.load()
     p = cfg["engines"]["propagation"]
     name = estimator or p["estimator"]
@@ -247,11 +264,13 @@ def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = No
         c = intel.classify(ip, tree.graph.nodes.get(ip, {}).get("asn")) if ip else None
         ip_class = c.ip_class if c else "residential_or_unknown"
         confidence = p["single_row_confidence"] if ip else 0.0
+        verdict = validity.assess_tree(tree, ip, intel, cfg, tx)
         return OriginEstimate(
             tree.txid, ip, ip_class, "first_timestamp", confidence,
             [(ip, 1.0)] if ip else [], tree.n_observations, degraded=True,
             evidence=["single relay observation: first-seen IP, not an estimate"],
-            low_confidence=low_confidence_origin(ip_class, confidence, cfg),
+            low_confidence=low_confidence_origin(ip_class, confidence, cfg, verdict),
+            validity=verdict,
             anonymized_entry_point=is_anonymized_entry(ip_class, cfg),
             attribution_confidence=attribution_confidence_of(
                 confidence, is_anonymized_entry(ip_class, cfg), cfg))
@@ -261,20 +280,22 @@ def estimate_origin(tree: PropagationTree, intel: IpIntel, cfg: dict | None = No
     ranked = sorted(weighted.items(), key=lambda kv: (-kv[1], kv[0]))
     if not ranked:
         return OriginEstimate(tree.txid, None, "residential_or_unknown", name, 0.0, [],
-                              tree.n_observations, degraded=True)
+                              tree.n_observations, degraded=True, low_confidence=True,
+                              validity=validity.assess(0, cfg=cfg))
     best_ip = ranked[0][0]
     ip_class = classified[best_ip].ip_class
     confidence = confidence_of(ranked, tree.n_observations)
     anonymized = is_anonymized_entry(ip_class, cfg)
     evidence = list(classified[best_ip].evidence)
+    verdict = validity.assess_tree(tree, best_ip, intel, cfg, tx)
     if anonymized:
         evidence.append("anonymized entry point: this is where the broadcast entered "
                         "the network, not necessarily who sent it")
     return OriginEstimate(
         tree.txid, best_ip, ip_class, name, confidence, ranked, tree.n_observations,
         degraded=False, evidence=evidence,
-        low_confidence=low_confidence_origin(ip_class, confidence, cfg),
-        anonymized_entry_point=anonymized,
+        low_confidence=low_confidence_origin(ip_class, confidence, cfg, verdict),
+        anonymized_entry_point=anonymized, validity=verdict,
         attribution_confidence=attribution_confidence_of(confidence, anonymized, cfg))
 
 
@@ -287,9 +308,11 @@ def estimate_all(df: pd.DataFrame, intel: IpIntel, cfg: dict | None = None,
     n_runner_ups = cfg["engines"]["propagation"]["runner_ups"]
     status = degraded_mode(df)
     trees = build_trees(df)
+    txs = ({tx.txid: tx for tx in iter_transactions(df)}
+           if "input_addresses" in df else {})
     rows = []
     for tree in trees.values():
-        est = estimate_origin(tree, intel, cfg, estimator, mode)
+        est = estimate_origin(tree, intel, cfg, estimator, mode, txs.get(tree.txid))
         runners = est.runner_ups[:n_runner_ups]
         rows.append({
             "txid": est.txid, "estimated_origin_ip": est.ip, "ip_class": est.ip_class,
@@ -300,5 +323,7 @@ def estimate_all(df: pd.DataFrame, intel: IpIntel, cfg: dict | None = None,
             "n_observations": est.n_observations, "degraded": est.degraded,
             "low_confidence_origin": est.low_confidence,
             "anonymized_entry_point": est.anonymized_entry_point,
+            "calibration_basis": CALIBRATION_BASIS,
+            **est.validity.columns(),
         })
     return pd.DataFrame(rows, columns=COLUMNS), status

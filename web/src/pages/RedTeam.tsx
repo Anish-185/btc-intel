@@ -528,6 +528,7 @@ function Origin({ result }: { result: RunResult }) {
               <th>Estimated</th>
               <th>Class</th>
               <th className="num">Confidence</th>
+              <th>Validity</th>
               <th className="num">Rank</th>
             </tr>
           </thead>
@@ -543,6 +544,11 @@ function Origin({ result }: { result: RunResult }) {
                 <td className="mono">{row.estimated_origin_ip ?? "—"}</td>
                 <td className="soft">{row.ip_class.replace(/_/g, " ")}</td>
                 <td className="num">{score3(row.confidence)}</td>
+                <td title={row.validity.evidence.join(" ")}>
+                  {row.validity.status === "PASS"
+                    ? "pass"
+                    : (row.validity.reason ?? "").replace(/_/g, " ").toLowerCase()}
+                </td>
                 <td className="num">{row.rank ?? (row.observed ? "—" : "not observed")}</td>
               </tr>
             ))}

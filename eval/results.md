@@ -19,19 +19,19 @@ before any of this was measured. Wallet recall is reported as secondary.
 | stacker AUC | 0.668 | 0.678 | actor (entity holds an illicit operation's wallet) | 482 / 1114 positive entities |
 | stacker AUC, old broad label | 0.681 | 0.705 | broad wallet label (hops included) | 496 / 1142 positive entities |
 | origin top-1 (split filter) | 0.748 | — | observed_origin_ip per transaction | 1091 estimates |
-| origin cost-weighted score | 0.216 | — | outcome costs +1 / +0.3 / -3 / 0 | split filter |
+| origin cost-weighted score | 0.206 | — | outcome costs +1 / +0.3 / -3 / 0 | split filter |
 | low_confidence_origin cutoff | 0.35 | — | chosen on seed A, reported on seed B | seed A = 41 |
 | false positive rate, zero-attack | 0.0000 | — | alerts per entity on traffic with nothing planted | 949 entities, 0 alerts |
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
 | red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 7) | 30 injections, shifted set |
 | red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 7 | 50 injections |
-| red-team median time-to-detect | — | 2.22s | inject to alert, incremental re-run, crimes only | 20 detected |
+| red-team median time-to-detect | — | 4.44s | inject to alert, incremental re-run, crimes only | 20 detected |
 | attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 6) | 38 / 62 leads |
 
 
 Origin figures: `first_timestamp`, split filter, standard set, seed 41, observation rate 0.3.
 
-`low_confidence_origin` on **seed 43** (never used for tuning): precision 0.239, recall 0.788, accuracy with the flag clear 0.886 against 0.658 when raised, cost-weighted score 0.211.
+`low_confidence_origin` on **seed 43** (never used for tuning): precision 0.235, recall 0.788, accuracy with the flag clear 0.883 against 0.665 when raised, cost-weighted score 0.2.
 
 
 ### Read this before quoting anything above
@@ -61,11 +61,11 @@ Origin figures: `first_timestamp`, split filter, standard set, seed 41, observat
   Accuracy alone would have called this the best configuration. It is the least
   useful one.
 - **The split filter is 4.5pp more accurate than the old combined filter
-  (0.748 vs 0.703) and abstains far more often** (593
+  (0.748 vs 0.703) and abstains far more often** (613
   of 1091). That is the trade it was built to make: it names an uninvolved third
-  party 55 times where the combined filter did so 124 times.
+  party 53 times where the combined filter did so 122 times.
 - **`low_confidence_origin`'s precision as a predictor of literal absence is
-  0.239 on seed B.** It was never a good predictor of that; the rename
+  0.235 on seed B.** It was never a good predictor of that; the rename
   exists because the old name claimed it was.
 
 
@@ -288,8 +288,8 @@ points with a reduced attribution confidence (`attribution_confidence_factor`).
 | filter | top1 | conditional_top1 | n | correct_actionable | correct_infrastructure | wrong_uninvolved_third_party | abstained | cost_weighted_score | anonymized_entry_points |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | off | 0.754 | 0.901 | 1091 | 0 | 0 | 0 | 1091 | 0.000 | 140 |
-| combined | 0.703 | 0.840 | 1091 | 514 | 16 | 124 | 437 | 0.135 | 46 |
-| split | 0.748 | 0.894 | 1091 | 382 | 61 | 55 | 593 | 0.216 | 200 |
+| combined | 0.703 | 0.840 | 1091 | 495 | 16 | 122 | 458 | 0.123 | 46 |
+| split | 0.748 | 0.894 | 1091 | 366 | 59 | 53 | 613 | 0.206 | 200 |
 
 
 The `off` row abstains on every estimate, which is not a bug: confidence is the
@@ -308,14 +308,14 @@ Outcome costs are pre-registered in `engines.propagation.origin_filter.cost_weig
 | estimator | filter | top1 | conditional_top1 | cost_weighted_score |
 | --- | --- | --- | --- | --- |
 | first_timestamp | off | 0.754 | 0.901 | 0.000 |
-| first_timestamp | combined | 0.703 | 0.840 | 0.135 |
-| first_timestamp | split | 0.748 | 0.894 | 0.216 |
-| rumor_centrality | off | 0.557 | 0.666 | 0.066 |
-| rumor_centrality | combined | 0.638 | 0.762 | 0.062 |
-| rumor_centrality | split | 0.649 | 0.775 | 0.077 |
+| first_timestamp | combined | 0.703 | 0.840 | 0.123 |
+| first_timestamp | split | 0.748 | 0.894 | 0.206 |
+| rumor_centrality | off | 0.557 | 0.666 | 0.061 |
+| rumor_centrality | combined | 0.638 | 0.762 | 0.050 |
+| rumor_centrality | split | 0.649 | 0.775 | 0.067 |
 | timestamp_weighted_centrality | off | 0.622 | 0.744 | 0.000 |
-| timestamp_weighted_centrality | combined | 0.658 | 0.786 | 0.169 |
-| timestamp_weighted_centrality | split | 0.689 | 0.824 | 0.176 |
+| timestamp_weighted_centrality | combined | 0.658 | 0.786 | 0.150 |
+| timestamp_weighted_centrality | split | 0.689 | 0.824 | 0.165 |
 
 
 ### Every estimator, every rate, filter on and off
@@ -386,18 +386,18 @@ cost-weighted score, ties to the lower cutoff:
 
 | cutoff | flagged | abstained | correct_actionable | correct_infrastructure | wrong_uninvolved_third_party | cost_weighted_score |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0.100 | 0 | 0 | 710 | 106 | 275 | -0.076 |
-| 0.150 | 0 | 0 | 710 | 106 | 275 | -0.076 |
-| 0.200 | 6 | 6 | 707 | 106 | 272 | -0.071 |
-| 0.250 | 125 | 125 | 643 | 88 | 235 | -0.033 |
-| 0.300 | 362 | 362 | 505 | 74 | 150 | 0.071 |
-| 0.350 | 593 | 593 | 382 | 61 | 55 | 0.216 |
-| 0.400 | 821 | 821 | 216 | 31 | 23 | 0.143 |
-| 0.450 | 902 | 902 | 161 | 18 | 10 | 0.125 |
-| 0.500 | 998 | 998 | 79 | 8 | 6 | 0.058 |
-| 0.550 | 1015 | 1015 | 66 | 6 | 4 | 0.051 |
-| 0.600 | 1066 | 1066 | 23 | 2 | 0 | 0.022 |
-| 0.650 | 1071 | 1071 | 19 | 1 | 0 | 0.018 |
+| 0.100 | 34 | 34 | 683 | 103 | 271 | -0.091 |
+| 0.150 | 34 | 34 | 683 | 103 | 271 | -0.091 |
+| 0.200 | 40 | 40 | 680 | 103 | 268 | -0.085 |
+| 0.250 | 156 | 156 | 617 | 86 | 232 | -0.049 |
+| 0.300 | 387 | 387 | 485 | 72 | 147 | 0.060 |
+| 0.350 | 613 | 613 | 366 | 59 | 53 | 0.206 |
+| 0.400 | 829 | 829 | 208 | 31 | 23 | 0.136 |
+| 0.450 | 908 | 908 | 155 | 18 | 10 | 0.120 |
+| 0.500 | 1002 | 1002 | 75 | 8 | 6 | 0.054 |
+| 0.550 | 1019 | 1019 | 62 | 6 | 4 | 0.047 |
+| 0.600 | 1067 | 1067 | 22 | 2 | 0 | 0.021 |
+| 0.650 | 1072 | 1072 | 18 | 1 | 0 | 0.017 |
 | 0.700 | 1085 | 1085 | 5 | 1 | 0 | 0.005 |
 | 0.750 | 1088 | 1088 | 2 | 1 | 0 | 0.002 |
 | 0.800 | 1091 | 1091 | 0 | 0 | 0 | 0.000 |
@@ -410,12 +410,12 @@ cost-weighted score, ties to the lower cutoff:
 
 | cutoff | flagged | of | precision | recall | accuracy | accuracy_when_flag_clear | accuracy_when_flagged |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.350 | 606 | 1104 | 0.239 | 0.788 | 0.547 | 0.886 | 0.658 |
+| 0.350 | 618 | 1104 | 0.235 | 0.788 | 0.536 | 0.883 | 0.665 |
 
 
 | n | accuracy | correct_actionable | correct_infrastructure | wrong_uninvolved_third_party | abstained | cost_weighted_score |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1104 | 0.761 | 388 | 53 | 57 | 606 | 0.211 |
+| 1104 | 0.761 | 376 | 53 | 57 | 618 | 0.200 |
 
 
 `precision` and `recall` are against "the true origin was not in the observed tree
@@ -837,7 +837,7 @@ all is the ceiling on the first number.
 
 ### Shifted set
 
-909 links over 661 entities; 62 leads shown across 56 alerts.
+908 links over 661 entities; 62 leads shown across 56 alerts.
 
 
 **Of the leads an analyst is shown, 0.613 name the actor's true broadcast address** and 0.710 name the address the broadcast entered the network from. The true address was observable at all for 0.871 of them — that is the ceiling, not a failure of the engine.
@@ -848,7 +848,7 @@ all is the ceiling on the first number.
 
 | score band | links | names the true IP | names the observed IP | true IP observable |
 | --- | --- | --- | --- | --- |
-| 0.0–0.2 | 707 | 0.426 | 0.590 | 0.912 |
+| 0.0–0.2 | 706 | 0.426 | 0.589 | 0.912 |
 | 0.2–0.4 | 157 | 0.930 | 0.930 | 0.994 |
 | 0.4–0.6 | 39 | 1.000 | 1.000 | 1.000 |
 | 0.6–0.8 | 6 | 1.000 | 1.000 | 1.000 |
@@ -879,7 +879,7 @@ all is the ceiling on the first number.
 
 | observations | links | names the true IP | names the observed IP |
 | --- | --- | --- | --- |
-| 1 | 754 | 0.448 | 0.602 |
+| 1 | 753 | 0.449 | 0.602 |
 | 2 | 92 | 0.989 | 0.989 |
 | 3–4 | 53 | 1.000 | 1.000 |
 | 5–9 | 10 | 1.000 | 1.000 |
@@ -901,7 +901,7 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 2.22s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 4.44s.
 
 
 Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
@@ -928,9 +928,9 @@ a legal privacy tool.
 | typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | yes | 10 | 4 | 0.400 | 2.120 | 5 | 5 |
-| peel_chain | yes | 10 | 7 | 0.700 | 2.190 | 5 | 5 |
-| ransomware_collector | yes | 10 | 9 | 0.900 | 2.290 | 5 | 5 |
+| layering | yes | 10 | 4 | 0.400 | 4.050 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 4.380 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 4.550 | 5 | 5 |
 | same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
@@ -969,36 +969,36 @@ not in this table — they are not misses.
 
 | run | typology | broadcast | rule | anomaly | gnn | taint | fused | threshold | short by |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| batch003 | layering | residential | 0.000 | 0.141 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch003 | layering | residential | 0.000 | 0.173 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch003 | layering | residential | 0.000 | 0.381 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch007 | peel_chain | tor_exit | 0.000 | 0.798 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch007 | peel_chain | tor_exit | 0.000 | 0.864 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch007 | peel_chain | tor_exit | 0.000 | 0.381 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch023 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch023 | layering | residential | 0.000 | 0.309 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch023 | layering | residential | 0.000 | 0.416 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch032 | peel_chain | hosting | 0.000 | 0.355 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch032 | peel_chain | hosting | 0.000 | 0.213 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch032 | peel_chain | hosting | 0.000 | 0.922 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch033 | layering | hosting | 0.000 | 0.290 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch033 | layering | hosting | 0.000 | 0.248 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch033 | layering | hosting | 0.000 | 0.257 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.289 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.929 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.268 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch038 | layering | relay_heavy | 0.000 | 0.263 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch038 | layering | relay_heavy | 0.000 | 0.285 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch038 | layering | relay_heavy | 0.000 | 0.272 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.691 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.359 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.394 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch043 | layering | residential | 0.000 | 0.795 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch043 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch043 | layering | residential | 0.000 | 0.354 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch048 | layering | tor_exit | 0.000 | 0.202 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch048 | layering | tor_exit | 0.000 | 0.026 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
-| batch048 | layering | tor_exit | 0.000 | 0.006 | 0.000 | 0.000 | 0.354 | 0.500 | 0.146 |
+| batch003 | layering | residential | 0.000 | 0.141 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch003 | layering | residential | 0.000 | 0.173 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch003 | layering | residential | 0.000 | 0.381 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch007 | peel_chain | tor_exit | 0.000 | 0.798 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch007 | peel_chain | tor_exit | 0.000 | 0.864 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch007 | peel_chain | tor_exit | 0.000 | 0.381 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch023 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch023 | layering | residential | 0.000 | 0.309 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch023 | layering | residential | 0.000 | 0.416 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch032 | peel_chain | hosting | 0.000 | 0.355 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch032 | peel_chain | hosting | 0.000 | 0.213 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch032 | peel_chain | hosting | 0.000 | 0.922 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch033 | layering | hosting | 0.000 | 0.290 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch033 | layering | hosting | 0.000 | 0.248 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch033 | layering | hosting | 0.000 | 0.257 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.289 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.929 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.268 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch038 | layering | relay_heavy | 0.000 | 0.263 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch038 | layering | relay_heavy | 0.000 | 0.285 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch038 | layering | relay_heavy | 0.000 | 0.272 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.691 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.359 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.394 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch043 | layering | residential | 0.000 | 0.795 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch043 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch043 | layering | residential | 0.000 | 0.354 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch048 | layering | tor_exit | 0.000 | 0.202 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch048 | layering | tor_exit | 0.000 | 0.026 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
+| batch048 | layering | tor_exit | 0.000 | 0.006 | 0.000 | 0.000 | 0.493 | 0.500 | 0.007 |
 
 
 One thing this table says loudly: **the fused score does not move with the anomaly
@@ -1028,7 +1028,7 @@ identical either way; the difference is the constrained refit landing on a
 different optimum once the column is gone, which is worth knowing but is not
 evidence the signal was doing harm.
 
-The red-team misses make it concrete. Two injected entities, one scoring **0.006** on anomaly and one **0.929** — a difference of 0.923 on the signal — both come out of the stacker at **0.354** and **0.354**. The fused score does not move, because nothing is multiplying it.
+The red-team misses make it concrete. Two injected entities, one scoring **0.006** on anomaly and one **0.929** — a difference of 0.923 on the signal — both come out of the stacker at **0.493** and **0.493**. The fused score does not move, because nothing is multiplying it.
 
 **Why it comes out below chance.** IsolationForest finds the population's
 outliers, and on this data the outliers are the exchanges: enormous fan-in,
@@ -1128,8 +1128,8 @@ because a fixture-derived row must never be read as a signet one.
 
 | capture_id | source | condition | rows | features | transactions | peers | degenerate_share | scope_out_share | quarantined_rows | quarantined_share |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| adjacent-synthetic | synthetic-test-fixture | adjacent | 143 | 47 | 40 | 5 | 0.0000 | 0.0000 | 0 | 0.0000 |
-| non_adjacent-synthetic | synthetic-test-fixture | non_adjacent | 103 | 47 | 40 | 4 | 0.0000 | 0.0000 | 0 | 0.0000 |
+| adjacent-synthetic | synthetic-test-fixture | adjacent | 143 | 48 | 40 | 5 | 0.0000 | 0.0000 | 0 | 0.0000 |
+| non_adjacent-synthetic | synthetic-test-fixture | non_adjacent | 103 | 48 | 40 | 4 | 0.0000 | 0.0000 | 0 | 0.0000 |
 
 
 `degenerate` is the share of rows whose transaction had 0 or 1 candidate — nothing to
@@ -1159,10 +1159,10 @@ The model reads one observer's relay matrix (`features/relay.py`), so it is trai
 | condition | test set | estimator | n | top1 | top1 95% CI | top3 | top3 95% CI | abstention rate | acc if answered | acc if answered 95% CI | ceiling (origin observed) | cost_weighted_score | wrong_uninvolved_third_party | cutoff (chosen on calibration) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | simulated | cross-topology | first_spy_baseline | 19414 | 0.247 | 0.241–0.254 | 0.274 | 0.268–0.281 | n/a | 0.247 | n/a — the floor never abstains | 0.279 | -2.014 | 14610 | n/a |
-| simulated | cross-topology | first_timestamp | 19414 | 0.252 | 0.246–0.259 | 0.275 | 0.269–0.281 | 0.986 | 0.960 | 0.929–0.977 | 0.279 | 0.012 | 11 | 0.550 |
-| simulated | cross-topology | rumor_centrality | 19414 | 0.128 | 0.124–0.133 | 0.182 | 0.177–0.188 | 0.986 | 0.956 | 0.924–0.974 | 0.279 | 0.011 | 12 | 0.500 |
-| simulated | cross-topology | timestamp_weighted_centrality | 19414 | 0.252 | 0.246–0.259 | 0.275 | 0.269–0.281 | 0.988 | 1.000 | 0.983–1.000 | 0.279 | 0.012 | 0 | 0.600 |
-| simulated | cross-topology | supervised_origination (P5) | 19414 | 0.274 | 0.268–0.281 | 0.278 | 0.271–0.284 | 0.808 | 0.906 | 0.896–0.915 | 0.279 | 0.120 | 350 | 0.750 |
+| simulated | cross-topology | first_timestamp | 19414 | 0.252 | 0.246–0.259 | 0.275 | 0.269–0.281 | 0.987 | 0.980 | 0.955–0.992 | 0.279 | 0.012 | 5 | 0.600 |
+| simulated | cross-topology | rumor_centrality | 19414 | 0.128 | 0.124–0.133 | 0.182 | 0.177–0.188 | 0.986 | 0.955 | 0.922–0.974 | 0.279 | 0.011 | 12 | 0.500 |
+| simulated | cross-topology | timestamp_weighted_centrality | 19414 | 0.252 | 0.246–0.259 | 0.275 | 0.269–0.281 | 0.987 | 0.966 | 0.936–0.982 | 0.279 | 0.012 | 9 | 0.550 |
+| simulated | cross-topology | supervised_origination (P5) | 19414 | 0.274 | 0.268–0.281 | 0.278 | 0.271–0.284 | 0.817 | 0.896 | 0.886–0.906 | 0.279 | 0.107 | 369 | 0.650 |
 
 *`condition="simulated"`.* The simulator omits: any Dandelion/Dandelion++ stem phase (every broadcast diffuses from its first hop immediately), Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement.
 
@@ -1171,14 +1171,14 @@ The model reads one observer's relay matrix (`features/relay.py`), so it is trai
 | condition | test set | estimator | n | top1 | top1 95% CI | top3 | top3 95% CI | abstention rate | acc if answered | acc if answered 95% CI | ceiling (origin observed) | cost_weighted_score | wrong_uninvolved_third_party | cutoff (chosen on calibration) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | simulated | within-topology | first_spy_baseline | 12279 | 0.239 | 0.232–0.247 | 0.267 | 0.259–0.275 | n/a | 0.239 | n/a — the floor never abstains | 0.272 | -2.048 | 9343 | n/a |
-| simulated | within-topology | first_timestamp | 12279 | 0.246 | 0.238–0.254 | 0.268 | 0.260–0.276 | 0.982 | 0.881 | 0.833–0.917 | 0.272 | 0.010 | 27 | 0.550 |
-| simulated | within-topology | rumor_centrality | 12279 | 0.124 | 0.118–0.130 | 0.179 | 0.173–0.186 | 0.981 | 0.836 | 0.783–0.878 | 0.272 | 0.007 | 38 | 0.500 |
-| simulated | within-topology | timestamp_weighted_centrality | 12279 | 0.246 | 0.238–0.254 | 0.268 | 0.260–0.276 | 0.986 | 0.989 | 0.960–0.997 | 0.272 | 0.014 | 2 | 0.600 |
-| simulated | within-topology | supervised_origination (P5) | 12279 | 0.268 | 0.261–0.276 | 0.272 | 0.264–0.280 | 0.815 | 0.915 | 0.902–0.925 | 0.272 | 0.122 | 194 | 0.750 |
+| simulated | within-topology | first_timestamp | 12279 | 0.246 | 0.238–0.254 | 0.268 | 0.260–0.276 | 0.984 | 0.911 | 0.864–0.943 | 0.272 | 0.011 | 18 | 0.600 |
+| simulated | within-topology | rumor_centrality | 12279 | 0.124 | 0.118–0.130 | 0.179 | 0.173–0.186 | 0.982 | 0.830 | 0.775–0.873 | 0.272 | 0.006 | 38 | 0.500 |
+| simulated | within-topology | timestamp_weighted_centrality | 12279 | 0.246 | 0.238–0.254 | 0.268 | 0.260–0.276 | 0.983 | 0.877 | 0.826–0.914 | 0.272 | 0.009 | 26 | 0.550 |
+| simulated | within-topology | supervised_origination (P5) | 12279 | 0.268 | 0.261–0.276 | 0.272 | 0.264–0.280 | 0.825 | 0.907 | 0.894–0.919 | 0.272 | 0.110 | 199 | 0.650 |
 
 *`condition="simulated"`.* The simulator omits: any Dandelion/Dandelion++ stem phase (every broadcast diffuses from its first hop immediately), Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement.
 
-**Verdict (cross-topology).** The model's cost-weighted score is 0.120 against 0.012 for the best single estimator, `first_timestamp`. On the pre-registered measure the fusion earns its place. Accuracy-given-answered is *lower* for the model (0.906 vs 0.960): `first_timestamp` answers only 1.4% of transactions and is right more often when it does; the model answers 19.2%, and the cost weights price that coverage above the precision it gives up. Most of the difference is in *when to answer*, not in ranking: top-1 is 0.274 against 0.252, both bounded by the 0.279 of transactions whose origin was a candidate at all. The estimators abstain on 98.6% of transactions because their confidence — the winner's share of the score vector — is small whenever many peers announce. A single estimator with a calibrated confidence was not built, so this table does not separate the value of fusing from the value of calibrating.
+**Verdict (cross-topology).** The model's cost-weighted score is 0.107 against 0.012 for the best single estimator, `first_timestamp`. On the pre-registered measure the fusion earns its place. Accuracy-given-answered is *lower* for the model (0.896 vs 0.980): `first_timestamp` answers only 1.3% of transactions and is right more often when it does; the model answers 18.3%, and the cost weights price that coverage above the precision it gives up. Most of the difference is in *when to answer*, not in ranking: top-1 is 0.274 against 0.252, both bounded by the 0.279 of transactions whose origin was a candidate at all. The estimators abstain on 98.7% of transactions because their confidence — the winner's share of the score vector — is small whenever many peers announce. A single estimator with a calibrated confidence was not built, so this table does not separate the value of fusing from the value of calibrating.
 
 #### Calibration
 
@@ -1220,7 +1220,7 @@ Top candidates from the cross-topology set, chosen by sorted key rather than by 
 | simulated | answered, correct | relay_hub-n600-r0.04-g0-c00 | 04213d1e7e43 | peer 117.200.95.163 (98% calibrated) was first in 2 of 2 earlier observations and had announced 2 earlier transactions in this capture and was the first of 19 peers to announce it |
 | simulated | answered, correct | relay_hub-n600-r0.04-g0-c00 | 06c40ba44725 | peer 49.36.162.30 (98% calibrated) was first in 1 of 1 earlier observation and had announced 1 earlier transaction in this capture and was the first of 26 peers to announce it |
 | simulated | answered, wrong | relay_hub-n600-r0.04-g0-c04 | 5dd4f580a58a | peer 91.65.14.86 (92% calibrated) was first in 1 of 1 earlier observation and was the first of 7 peers to announce it and first timestamp ranked it 1 of 7 |
-| simulated | answered, wrong | relay_hub-n600-r0.04-g0-c05 | 6d96f0cba2bf | peer 122.176.88.165 (79% calibrated) had announced nothing earlier in this capture and was the first of 24 peers to announce it and first timestamp ranked it 1 of 24 |
+| simulated | answered, wrong | relay_hub-n600-r0.04-g0-c04 | b52d59b34f5e | peer 91.65.14.86 (50% calibrated) had announced nothing earlier in this capture and was the first of 8 peers to announce it and first timestamp ranked it 1 of 8 |
 | simulated | abstained: degenerate | relay_hub-n600-r0.04-g0-c01 | 0128291733b0 | peer 122.176.227.219: no answer — it was the only peer to announce this transaction, so there is nothing to compare it against |
 | simulated | abstained: degenerate | relay_hub-n600-r0.04-g0-c01 | 1ce0f8f1aee3 | peer 122.176.227.219: no answer — it was the only peer to announce this transaction, so there is nothing to compare it against |
 | simulated | abstained: scope_out | relay_hub-n600-r0.04-g0-c10 | 058ee8046bee | peer 159.65.231.178: no answer — every peer that announced this transaction is a listed relay, and a relay is never a plausible sender |
@@ -1231,7 +1231,108 @@ Top candidates from the cross-topology set, chosen by sorted key rather than by 
 Signet rows for the model stay **PENDING**: it has been trained and scored only on simulated captures (row `supervised_origination (P5)` in the signet tables above).
 
 
-## 10. Decisions taken in this pass
+## 10. The validity layer: when attribution is invalid
+
+`condition="simulated"`. **What the simulator omits:** The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
+Corpus variant `efc5a443edf54d56`, deterministic from `origination/manifest_validity.json`: the base manifest's captures, each drawing four independent toggles. The model is fitted, calibrated and scored on it exactly as in section 9. Captures with each toggle on: dandelion 1029, onion 1037, v2 1101, coinjoin 1071, of 2160.
+
+### Ground-truth prevalence
+
+| condition | measure | transactions | share of broadcast |
+| --- | --- | --- | --- |
+| simulated | dandelion stem | 21599 | 0.248 |
+| simulated | dandelion stem through an observer | 2469 | 0.028 |
+| simulated | onion origin | 14650 | 0.168 |
+| simulated | coinjoin | 6562 | 0.075 |
+| simulated | equal value batch payout | 4093 | 0.047 |
+| simulated | matrix rows over v2 | 112673 | n/a |
+| simulated | matrix rows from onion peers | 1617 | n/a |
+
+*`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
+### Detector precision and recall against the generator's labels
+
+Each detector run on its own over every observed test transaction. TOR_OR_V2 depends on which peer is named; the model's choice is used.
+
+| condition | test set | detector | ground truth | transactions | truly present | fired | true positives | precision | precision 95% CI | recall | recall 95% CI |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| simulated | within-topology | DANDELION_STEM | a stem was used | 12223 | 3078 | 737 | 313 | 0.425 | 0.390–0.461 | 0.102 | 0.091–0.113 |
+| simulated | within-topology | DANDELION_STEM | the stem passed through an observer | 12223 | 375 | 737 | 219 | 0.297 | 0.265–0.331 | 0.584 | 0.533–0.633 |
+| simulated | within-topology | COINJOIN | CoinJoin shape | 12223 | 923 | 1054 | 923 | 0.876 | 0.854–0.894 | 1.000 | 0.996–1.000 |
+| simulated | within-topology | TOR_OR_V2 (onion clause) | sender reachable only over Tor | 12223 | 1905 | 249 | 249 | 1.000 | 0.985–1.000 | 0.131 | 0.116–0.147 |
+| simulated | within-topology | TOR_OR_V2 (both clauses) | sender reachable only over Tor | 12223 | 1905 | 1370 | 372 | 0.272 | 0.249–0.296 | 0.195 | 0.178–0.214 |
+| simulated | cross-topology | DANDELION_STEM | a stem was used | 19250 | 4678 | 1143 | 489 | 0.428 | 0.399–0.457 | 0.105 | 0.096–0.114 |
+| simulated | cross-topology | DANDELION_STEM | the stem passed through an observer | 19250 | 635 | 1143 | 335 | 0.293 | 0.267–0.320 | 0.528 | 0.489–0.566 |
+| simulated | cross-topology | COINJOIN | CoinJoin shape | 19250 | 1383 | 1597 | 1383 | 0.866 | 0.848–0.882 | 1.000 | 0.997–1.000 |
+| simulated | cross-topology | TOR_OR_V2 (onion clause) | sender reachable only over Tor | 19250 | 3471 | 443 | 443 | 1.000 | 0.991–1.000 | 0.128 | 0.117–0.139 |
+| simulated | cross-topology | TOR_OR_V2 (both clauses) | sender reachable only over Tor | 19250 | 3471 | 2411 | 720 | 0.299 | 0.281–0.317 | 0.207 | 0.194–0.221 |
+
+*`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
+On the base corpus `945261fe69e264d6` (cross-topology test set), where no transaction has a stem, DANDELION_STEM fires on 815 of 19414 transactions (0.042): every one a false alarm.
+
+### The system with and without the validity layer
+
+The supervised model on the same test transactions; each row's cutoff chosen on the calibration captures by `eval.origin.choose_cutoff_for`, with the layer on and off respectively. **The headline is `cost_weighted_score` and `acc if answered`.**
+
+| condition | test set | estimator | n | top1 | top1 95% CI | top3 | top3 95% CI | abstention rate | acc if answered | acc if answered 95% CI | ceiling (origin observed) | cost_weighted_score | wrong_uninvolved_third_party | cutoff (chosen on calibration) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| simulated | within-topology | supervised_origination (P5), validity off | 12223 | 0.192 | 0.185–0.199 | 0.195 | 0.188–0.202 | 0.887 | 0.919 | 0.903–0.932 | 0.195 | 0.067 | 112 | 0.700 |
+| simulated | within-topology | supervised_origination (P5) + validity | 12223 | 0.192 | 0.185–0.199 | 0.195 | 0.188–0.202 | 0.933 | 0.906 | 0.884–0.924 | 0.195 | 0.042 | 77 | 0.700 |
+| simulated | cross-topology | supervised_origination (P5), validity off | 19250 | 0.190 | 0.185–0.196 | 0.193 | 0.188–0.199 | 0.885 | 0.900 | 0.886–0.911 | 0.194 | 0.057 | 223 | 0.700 |
+| simulated | cross-topology | supervised_origination (P5) + validity | 19250 | 0.190 | 0.185–0.196 | 0.193 | 0.188–0.199 | 0.932 | 0.874 | 0.855–0.891 | 0.194 | 0.034 | 165 | 0.700 |
+
+*`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
+**Verdict (cross-topology): the validity layer does not improve the cost score** — 0.034 with it against 0.057 without. That means its detectors abstain on transactions the model was getting right more often than on ones it was getting wrong; the ablation shows which. Accuracy-given-answered is 0.874 with the layer and 0.9 without; abstention 0.932 against 0.885.
+
+### What each reason withholds
+
+At the layer-off cutoff: how many transactions each reason withholds that the layer-off system would have answered, what those answers would have been, and the cost score with only that reason enforced. DEGENERATE and NOT_REACHABLE were already abstentions by construction and cost nothing new.
+
+| condition | test set | reason | withheld | would have been answered | …correct_actionable | …correct_infrastructure | …wrong_uninvolved_third_party | cost score, this reason only | change vs layer off |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| simulated | within-topology | DEGENERATE | 1107 | 0 | 0 | 0 | 0 | 0.067 | 0.000 |
+| simulated | within-topology | NOT_REACHABLE | 914 | 0 | 0 | 0 | 0 | 0.067 | 0.000 |
+| simulated | within-topology | COINJOIN | 878 | 127 | 95 | 22 | 10 | 0.061 | -0.006 |
+| simulated | within-topology | TOR_OR_V2 | 1030 | 229 | 72 | 148 | 9 | 0.059 | -0.008 |
+| simulated | within-topology | DANDELION_STEM | 577 | 209 | 193 | 0 | 16 | 0.055 | -0.012 |
+| simulated | cross-topology | DEGENERATE | 1482 | 0 | 0 | 0 | 0 | 0.057 | 0.000 |
+| simulated | cross-topology | NOT_REACHABLE | 1446 | 0 | 0 | 0 | 0 | 0.057 | 0.000 |
+| simulated | cross-topology | COINJOIN | 1340 | 179 | 134 | 33 | 12 | 0.051 | -0.006 |
+| simulated | cross-topology | TOR_OR_V2 | 1838 | 482 | 156 | 303 | 23 | 0.048 | -0.009 |
+| simulated | cross-topology | DANDELION_STEM | 854 | 254 | 230 | 1 | 23 | 0.048 | -0.009 |
+
+*`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
+### Verdicts issued on the test sets
+
+| verdict | within-topology | cross-topology |
+| --- | --- | --- |
+| PASS | 7717 | 12290 |
+| DEGENERATE | 1107 | 1482 |
+| TOR_OR_V2 | 1030 | 1838 |
+| NOT_REACHABLE | 914 | 1446 |
+| COINJOIN | 878 | 1340 |
+| DANDELION_STEM | 577 | 854 |
+
+*`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
+### The variant's section-9 table (cross-topology), validity enforced
+
+| condition | test set | estimator | n | top1 | top1 95% CI | top3 | top3 95% CI | abstention rate | acc if answered | acc if answered 95% CI | ceiling (origin observed) | cost_weighted_score | wrong_uninvolved_third_party | cutoff (chosen on calibration) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| simulated | cross-topology | first_spy_baseline | 19250 | 0.173 | 0.168–0.178 | 0.191 | 0.185–0.197 | n/a | 0.173 | n/a — the floor never abstains | 0.194 | -2.327 | 15922 | n/a |
+| simulated | cross-topology | first_timestamp | 19250 | 0.176 | 0.171–0.182 | 0.191 | 0.186–0.197 | 0.991 | 0.874 | 0.817–0.915 | 0.194 | 0.004 | 22 | 0.500 |
+| simulated | cross-topology | rumor_centrality | 19250 | 0.086 | 0.082–0.090 | 0.122 | 0.118–0.127 | 0.991 | 0.899 | 0.844–0.936 | 0.194 | 0.005 | 17 | 0.500 |
+| simulated | cross-topology | timestamp_weighted_centrality | 19250 | 0.176 | 0.171–0.182 | 0.191 | 0.186–0.197 | 0.991 | 0.894 | 0.839–0.932 | 0.194 | 0.005 | 18 | 0.500 |
+| simulated | cross-topology | supervised_origination (P5) | 19250 | 0.190 | 0.185–0.196 | 0.193 | 0.188–0.199 | 0.932 | 0.874 | 0.855–0.891 | 0.194 | 0.034 | 165 | 0.700 |
+
+*`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
+
+## 11. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

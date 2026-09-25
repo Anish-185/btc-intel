@@ -7,7 +7,7 @@
  *  whether the origin estimate behind it was weak. */
 import type { Lead } from "../api/types";
 import { ipClass } from "../lib/format";
-import { Chip } from "./ui";
+import { Chip, ValidityChip } from "./ui";
 
 export function LeadsPanel({
   leads,
@@ -48,6 +48,7 @@ export function LeadsPanel({
                       <span aria-hidden="true">⚠</span> anonymized entry point
                     </Chip>
                   )}
+                  {lead.validity && <ValidityChip validity={lead.validity} />}{" "}
                   {lowConfidence && (
                     <Chip tone="caution" title="The origin estimate behind this lead is weak">
                       <span aria-hidden="true">⚠</span> low confidence origin

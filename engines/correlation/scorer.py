@@ -50,6 +50,7 @@ from pathlib import Path
 import pandas as pd
 
 import config
+from analysis.validity import DEGENERATE, PASS, enforced
 from engines.propagation.estimators import estimate_all
 from engines.rules.detectors import FeatureSet
 from graph.builder import build_graph, iter_transactions, load
@@ -59,7 +60,8 @@ from ingest.ip_intel import HOSTING, RESIDENTIAL, TOR_EXIT, IpIntel, load_intel
 COLUMNS = ["entity_id", "ip", "ip_class", "asn", "asn_org", "geo_country", "high_risk_asn",
            "observation_count", "effective_observations", "origin_confidence",
            "distinct_entities", "raw_confidence", "asn_penalty", "shared_ip_penalty",
-           "final_score", "first_seen", "last_seen", "reason"]
+           "final_score", "first_seen", "last_seen", "reason", "validity",
+           "validity_evidence"]
 
 HOUR = 3600.0
 DAY = 86400.0
@@ -78,6 +80,7 @@ class Observation:
     country: str | None = None
     ip_class: str = RESIDENTIAL
     origin_confidence: float = 1.0
+    validity: str = PASS
 
 
 def raw_confidence(observation_count: float, cfg: dict | None = None) -> float:
@@ -188,6 +191,14 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
         txid = str(est.txid)
         if txid in mixes or not est.estimated_origin_ip:
             continue
+        # An origin the validity layer found invalid (a mix, Tor/v2, a
+        # Dandelion stem, only relays in view) is not evidence about anybody.
+        # DEGENERATE is kept: one transaction offering nothing to compare is
+        # exactly what aggregating many of them, each weighted by its low
+        # confidence, exists for — and the lead's own verdict says so.
+        verdict = str(getattr(est, "validity", PASS) or PASS)
+        if verdict not in (PASS, DEGENERATE) and enforced(cfg):
+            continue
         row = meta.get(txid)
         entities = {features.entity_of(a) for a in inputs_by_tx.get(txid, [])}
         ts = pd.Timestamp(row.timestamp).timestamp() if row is not None else 0.0
@@ -204,7 +215,8 @@ def collect_observations(df: pd.DataFrame, features: FeatureSet, cfg: dict | Non
                 # rather than being pushed down the ranking. See
                 # engines.propagation.attribution_confidence_of.
                 origin_confidence=float(getattr(est, "attribution_confidence",
-                                                est.confidence))))
+                                                est.confidence)),
+                validity=verdict))
     return observations
 
 
@@ -266,6 +278,7 @@ def score_observations(observations: list[Observation], cfg: dict | None = None)
         if obs.txid not in link["txids"]:    # independent broadcasts, not rows
             link["txids"].add(obs.txid)
             link.setdefault("origin_confidences", []).append(obs.origin_confidence)
+            link.setdefault("verdicts", []).append(obs.validity)
         link.setdefault("ip_class", obs.ip_class)
         link["first_seen"] = min(link["first_seen"], obs.timestamp)
         link["last_seen"] = max(link["last_seen"], obs.timestamp)
@@ -290,6 +303,12 @@ def score_observations(observations: list[Observation], cfg: dict | None = None)
         link["final_score"] = (link["raw_confidence"] * link["asn_penalty"]
                                * link["shared_ip_penalty"])
         link["reason"] = build_reason(link)
+        degenerate = sum(v != PASS for v in link["verdicts"])
+        link["validity"] = DEGENERATE if degenerate else PASS
+        link["validity_evidence"] = (
+            f"{degenerate} of {count} contributing origin estimates had a single "
+            "candidate (DEGENERATE); the lead rests on their repetition, not on any one"
+            if degenerate else f"all {count} contributing origin estimates passed validity")
         link["first_seen"] = pd.Timestamp(link["first_seen"], unit="s", tz="UTC")
         link["last_seen"] = pd.Timestamp(link["last_seen"], unit="s", tz="UTC")
         rows.append({c: link[c] for c in COLUMNS})

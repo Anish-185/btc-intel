@@ -23,6 +23,7 @@ import pandas as pd
 
 import config
 import custody
+from analysis.validity import NOT_ASSESSED, PASS
 from engines.anomaly.detector import fit_score
 from engines.correlation.scorer import correlate
 from engines.propagation.estimators import estimate_all, is_anonymized_entry
@@ -132,6 +133,20 @@ def labels_for(signals: pd.DataFrame, ground_truth: dict, features: FeatureSet,
     return signals["entity_id"].isin(bad_entities).astype(int)
 
 
+LEAD_CALIBRATION_BASIS = ("uncalibrated: evidence-weighted count of origin estimates, "
+                          "discounted for shared infrastructure")
+
+
+def _lead_validity(row) -> dict:
+    """Correlation drops invalid origins; what remains is PASS or DEGENERATE."""
+    reason = getattr(row, "validity", None)
+    if reason is None or pd.isna(reason):
+        return NOT_ASSESSED.as_dict()
+    return {"status": "PASS" if reason == PASS else "INCONCLUSIVE",
+            "reason": None if reason == PASS else reason, "confidence": None,
+            "evidence": [str(row.validity_evidence)]}
+
+
 def attribution_leads(links: pd.DataFrame, cfg: dict) -> dict[str, list[dict]]:
     """Top-k IP leads per entity — shown beside an alert, never inside its score.
 
@@ -158,7 +173,9 @@ def attribution_leads(links: pd.DataFrame, cfg: dict) -> dict[str, list[dict]]:
                            "anonymized_entry_point": anonymized,
                            "label": ("anonymized entry point" if anonymized
                                      else "candidate origin"),
-                           "evidence": str(row.reason)})
+                           "evidence": str(row.reason),
+                           "calibration_basis": LEAD_CALIBRATION_BASIS,
+                           "validity": _lead_validity(row)})
     return out
 
 

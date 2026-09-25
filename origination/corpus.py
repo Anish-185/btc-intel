@@ -76,6 +76,7 @@ import config
 from features.relay import RELAY_COLUMNS, compute_relay_features, relay_frame
 from generator.main import node_intel
 from generator.net import GossipNet, Ip, IpAllocator, build_net
+from generator.typologies import shape
 from ingest.geoip import GeoIp
 from ingest.ip_intel import IpIntel
 from p2p.capture_reader import RelayEvent
@@ -83,6 +84,10 @@ from p2p.capture_reader import RelayEvent
 log = logging.getLogger(__name__)
 
 MANIFEST = Path(__file__).with_name("manifest.json")
+#: The same captures with the four invalidating conditions switched on per
+#: capture — Dandelion stems, onion senders, v2 links, CoinJoins. Read by
+#: `analysis.evaluate`; the base corpus stays the model's headline.
+VALIDITY_MANIFEST = Path(__file__).with_name("manifest_validity.json")
 
 #: The one sentence that sits next to every simulated number.
 OMISSIONS = (
@@ -93,6 +98,20 @@ OMISSIONS = (
     "re-announcement, wtxid relay, user agents and real GeoIP; senders keep one "
     "address and one peer set for a whole capture, and the share of senders "
     "connected directly to an observer is a sampled parameter, not a measurement.")
+
+#: What the validity variant adds, and how it simplifies — quoted beside every
+#: number that corpus produces, after `OMISSIONS` with its first clause struck.
+VALIDITY_ADDS = (
+    "The validity variant adds, per capture: a Dandelion stem phase in BIP-156's "
+    "shape (serial single-peer forwarding for a geometrically drawn number of hops, "
+    "then an ordinary broadcast; the stem successor is drawn fresh per hop rather "
+    "than from two per-epoch destinations, stem hops use the ordinary per-hop delay, "
+    "and there is no embargo timer), senders reachable only over Tor (one uniform "
+    "circuit latency on their first hop, entry only through mixed-transport nodes), "
+    "BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and "
+    "CoinJoin and equal-value batch-payout transaction shapes. "
+    "Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s "
+    "per-epoch routing remain unsimulated.")
 
 #: Observer addresses: TEST-NET-2, never allocated to a simulated node.
 _OBSERVER_PREFIX = "198.51.100."
@@ -161,12 +180,36 @@ def expand(manifest: dict) -> list[dict]:
                             "n_transactions": rng.randint(*c["n_transactions"]),
                             "n_senders": rng.randint(*c["senders"]),
                             "tx_interval_s": c["tx_interval_s"],
+                            **_validity_spec(manifest, capture_seed),
                         })
     unknown = held_out - {s["topology_id"] for s in specs}
     if unknown:
         raise ValueError(f"cross_topology_test names configurations the manifest "
                          f"does not generate: {sorted(unknown)}")
     return specs
+
+
+def _validity_spec(manifest: dict, capture_seed: int) -> dict:
+    """The per-capture toggles and parameters of the validity variant, flat so
+    they land as columns of captures.parquet. Drawn from their own stream, so a
+    manifest without a `validity` block expands exactly as it always has."""
+    v = manifest.get("validity")
+    if not v:
+        return {}
+    rng = random.Random(_seed(capture_seed, "validity"))
+    on = {k: rng.random() < p for k, p in v["toggle_probability"].items()}
+    d, o, w, j = v["dandelion"], v["onion"], v["v2"], v["coinjoin"]
+    return {
+        "dandelion": on["dandelion"], "onion": on["onion"],
+        "v2": on["v2"], "coinjoin": on["coinjoin"],
+        "dandelion_sender_share": d["sender_share"],
+        "fluff_probability": d["fluff_probability"], "max_stem": d["max_stem"],
+        "onion_sender_share": o["sender_share"], "mixed_node_share": o["mixed_node_share"],
+        "observer_onion": rng.random() < o["observer_onion"],
+        "tor_latency_lo": o["latency_s"][0], "tor_latency_hi": o["latency_s"][1],
+        "v2_node_share": w["node_share"], "observer_v2": rng.random() < w["observer_v2"],
+        "coinjoin_rate": j["rate"], "batch_rate": j["batch_rate"],
+    }
 
 
 # --- one graph ------------------------------------------------------------
@@ -237,14 +280,23 @@ def _with_observers(net: GossipNet, spec: dict, rng: random.Random) -> tuple[Gos
 
 
 # --- one capture ----------------------------------------------------------
-def simulate(spec: dict, cfg: dict) -> tuple[list[RelayEvent], dict[str, str], list[str], GossipNet]:
-    """(events the observers logged, txid -> true origin, observer ips, net)."""
+def simulate(spec: dict, cfg: dict) -> tuple[list[RelayEvent], dict[str, dict], list[str], GossipNet]:
+    """(events the observers logged, txid -> truth record, observer ips, net).
+
+    The truth record's `origin` is the address the transaction entered the
+    network from; the validity variant adds what each transaction went through.
+    """
     rng = random.Random(spec["capture_seed"])
     net, observers = _with_observers(build_graph(spec, cfg), spec, rng)
     observer_set = set(observers)
     index = {ip.addr: i for i, ip in enumerate(net.nodes)}
     mean = net.cfg["delay_mean_ms"] / 1000.0
     broadcast = cfg["generator"]["broadcast"]
+    variant = "dandelion" in spec
+    # Every validity draw comes from here, never from `rng`, so a capture with
+    # all four toggles off is the base corpus's capture, draw for draw.
+    vr = random.Random(_seed(spec["capture_seed"], "validity-sim"))
+    world = _validity_world(spec, net, observers, vr) if variant else None
 
     # Senders draw addresses from the same residential pools as relaying
     # nodes, so no enrichment column can tell a sender from a forwarder.
@@ -253,25 +305,30 @@ def simulate(spec: dict, cfg: dict) -> tuple[list[RelayEvent], dict[str, str], l
               "hosting": [i for i, x in enumerate(net.nodes)
                           if x.kind == "hosting" and i not in set(net.relays)]}
     senders = []
-    for _ in range(spec["n_senders"]):
+    for k in range(spec["n_senders"]):
         home = allocator.allocate("residential")
         while home.addr in index:
             home = allocator.allocate("residential")
         entries = net.origin_peers(rng)
-        if observers and rng.random() < spec["sender_adjacency"]:
+        adjacent = bool(observers) and rng.random() < spec["sender_adjacency"]
+        if adjacent:
             entries = sorted(set(entries) | {rng.choice(observers)})
-        senders.append((home, entries))
+        traits = {"cluster": f"s{k}", "onion": False, "dandelion": False, "v2": False}
+        if world:
+            home, entries, traits = _validity_sender(spec, world, home, entries, adjacent,
+                                                     observers, traits, vr, cfg)
+        senders.append((home, entries, traits))
 
     events: list[RelayEvent] = []
-    truth: dict[str, str] = {}
+    truth: dict[str, dict] = {}
     t = 1_790_000_000.0
     for _ in range(spec["n_transactions"]):
         t += rng.expovariate(1.0 / spec["tx_interval_s"])
-        home, entries = rng.choice(senders)
+        home, entries, traits = rng.choice(senders)
         roll = rng.random()
         pool = ("tor" if roll < broadcast["tor_rate"] else
                 "hosting" if roll < broadcast["tor_rate"] + broadcast["hosting_rate"] else None)
-        origin = home
+        origin, t0 = home, t
         if pool and masked[pool]:
             # Broadcast through an anonymising node: that node's own links are
             # where the transaction enters the network, and its address is
@@ -279,13 +336,75 @@ def simulate(spec: dict, cfg: dict) -> tuple[list[RelayEvent], dict[str, str], l
             relay_node = rng.choice(masked[pool])
             origin, entries = net.nodes[relay_node], net.peers[relay_node]
         txid = "%064x" % rng.getrandbits(256)
-        truth[txid] = origin.addr
-        events.extend(_observed(net, observer_set, origin, entries, t, txid, spec,
-                                mean, index, rng))
+        record = {"origin": origin.addr}
+        stem_length = 0
+        if world:
+            direct = origin is home
+            if direct and traits["onion"]:
+                t0 += vr.uniform(spec["tor_latency_lo"], spec["tor_latency_hi"])
+            if direct and traits["dandelion"]:
+                stem_length = 1
+                while vr.random() > spec["fluff_probability"] and stem_length < spec["max_stem"]:
+                    stem_length += 1
+            kind = ("coinjoin" if spec["coinjoin"] and vr.random() < spec["coinjoin_rate"]
+                    else "batch" if vr.random() < spec["batch_rate"] else "payment")
+            record.update(onion_origin=direct and traits["onion"],
+                          **shape(vr, kind, traits["cluster"], cfg))
+        if stem_length:
+            stem_hops, fluff, t_fluff = net.stem(origin, t0, vr, entries, stem_length)
+            fluff_hops = net.diffuse(net.nodes[fluff], t_fluff, rng, entries=net.peers[fluff])
+            hops = stem_hops + fluff_hops
+            announce = {net.nodes[fluff].addr: t_fluff}
+            for ts, _, dst in sorted(fluff_hops, key=lambda h: h[0]):
+                announce.setdefault(dst.addr, ts)
+            me = {net.nodes[o].addr for o in observers}
+            record.update(stem_through_observer=any(dst.addr in me for _, _, dst in stem_hops))
+        else:
+            hops = net.diffuse(origin, t0, rng, entries=entries)
+            announce = None
+        if world:
+            record.update(stem_length=len(stem_hops) if stem_length else 0)
+            record.setdefault("stem_through_observer", False)
+        truth[txid] = record
+        events.extend(_observed(net, observer_set, hops, announce, txid, spec,
+                                mean, index, rng, world))
     return events, truth, [net.nodes[i].addr for i in observers], net
 
 
-def _observed(net, observers, origin, entries, t0, txid, spec, mean, index, rng):
+def _validity_world(spec: dict, net: GossipNet, observers: list[int], vr) -> dict:
+    """Which nodes accept onion connections and which speak v2."""
+    relaying = range(len(net.nodes) - len(observers))
+    mixed = (set(vr.sample(relaying, max(1, round(len(relaying) * spec["mixed_node_share"]))))
+             if spec["onion"] else set())
+    v2 = (set(vr.sample(relaying, round(len(relaying) * spec["v2_node_share"])))
+          if spec["v2"] else set())
+    if spec["onion"] and spec["observer_onion"]:
+        mixed |= set(observers)
+    if spec["v2"] and spec["observer_v2"]:
+        v2 |= set(observers)
+    return {"mixed": mixed, "v2": {net.nodes[i].addr for i in v2}}
+
+
+def _validity_sender(spec, world, home, entries, adjacent, observers, traits, vr, cfg):
+    """A sender's Tor/Dandelion/v2 traits. An onion-only sender can connect
+    only to mixed-transport nodes, so an observer hears it directly only when
+    the observer itself accepts onion connections."""
+    traits = dict(traits,
+                  dandelion=spec["dandelion"] and vr.random() < spec["dandelion_sender_share"],
+                  onion=spec["onion"] and vr.random() < spec["onion_sender_share"],
+                  v2=spec["v2"] and vr.random() < spec["v2_node_share"])
+    if traits["onion"]:
+        home = IpAllocator(vr, cfg).allocate_onion()
+        mixed = sorted(world["mixed"] - set(observers))
+        entries = vr.sample(mixed, min(len(entries), len(mixed)))
+        if adjacent and set(observers) & world["mixed"]:
+            entries = sorted(set(entries) | {vr.choice(sorted(set(observers) & world["mixed"]))})
+    if traits["v2"]:
+        world["v2"].add(home.addr)
+    return home, entries, traits
+
+
+def _observed(net, observers, hops, announce, txid, spec, mean, index, rng, world=None):
     """What the observers log for one transaction.
 
     `diffuse` records only the hop that first reaches each node. An observer
@@ -294,14 +413,19 @@ def _observed(net, observers, origin, entries, t0, txid, spec, mean, index, rng)
     each node's infection time, and each observer's log is rebuilt from its
     neighbours' — the infecting hop at its own timestamp, the rest one
     forwarding delay after the neighbour received it.
+
+    `announce` overrides the infection time for a Dandelion transaction: a stem
+    node holds the transaction but tells nobody except its one successor until
+    the broadcast reaches it, so its neighbours hear from it only then.
     """
-    hops = net.diffuse(origin, t0, rng, entries=entries)
     infected: dict[str, float] = {}
     told_by: dict[str, str] = {}
     for ts, src, dst in hops:
         if dst.addr not in infected:
             infected[dst.addr] = ts
             told_by[dst.addr] = src.addr
+    if announce is not None:
+        infected = announce
     out = []
     for obs in sorted(observers):
         me = net.nodes[obs].addr
@@ -316,12 +440,15 @@ def _observed(net, observers, origin, entries, t0, txid, spec, mean, index, rng)
         for addr in sorted(heard):
             if rng.random() < spec["message_loss"]:
                 continue
+            transport = None
+            if world is not None:
+                transport = "v2" if addr in world["v2"] and me in world["v2"] else "v1"
             out.append(RelayEvent(
                 txid=txid, peer_ip=addr, peer_port=8333, peer_id=index.get(addr),
                 user_agent=None, wall_clock_ts=round(heard[addr], 6),
                 monotonic_or_derived_ts=round(heard[addr] - 1_790_000_000.0, 6),
                 message_type="inv", direction="inbound",
-                capture_source=f"sim:{spec['capture_id']}"))
+                capture_source=f"sim:{spec['capture_id']}", transport=transport))
     return out
 
 
@@ -366,7 +493,7 @@ def featurise(spec: dict, cfg: dict | None = None) -> dict:
         # would reject the empty capture; it is kept, as candidate_count 0 in
         # the truth table, because that is exactly the case being counted.
         features = pd.DataFrame(columns=RELAY_COLUMNS)
-    features["originated"] = [truth.get(t) == p for t, p in
+    features["originated"] = [truth.get(t, {}).get("origin") == p for t, p in
                               zip(features["txid"], features["peer_ip"])]
     features["topology_id"] = spec["topology_id"]
     usable = [e for e in events if e.peer_ip not in set(observers)]
@@ -374,10 +501,11 @@ def featurise(spec: dict, cfg: dict | None = None) -> dict:
     relay["capture_id"] = spec["capture_id"]
     candidates = features.groupby("txid")["peer_ip"].apply(set).to_dict()
     truth_rows = pd.DataFrame(
-        [{"capture_id": spec["capture_id"], "txid": txid, "origin_ip": ip,
+        [{"capture_id": spec["capture_id"], "txid": txid, "origin_ip": r["origin"],
           "candidate_count": len(candidates.get(txid, ())),
-          "origin_is_candidate": ip in candidates.get(txid, ())}
-         for txid, ip in truth.items()])
+          "origin_is_candidate": r["origin"] in candidates.get(txid, ()),
+          **{k: v for k, v in r.items() if k != "origin"}}
+         for txid, r in truth.items()])
     return {"features": features, "relay": relay, "truth": truth_rows,
             "observers": ",".join(observers)}
 
@@ -470,4 +598,26 @@ def summarise(features: pd.DataFrame, truth: pd.DataFrame, captures: pd.DataFram
         "captures_by_family": captures["family"].value_counts().sort_index().to_dict(),
         "captures_by_topology_split": captures["topology_split"].value_counts()
         .sort_index().to_dict(),
+        **(_prevalence(features, truth, captures) if "stem_length" in truth else {}),
     }
+
+
+def _prevalence(features: pd.DataFrame, truth: pd.DataFrame, captures: pd.DataFrame) -> dict:
+    """Ground-truth prevalence of each invalidating condition, over broadcast
+    transactions (what happened) and over matrix rows (what an observer saw)."""
+    n = len(truth)
+
+    def share(mask) -> dict:
+        return {"transactions": int(mask.sum()), "share": round(float(mask.mean()), 4)}
+
+    return {"validity_conditions": {
+        "captures_with_toggle_on": {k: int(captures[k].sum())
+                                    for k in ("dandelion", "onion", "v2", "coinjoin")},
+        "dandelion_stem": share(truth["stem_length"] > 0),
+        "dandelion_stem_through_an_observer": share(truth["stem_through_observer"]),
+        "onion_origin": share(truth["onion_origin"].astype(bool)),
+        "coinjoin": share(truth["shape"] == "coinjoin"),
+        "equal_value_batch_payout": share(truth["shape"] == "batch"),
+        "matrix_rows_over_v2": int(features["transport_v2"].sum()),
+        "matrix_rows_from_onion_peers": int(features["is_onion"].sum()),
+        "transactions": n}}

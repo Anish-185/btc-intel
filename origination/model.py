@@ -48,6 +48,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.isotonic import IsotonicRegression
 
 import config
+from analysis import validity
 from engines.propagation.estimators import ESTIMATORS
 from eval import origin as origin_eval
 from fusion.explain import shap_contributions
@@ -160,7 +161,8 @@ class OriginationModel:
         model.baseline_terms = model.terms(background).mean()
         return model
 
-    def calibrate(self, calibration: pd.DataFrame, cfg: dict | None = None) -> "OriginationModel":
+    def calibrate(self, calibration: pd.DataFrame, cfg: dict | None = None,
+                  shapes: pd.DataFrame | None = None) -> "OriginationModel":
         """Isotonic on the calibration captures, then the abstention cutoff on
         the same captures by the pre-registered rule. Never on a test capture."""
         cfg = cfg or config.load()
@@ -170,7 +172,7 @@ class OriginationModel:
         self.calibrator.fit(scored.loc[fit_on, "p_raw"],
                             calibration.loc[fit_on, "originated"].astype(float))
         truth = calibration[calibration["originated"]].set_index(KEY)["peer_ip"]
-        frame = self.decide(calibration, truth)
+        frame = self.decide(calibration, truth, cfg, shapes)
         self.cutoff, self.cutoff_table = origin_eval.choose_cutoff_for(frame, cfg)
         return self
 
@@ -202,7 +204,7 @@ class OriginationModel:
         return out
 
     def decide(self, matrix: pd.DataFrame, truth: pd.Series | None = None,
-               cfg: dict | None = None) -> pd.DataFrame:
+               cfg: dict | None = None, shapes: pd.DataFrame | None = None) -> pd.DataFrame:
         """One row per transaction, in the shape `eval.ground_truth.score.summarise`
         and `eval.origin.cost_score` read — so the outcome machinery is theirs.
 
@@ -231,16 +233,34 @@ class OriginationModel:
                 "top3": answer in list(group["peer_ip"][:1 + runner_ups]),
                 "origin_observed": answer in set(group["peer_ip"]),
             })
-        return pd.DataFrame(rows)
+        decided = pd.DataFrame(rows)
+        if decided.empty:
+            return decided
+        # The verdict is about the candidate actually named. `flagged_at` reads
+        # it, so a failed check abstains through the same rule as the cutoff.
+        verdicts = validity.assess_matrix(matrix, decided, shapes, cfg)
+        return decided.merge(verdicts, on=KEY, how="left").assign(
+            calibration_basis=self.calibration_basis)
 
-    def predict(self, matrix: pd.DataFrame, cfg: dict | None = None) -> pd.DataFrame:
-        """Serving output: per row, the calibrated probability and whether the
-        transaction is answered. No labels are read."""
+    @property
+    def calibration_basis(self) -> str:
+        if self.calibrator is None:
+            return "uncalibrated: within-transaction normalised model output"
+        return (f"isotonic regression fitted on the calibration captures of corpus "
+                f"{self.meta.get('corpus', '?')}, never on a test capture")
+
+    def predict(self, matrix: pd.DataFrame, cfg: dict | None = None,
+                shapes: pd.DataFrame | None = None) -> pd.DataFrame:
+        """Serving output: per row, the calibrated probability, its calibration
+        basis, the transaction's validity verdict and whether it is answered.
+        No labels are read."""
         scored = self.score(matrix)
-        decided = self.decide(matrix, None, cfg).set_index(KEY)
+        decided = self.decide(matrix, None, cfg, shapes).set_index(KEY)
         answered = ~origin_eval.flagged_at(decided, cfg or config.load(), self.cutoff)
         key = pd.MultiIndex.from_frame(scored[KEY])
         scored["answered_tx"] = answered.reindex(key).to_numpy()
+        for column in ("calibration_basis", *validity.COLUMNS):
+            scored[column] = decided[column].reindex(key).to_numpy()
         scored["rank_in_tx"] = (scored.groupby(KEY)["p_calibrated"]
                                 .rank(ascending=False, method="first"))
         return scored

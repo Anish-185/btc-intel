@@ -610,6 +610,14 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
                          origination_report.section(origination, md_table))
     origination_report.write_doc(origination, md_table, cfg["origination"]["results_doc"])
 
+    # --- 10. the validity layer ------------------------------------------
+    add("\n## 10. The validity layer: when attribution is invalid\n")
+    from analysis import evaluate as validity_eval
+
+    validity = validity_eval.run(cfg, rebuild, base=origination)
+    add(validity_eval.section(validity, md_table))
+    validity_eval.write_doc(validity, md_table, cfg["validity"]["results_doc"])
+
     add(CLOSING)
     return "\n".join(parts)
 
@@ -891,7 +899,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 10. Decisions taken in this pass
+## 11. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

@@ -16,6 +16,13 @@ This is the "haircut" idea from conventional taint analysis, simplified: we
 decay per hop rather than per proportion of value, because our goal is to rank
 leads for a human, not to compute what fraction of a coin is dirty.
 
+A CoinJoin terminates taint. Its inputs and outputs belong to many unrelated
+participants, so following value through one reaches everybody who mixed that
+round; an edge that exists only because of CoinJoins (`mix_count == count`,
+set by graph.entity_graph from clustering.is_coinjoin — the same check
+analysis.validity's COINJOIN verdict uses) is not crossed. Taint still reaches
+the participant that fed the mix; it stops there.
+
 A taint score is INHERITED suspicion, not evidence of wrongdoing. Receiving
 money two hops from a ransomware collector is what happens to exchanges,
 merchants and ordinary people every day. The taint_path exists so an
@@ -115,8 +122,17 @@ def propagate(entity_graph: nx.DiGraph, seeds: dict[str, float],
         for nxt in neighbours:
             if nxt in path:                    # never loop back through a cycle
                 continue
+            if _through_mix_only(entity_graph, node, nxt, both):
+                continue
             heapq.heappush(queue, (-(score * decay), hops + 1, nxt, path + (nxt,)))
     return best
+
+
+def _through_mix_only(g: nx.DiGraph, node: str, nxt: str, both: bool) -> bool:
+    """Every edge taint could follow from `node` to `nxt` is made of CoinJoins."""
+    carrying = [g.edges[e] for e in [(node, nxt)] + ([(nxt, node)] if both else [])
+                if g.has_edge(*e)]
+    return bool(carrying) and all(e.get("mix_count", 0) >= e.get("count", 1) for e in carrying)
 
 
 def taint_frame(taints: dict[str, Taint]) -> pd.DataFrame:

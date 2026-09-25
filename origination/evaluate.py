@@ -139,9 +139,11 @@ def run(cfg: dict | None = None, rebuild: bool = False, workers: int | None = No
     matrix_role = matrix["capture_id"].map(roles)
     part = {role: matrix[matrix_role == role] for role in ROLES}
     truth = data["truth"].set_index(KEY)["origin_ip"]
+    shapes = shapes_of(data)
 
-    model = OriginationModel.fit(part["train"], cfg).calibrate(part["calibration"], cfg)
+    model = OriginationModel.fit(part["train"], cfg)
     model.meta.update(corpus=directory.name, split=split)
+    model.calibrate(part["calibration"], cfg, shapes)
 
     # Every estimator's cutoff is chosen the way the model's is: on the
     # calibration captures, by the same rule. The configured cutoff was chosen
@@ -157,7 +159,7 @@ def run(cfg: dict | None = None, rebuild: bool = False, workers: int | None = No
     for role, label in TEST_SETS.items():
         rows = []
         tested = baselines(data, ids[role], cfg, workers)
-        decided = model.decide(part[role], truth, cfg)
+        decided = model.decide(part[role], truth, cfg, shapes)
         n = len(decided)
         for name, frame in tested.items():
             if len(frame) != n:
@@ -172,6 +174,9 @@ def run(cfg: dict | None = None, rebuild: bool = False, workers: int | None = No
     best = _verdict(tables["cross_test"])
     return {"corpus": directory.name,
             "summary": _read_summary(directory),
+            # for analysis.evaluate's with/without-validity comparison
+            "decided": frames, "parts": part, "truth": truth, "shapes": shapes,
+            "baselines_cfg": cfg,
             "split": split, "cutoffs": cutoffs, "tables": tables,
             "reliability": reliability, "verdict": best,
             "examples": examples(model, part["cross_test"], frames["cross_test"]),
@@ -244,6 +249,12 @@ def examples(model: OriginationModel, matrix: pd.DataFrame, decided: pd.DataFram
                          "txid": r.txid[:12],
                          "explanation": text})
     return pd.DataFrame(rows)
+
+
+def shapes_of(data: dict) -> pd.DataFrame | None:
+    """Transaction structure, where the corpus has it (the validity variant)."""
+    truth = data["truth"]
+    return truth if "in_addrs" in truth else None
 
 
 def _read_summary(directory) -> dict:

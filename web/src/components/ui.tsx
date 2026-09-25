@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { RISK, brailleMeter, riskLevel } from "../lib/risk";
 import { useCountUp } from "../lib/motion";
+import type { Validity } from "../api/types";
 
 export function Label({ children }: { children: ReactNode }) {
   return <p className="label">{children}</p>;
@@ -53,6 +54,18 @@ export function RiskChip({ score }: { score: number }) {
       <span aria-hidden="true">{RISK[level].glyph}</span>
       {RISK[level].label}
     </span>
+  );
+}
+
+/** An origin's validity verdict. PASS is quiet; a withheld origin names why. */
+export function ValidityChip({ validity }: { validity: Validity }) {
+  if (validity.status === "PASS") {
+    return <Chip title={validity.evidence.join(" ")}>validity pass</Chip>;
+  }
+  return (
+    <Chip tone="caution" title={validity.evidence.join(" ")}>
+      <span aria-hidden="true">⚠</span> inconclusive: {(validity.reason ?? "").replace(/_/g, " ").toLowerCase()}
+    </Chip>
   );
 }
 

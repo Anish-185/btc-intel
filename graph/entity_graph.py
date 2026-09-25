@@ -41,6 +41,7 @@ def build_entity_graph(source, clustering: Clustering, cfg: dict | None = None) 
                    value_in=0.0, value_out=0.0)
 
     for tx in txs:
+        mix = int(tx.txid in clustering.coinjoins)
         senders: dict[str, float] = {}
         for addr, value in tx.inputs:
             senders[entity(addr)] = senders.get(entity(addr), 0.0) + value
@@ -71,12 +72,16 @@ def build_entity_graph(source, clustering: Clustering, cfg: dict | None = None) 
                     e = g.edges[src, dst]
                     e["value"] += value
                     e["count"] += 1
+                    e["mix_count"] += mix
                     e["txids"].append(tx.txid)
                     e["last_seen"] = max(e["last_seen"], tx.timestamp) if tx.timestamp else e["last_seen"]
                 else:
                     # ponytail: full txid list per edge — fine at case scale; swap
                     # for a count plus a sample if an edge ever holds millions.
-                    g.add_edge(src, dst, value=value, count=1, txids=[tx.txid],
+                    # mix_count: how many of those transactions were CoinJoins
+                    # (clustering.is_coinjoin). fusion.taint does not cross an
+                    # edge made of nothing else.
+                    g.add_edge(src, dst, value=value, count=1, mix_count=mix, txids=[tx.txid],
                                first_seen=tx.timestamp, last_seen=tx.timestamp)
     for _, d in g.nodes(data=True):
         d["ips"] = sorted(d["ips"])

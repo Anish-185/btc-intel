@@ -162,6 +162,9 @@ export function GraphPanel({
             {ipClass(tree.ip_class).label} · confidence {tree.confidence.toFixed(2)}
             {tree.low_confidence_origin && " · ⚠ low confidence origin"}
             {tree.anonymized_entry_point && " · ⚠ anonymized entry point"}
+            {tree.validity.status === "PASS"
+              ? " · validity pass"
+              : ` · ⚠ inconclusive: ${(tree.validity.reason ?? "").replace(/_/g, " ").toLowerCase()}`}
           </span>
         </div>
       ) : (

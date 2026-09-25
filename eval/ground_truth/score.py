@@ -30,6 +30,7 @@ import math
 import pandas as pd
 
 import config
+from analysis import validity
 from engines.propagation.estimators import (ESTIMATORS, apply_class_weights,
                                             attribution_confidence_of, confidence_of,
                                             is_anonymized_entry, low_confidence_origin)
@@ -109,12 +110,15 @@ def score_estimator(frame: pd.DataFrame, truth: dict[str, str], estimator: str,
         ip_class = intel.classify(best, None).ip_class
         confidence = confidence_of(ranked, tree.n_observations)
         anonymized = is_anonymized_entry(ip_class, cfg)
+        verdict = validity.assess_tree(tree, best, intel, cfg, exclude=exclude)
         rows.append({
             "txid": txid, "estimated_origin_ip": best, "ip_class": ip_class,
             "confidence": confidence,
             "attribution_confidence": attribution_confidence_of(confidence, anonymized, cfg),
             "anonymized_entry_point": anonymized,
-            "low_confidence_origin": low_confidence_origin(ip_class, confidence, cfg),
+            "low_confidence_origin": low_confidence_origin(ip_class, confidence, cfg,
+                                                           verdict),
+            **verdict.columns(),
             "n_observations": tree.n_observations,
             "n_candidates": len(ranked),
             "correct": best == truth[txid],
@@ -127,13 +131,15 @@ def score_estimator(frame: pd.DataFrame, truth: dict[str, str], estimator: str,
 def without_abstention(cfg: dict) -> dict:
     """The same config with the abstention rule switched off.
 
-    Used for the floor row only, and done by overriding the two config values
+    Used for the floor row only, and done by overriding the config values
     `eval.origin`'s existing machinery reads rather than by writing a second
-    outcome classifier that could drift from it.
+    outcome classifier that could drift from it. The validity layer is part of
+    abstention, so it is off here too.
     """
     propagation = dict(cfg["engines"]["propagation"],
                        low_confidence_classes=[], low_confidence_cutoff=0.0)
-    return {**cfg, "engines": {**cfg["engines"], "propagation": propagation}}
+    return {**cfg, "engines": {**cfg["engines"], "propagation": propagation},
+            "validity": {**cfg.get("validity", {}), "enforce": False}}
 
 
 def summarise(estimator: str, frame: pd.DataFrame, cfg: dict,

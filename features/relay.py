@@ -82,7 +82,7 @@ STRICT_COLUMNS = ["peer_txids_before", "peer_firsts_before", "peer_fraction_firs
                   "peer_median_interval_s", "peer_stdev_interval_s",
                   "peer_first_seen_age_s"]
 
-CONTEXT_COLUMNS = ["peer_port", "non_standard_port", "is_ipv6", "is_onion",
+CONTEXT_COLUMNS = ["peer_port", "non_standard_port", "is_ipv6", "is_onion", "transport_v2",
                    "user_agent", "user_agent_class", "ip_class", "is_tor_exit",
                    "connection_age_s", "connection_age_known"]
 
@@ -398,6 +398,7 @@ def _row(txid, peer_ip, event, capture_id, observer_ip, observers, basis, window
         "non_standard_port": (event.peer_port is not None
                               and event.peer_port != int((cfg.get("p2p") or {}).get("port", 8333))),
         "is_ipv6": _is_ipv6(peer_ip), "is_onion": _is_onion(peer_ip),
+        "transport_v2": getattr(event, "transport", None) == "v2",
         "user_agent": agents.get(peer_ip), "user_agent_class": user_agent_class(agents.get(peer_ip)),
         "ip_class": ip_class, "is_tor_exit": ip_class == TOR_EXIT,
         # The reader's event stream carries announcements, not connection

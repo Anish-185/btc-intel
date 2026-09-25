@@ -336,6 +336,19 @@ origination:
   ece_bins: 10
   explain_top_features: 3
 
+validity:
+  # analysis/validity.py — conditions under which an origin attribution is
+  # invalid. A failed check forces abstention through low_confidence_origin /
+  # eval.origin.flagged_at; `enforce: false` switches it off there (the
+  # no-abstention floor, and the "without validity" comparison).
+  enforce: true
+  results_doc: docs/VALIDITY.md
+  dandelion:
+    # Fixed before the first result, from the shape a stem leaves rather than
+    # from the data: a lone first announcement followed by a burst. Not tuned.
+    min_candidates: 4           # at least two gaps after the first
+    isolation_ratio: 5.0        # first gap / median later gap
+
 fusion:
   alerts_parquet: data/processed/final_alerts.parquet
   # Analyst verdicts from the API, for recalibrating fusion/stacker.py later.

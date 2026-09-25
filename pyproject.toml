@@ -32,7 +32,7 @@ build-backend = "hatchling.build"
 # asserts both halves of that — every top-level package is listed, and every
 # nested package has an __init__.py and a declared parent, so nothing imports
 # from a checkout and then goes missing from the wheel.
-packages = ["generator", "ingest", "graph", "features", "engines", "fusion", "p2p", "origination", "api", "eval", "offline"]
+packages = ["generator", "ingest", "graph", "features", "engines", "fusion", "p2p", "origination", "analysis", "api", "eval", "offline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

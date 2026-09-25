@@ -41,7 +41,7 @@ from pydantic import BaseModel, Field
 
 import config
 import custody
-from engines.propagation.estimators import estimate_origin
+from engines.propagation.estimators import CALIBRATION_BASIS, estimate_origin
 from engines.propagation.tree import build_trees
 from fusion import incremental
 from generator.inject import inject_pattern
@@ -282,6 +282,9 @@ def _origin_report(new_rows: pd.DataFrame, txids: list[str], truth: dict,
             "ip_class": estimate.ip_class,
             "confidence": estimate.confidence,
             "low_confidence_origin": estimate.low_confidence,
+            "probability": estimate.confidence,
+            "calibration_basis": CALIBRATION_BASIS,
+            "validity": estimate.validity.as_dict(),
             "rank": rank,
             "observed": true_ip in tree.ips,
         })

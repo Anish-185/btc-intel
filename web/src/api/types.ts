@@ -7,6 +7,14 @@ export type IpClass =
   | "hosting_vpn"
   | "known_bitcoin_relay";
 
+/** analysis/validity.py's verdict on an origin: PASS, or why it is withheld. */
+export interface Validity {
+  status: "PASS" | "INCONCLUSIVE";
+  reason: string | null;
+  confidence: number | null;
+  evidence: string[];
+}
+
 export interface Lead {
   ip: string;
   ip_class: IpClass;
@@ -15,6 +23,8 @@ export interface Lead {
   anonymized_entry_point?: boolean;
   label?: string;
   evidence: string;
+  calibration_basis?: string;
+  validity: Validity;
 }
 
 export interface Alert {
@@ -126,6 +136,9 @@ export interface Propagation {
   degraded: boolean;
   low_confidence_origin: boolean;
   anonymized_entry_point: boolean;
+  probability: number;
+  calibration_basis: string;
+  validity: Validity;
   n_observations: number;
   runner_ups: { ip: string; score: number }[];
   caveat: string;

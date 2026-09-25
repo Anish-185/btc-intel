@@ -120,6 +120,11 @@ class IpIntel:
     def classify(self, ip: str, asn: int | None = None) -> IpClassification:
         ip = str(ip)
         evidence: list[str] = []
+        if ip.endswith(".onion"):
+            # Reached over Tor: like an exit, it is where the transaction entered
+            # the network and names nobody an ISP request could reach.
+            evidence.append("a .onion address: the peer was reached over Tor")
+            return IpClassification(ip, TOR_EXIT, evidence, asn)
         if ip in self.relays:
             evidence.append(f"listed as a reachable Bitcoin node in "
                             f"{self.sources.get(KNOWN_RELAY, 'the node snapshot')}")

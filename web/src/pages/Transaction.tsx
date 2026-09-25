@@ -8,7 +8,7 @@ import { useApi } from "../lib/useApi";
 import { ipClass } from "../lib/format";
 import { formatId } from "../lib/formatId";
 import { token } from "../lib/tokens";
-import { Chip, ErrorNote, Label, SkeletonRows } from "../components/ui";
+import { Chip, ErrorNote, Label, SkeletonRows, ValidityChip } from "../components/ui";
 import { Shell } from "../components/Shell";
 
 const FieldGraph = lazy(() =>
@@ -67,6 +67,7 @@ export function Transaction() {
             <span style={{ display: "flex", gap: "var(--sp-2)", flexWrap: "wrap" }}>
               <Chip>{data.estimator}</Chip>
               <Chip>{data.n_observations} observations</Chip>
+              <ValidityChip validity={data.validity} />
               {data.low_confidence_origin && <Chip tone="caution">⚠ low confidence origin</Chip>}
               {data.anonymized_entry_point && <Chip tone="caution">⚠ anonymized entry point</Chip>}
             </span>
@@ -89,7 +90,7 @@ export function Transaction() {
               </div>
               <div className="stat">
                 <h3>Confidence</h3>
-                <Label>in this estimate</Label>
+                <Label>{data.calibration_basis}</Label>
                 <p className="stat-value" style={{ fontSize: "1.75rem" }}>
                   {data.confidence.toFixed(2)}
                 </p>
@@ -100,6 +101,15 @@ export function Transaction() {
                 <p className="stat-value" style={{ fontSize: "1.75rem" }}>
                   {data.attribution_confidence.toFixed(2)}
                 </p>
+              </div>
+              <div className="stat">
+                <h3>Validity</h3>
+                <Label>{data.validity.status === "PASS" ? "pass" : data.validity.reason}</Label>
+                <ul className="soft" style={{ marginTop: "var(--sp-3)", fontSize: "var(--fs-small)" }}>
+                  {data.validity.evidence.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
               </div>
             </div>
 

@@ -171,6 +171,9 @@ def test_the_origin_report_ranks_the_true_injected_ip(demo):
     assert origin["transactions"] > 0
     assert origin["best_rank"] == 1, "a residential broadcast should be named outright"
     assert all(d["true_origin_ip"] for d in origin["detail"])
+    # No origin leaves without a validity verdict, here as at every API route.
+    assert all(d["validity"]["status"] in ("PASS", "INCONCLUSIVE") for d in origin["detail"])
+    assert all(d["calibration_basis"] for d in origin["detail"])
 
 
 # --- incremental == full ---------------------------------------------------

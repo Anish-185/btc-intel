@@ -297,3 +297,63 @@ def test_version_prefers_the_stamped_commit(monkeypatch, client):
         assert api.get("/version").json()["commit"] == "deadbee"
     finally:
         app_module._commit.cache_clear()
+
+
+# --- no origin leaves the API without a validity verdict ----------------------
+ORIGIN_KEYS = ("estimated_origin", "estimated_origin_ip")
+
+
+def origins_in(payload, found=None) -> list[dict]:
+    """Every dict in a response that names an origin: an estimate, or a lead."""
+    found = [] if found is None else found
+    if isinstance(payload, dict):
+        if any(k in payload for k in ORIGIN_KEYS) or ("ip" in payload and "observations" in payload):
+            found.append(payload)
+        for key, value in payload.items():
+            if key == "leads" and isinstance(value, str):
+                value = json.loads(value)
+            origins_in(value, found)
+    elif isinstance(payload, list):
+        for item in payload:
+            origins_in(item, found)
+    return found
+
+
+def assert_verdict(origin: dict) -> None:
+    verdict = origin.get("validity")
+    assert isinstance(verdict, dict), f"origin without a validity verdict: {origin}"
+    assert verdict["status"] in ("PASS", "INCONCLUSIVE")
+    if verdict["status"] == "INCONCLUSIVE":
+        assert verdict["reason"] and verdict["evidence"], origin
+    else:
+        assert verdict["reason"] is None
+
+
+def test_no_origin_leaves_the_api_without_a_validity_verdict(client):
+    api, d = client
+    df = pd.read_parquet(d / "t.parquet")
+    seen = []
+    for txid in df["txid"].drop_duplicates().head(40):
+        body = api.get(f"/transactions/{txid}/propagation").json()
+        assert "probability" in body and body["calibration_basis"]
+        if body["validity"]["status"] == "INCONCLUSIVE":
+            assert body["low_confidence_origin"], "a withheld origin must abstain"
+        seen += origins_in(body)
+    listing = api.get("/alerts?limit=50").json()
+    seen += origins_in(listing)
+    for alert in listing["alerts"][:10]:
+        seen += origins_in(api.get(f"/entities/{alert['entity_id']}").json())
+    assert any("observations" in o for o in seen), "no lead was exercised"
+    assert len(seen) >= 40
+    for origin in seen:
+        assert_verdict(origin)
+
+
+def test_a_lead_stored_before_the_validity_layer_is_never_served_as_pass(fixture_client):
+    api, _ = fixture_client
+    leads = origins_in(api.get("/alerts").json())
+    assert leads
+    for lead in leads:
+        assert_verdict(lead)
+        assert lead["validity"]["status"] == "INCONCLUSIVE"
+        assert lead["validity"]["reason"] == "NOT_ASSESSED"

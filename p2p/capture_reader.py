@@ -70,8 +70,14 @@ class RelayEvent:
     message_type: str                    # inv | inv_wtx | tx
     direction: str                       # inbound | outbound
     capture_source: str                  # "<format>:<file name>"
+    transport: str | None = None         # v1 | v2 (BIP-324) | None when unknown
 
 
+#: `transport` is known from bitcoind's connect line ("transport: v2", Core
+#: >= 26), from a .btcap field, and is always "v1" for pcap: a BIP-324 stream is
+#: encrypted, so every message we could decode from a pcap came over v1. It is
+#: what `analysis.validity`'s TOR_OR_V2 detector reads.
+#:
 #: `monotonic_or_derived_ts` is the capture's own clock: a monotonic reading when
 #: the source supplies one (.btcap may), otherwise seconds since the first event
 #: in the file. Either way it is immune to the wall clock being stepped
@@ -172,10 +178,16 @@ _PEER = re.compile(r"\bpeer=(\d+)")
 #: disconnect line has the same shape. `peeraddr=` is preferred because the
 #: version line carries *two* addresses — the peer's and, as `us=`, our own —
 #: and binding a peer to our own address would make every event look local.
-_HOSTPORT = r"(\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-fA-F:]+\]):(\d{1,5})\b"
+#: Tor addresses are matched too: v3 (56 base32 characters) and the retired v2
+#: (16). They were skipped in P4, which silently dropped every onion peer's
+#: events — the peers whose timing is least trustworthy vanished rather than
+#: being flagged.
+_HOSTPORT = (r"(\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-fA-F:]+\]"
+             r"|(?:[a-z2-7]{56}|[a-z2-7]{16})\.onion):(\d{1,5})\b")
 _PEERADDR = re.compile(r"\bpeeraddr=" + _HOSTPORT)
 _BARE_ADDR = re.compile(r"\b" + _HOSTPORT)
 _OURS = re.compile(r"\bus=")
+_TRANSPORT = re.compile(r"\btransport[:=]\s*(v1|v2)\b")
 _UA = re.compile(r"version message:\s*(/[^/\s]+/)")
 #: The two net-debug lines that carry an identifier, and the mempool line that
 #: carries the txid of a transaction actually accepted from a peer.
@@ -201,6 +213,7 @@ def parse_debug_log(path: Path, cfg: dict | None = None) -> list[RelayEvent]:
     source = f"debug.log:{path.name}"
     addrs: dict[int, tuple[str, int]] = {}
     agents: dict[int, str] = {}
+    transports: dict[int, str] = {}
     events: list[RelayEvent] = []
 
     with _open(path) as handle:
@@ -217,6 +230,8 @@ def parse_debug_log(path: Path, cfg: dict | None = None) -> list[RelayEvent]:
                     addrs[peer_id] = (addr.group(1).strip("[]"), int(addr.group(2)))
                 if (ua := _UA.search(line)):
                     agents[peer_id] = ua.group(1)
+                if (transport := _TRANSPORT.search(line)):
+                    transports[peer_id] = transport.group(1)
 
             ts = _log_timestamp(line)
             for verb, kind, digest in _INV.findall(line):
@@ -228,6 +243,8 @@ def parse_debug_log(path: Path, cfg: dict | None = None) -> list[RelayEvent]:
                 events.append(_log_event(digest, int(accepted_peer), addrs, agents, ts,
                                          source, "tx", "inbound"))
 
+    for event in events:            # the connect line can follow the first inv
+        event.transport = transports.get(event.peer_id)
     _derive_clock(events)
     return events
 
@@ -447,7 +464,7 @@ def parse_pcap(path: Path, cfg: dict | None = None,
             for kind, digest in _inv_entries(payload):
                 events.append(RelayEvent(
                     digest, peer_ip, peer_port, None, None, ts, None,
-                    "inv" if kind == INV_TX else "inv_wtx", direction, source))
+                    "inv" if kind == INV_TX else "inv_wtx", direction, source, "v1"))
         elif command == "tx":
             try:
                 txid, wtxid = txids_of(payload)
@@ -456,7 +473,7 @@ def parse_pcap(path: Path, cfg: dict | None = None,
                 continue
             pairs[wtxid] = txid
             events.append(RelayEvent(txid, peer_ip, peer_port, None, None, ts, None,
-                                     "tx", direction, source))
+                                     "tx", direction, source, "v1"))
 
     _resolve_wtxids(events, pairs)
     _derive_clock(events)
@@ -522,7 +539,8 @@ def parse_btcap(path: Path, cfg: dict | None = None) -> list[RelayEvent]:
                                          else None),
                 message_type=str(row["message_type"]),
                 direction=str(row.get("direction") or "inbound"),
-                capture_source=str(row.get("capture_source") or source)))
+                capture_source=str(row.get("capture_source") or source),
+                transport=row.get("transport")))
     if skipped:
         log.warning("%s: %d unusable line(s) skipped", path.name, skipped)
     _derive_clock(events)

@@ -35,7 +35,9 @@ from pydantic import BaseModel
 
 import config
 import custody
-from engines.propagation.estimators import estimate_origin
+from analysis.validity import NOT_ASSESSED
+from engines.propagation.estimators import CALIBRATION_BASIS, estimate_origin
+from graph.builder import iter_transactions
 from engines.propagation.tree import build_trees, degraded_mode
 from engines.rules.detectors import FeatureSet
 from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
@@ -188,7 +190,18 @@ def _alerts() -> dict:
 
 
 def _alert_rows() -> list[dict]:
-    return list(_alerts().get("alerts", []))
+    # Leads stay a JSON string on this route (the console's type); each one is
+    # given a validity verdict first, so no route serves an origin without one.
+    return [{**row, "leads": json.dumps(_leads(row["leads"]))} if row.get("leads") else row
+            for row in _alerts().get("alerts", [])]
+
+
+def _leads(raw) -> list[dict]:
+    """A stored alert's leads, each carrying a validity verdict. Leads written
+    before the validity layer existed are marked NOT_ASSESSED, never PASS."""
+    leads = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    return [lead if "validity" in lead else {**lead, "validity": NOT_ASSESSED.as_dict()}
+            for lead in leads]
 
 
 def _alert_for(entity_id: str) -> dict | None:
@@ -353,7 +366,7 @@ def entity(entity_id: str) -> dict:
         "reason": alert.get("reason"),
         "evidence": alert.get("evidence", []),
         "taint_path": alert.get("taint_path", []),
-        "leads": json.loads(alert["leads"]) if alert.get("leads") else [],
+        "leads": _leads(alert.get("leads")),
         "caveat": ("scores rank leads for a human; an entity without an alert is not "
                    "cleared, only unremarkable"),
     }
@@ -567,7 +580,8 @@ def propagation(txid: str) -> dict:
         raise HTTPException(404, f"unknown transaction {txid}")
 
     tree = build_trees(rows)[txid]
-    estimate = estimate_origin(tree, _intel(), config.load())
+    tx = next(iter_transactions(rows), None) if "input_addresses" in rows else None
+    estimate = estimate_origin(tree, _intel(), config.load(), tx=tx)
     runner_ups = {ip: score for ip, score in estimate.runner_ups[:3]}
     ranked = dict(estimate.ranked)
 
@@ -599,6 +613,11 @@ def propagation(txid: str) -> dict:
         "degraded": estimate.degraded,
         "low_confidence_origin": estimate.low_confidence,
         "anonymized_entry_point": estimate.anonymized_entry_point,
+        "probability": estimate.confidence,
+        "calibration_basis": CALIBRATION_BASIS,
+        # PASS, or the reason the origin is withheld and the evidence for it.
+        # An INCONCLUSIVE verdict also sets low_confidence_origin.
+        "validity": estimate.validity.as_dict(),
         "n_observations": estimate.n_observations,
         "runner_ups": [{"ip": ip, "score": round(float(s), 6)} for ip, s in runner_ups.items()],
         "caveat": ("estimated origin is a probabilistic lead, not an attribution — "
