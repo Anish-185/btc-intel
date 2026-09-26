@@ -10,7 +10,7 @@ import { api } from "../api/client";
 import type { AsnProfile, LinkedCluster, OriginClaim, PeerProfile } from "../api/types";
 import { Shell } from "../components/Shell";
 import { Chip, ErrorNote, Label, Notice, SkeletonRows, ValidityChip } from "../components/ui";
-import { FingerprintSplit } from "../components/Fingerprint";
+import { FingerprintHidden, FingerprintSplit } from "../components/Fingerprint";
 import { ipClass } from "../lib/format";
 import { formatId } from "../lib/formatId";
 import { useApi } from "../lib/useApi";
@@ -213,15 +213,21 @@ function ProfileBody({ profile }: { profile: PeerProfile }) {
 
       {profile.fingerprints && (
         <>
-          <h2 style={{ marginTop: "var(--sp-5)" }}>Wallet fingerprints</h2>
+          <h2 style={{ marginTop: "var(--sp-5)" }}>Construction fingerprints</h2>
           <p className="soft" style={{ marginBottom: "var(--sp-2)" }}>{profile.fingerprints.statement}</p>
-          <Label>originated (origination model)</Label>
-          <FingerprintSplit dist={profile.fingerprints.originated} empty="No originated transaction to fingerprint." />
-          <Label>origin estimated by engines.propagation</Label>
-          <FingerprintSplit
-            dist={profile.fingerprints.propagation_origin}
-            empty="No relay-hop transaction names this peer as origin."
-          />
+          {profile.fingerprints.console_display ? (
+            <>
+              <Label>originated (origination model)</Label>
+              <FingerprintSplit dist={profile.fingerprints.originated} empty="No originated transaction to fingerprint." />
+              <Label>origin estimated by engines.propagation</Label>
+              <FingerprintSplit
+                dist={profile.fingerprints.propagation_origin}
+                empty="No relay-hop transaction names this peer as origin."
+              />
+            </>
+          ) : (
+            <FingerprintHidden />
+          )}
         </>
       )}
 

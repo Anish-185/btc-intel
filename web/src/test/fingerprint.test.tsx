@@ -13,7 +13,7 @@ afterEach(() => vi.restoreAllMocks());
 
 const TX = "d".repeat(64);
 const ranked = [
-  { label: "core_like", display: "Bitcoin Core-like construction", confidence: 0.81, posterior: 0.9 },
+  { label: "core_like", display: "Core-like construction", confidence: 0.81, posterior: 0.9 },
   { label: "electrum_like", display: "Electrum-like construction", confidence: 0.12, posterior: 0.08 },
 ];
 
@@ -30,23 +30,32 @@ function open(fp: TxFingerprint) {
   );
 }
 
-describe("wallet fingerprint on the transaction page", () => {
+describe("construction fingerprint on the transaction page", () => {
   it("names the construction with its confidence and the ranked alternatives", async () => {
-    open({ txid: TX, label: "core_like", display: "Bitcoin Core-like construction", confidence: 0.81,
+    open({ txid: TX, label: "core_like", display: "Core-like construction", confidence: 0.81,
            unknown_reason: null, ranked, tells: { version: "v2", locktime: "height" },
-           observed_tells: ["version", "locktime"], condition: "full" });
-    expect(await screen.findByRole("heading", { name: "Wallet fingerprint" })).toBeInTheDocument();
-    expect(screen.getAllByText(/Bitcoin Core-like construction/).length).toBeGreaterThan(0);
+           observed_tells: ["version", "locktime"], condition: "full", console_display: true });
+    expect(await screen.findByRole("heading", { name: "Construction fingerprint" })).toBeInTheDocument();
+    expect(screen.getAllByText(/Core-like construction/).length).toBeGreaterThan(0);
     expect(screen.getByText(/version v2 · locktime height/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/owner|operated by|belongs to/i);
+    expect(screen.getByText(/not which software built it/)).toBeInTheDocument();
   });
 
   it("says unknown, why, and that it read structure only", async () => {
     open({ txid: TX, label: "unknown", display: "unknown construction", confidence: 0.41,
            unknown_reason: "top confidence 0.41 is under 0.6", ranked, tells: {},
-           observed_tells: [], condition: "structural" });
+           observed_tells: [], condition: "structural", console_display: true });
     expect(await screen.findByText("unknown construction")).toBeInTheDocument();
     expect(screen.getByText(/under 0.6/)).toBeInTheDocument();
     expect(screen.getByText(/from structure only/)).toBeInTheDocument();
+  });
+
+  it("shows a notice, not a label, when the console display is off", async () => {
+    open({ txid: TX, label: "core_like", display: "Core-like construction", confidence: 0.81,
+           unknown_reason: null, ranked, tells: {}, observed_tells: [], condition: "full",
+           console_display: false });
+    expect(await screen.findByRole("note")).toHaveTextContent(/hidden by default/);
+    expect(screen.queryByText(/Core-like construction/)).not.toBeInTheDocument();
   });
 });

@@ -415,7 +415,8 @@ def _entity_fingerprints(wallets: set[str], features) -> dict:
             "conflicts": [{"txid": m["txid"], "heuristic": m["heuristic"],
                            "fingerprints": m["fingerprints"]} for m in conflicts],
             "note": ("fingerprints only lower a merge's confidence when the wallets' "
-                     "spending transactions were built differently; they never create one")}
+                     "spending transactions were built differently; they never create one"),
+            "console_display": fingerprint.console_display()}
 
 
 def subgraph(entity_id: str, hops: int) -> dict:
@@ -684,12 +685,12 @@ def propagation(txid: str) -> dict:
 
 @app.get("/transactions/{txid}/fingerprint")
 def transaction_fingerprint(txid: str) -> dict:
-    """Which wallet software family or construction pattern likely built this
-    transaction: a ranked label set, or unknown. A family, never a party."""
+    """How this transaction was likely built: a ranked set of construction
+    patterns, or unknown. Not which software built it, and never a party."""
     answer = _fingerprints().get(txid)
     if answer is None:
         raise HTTPException(404, f"transaction {txid} has no structure in the served dataset")
-    return {"txid": txid, **answer}
+    return {"txid": txid, **answer, "console_display": fingerprint.console_display()}
 
 
 @app.get("/transactions/{txid}/origination")

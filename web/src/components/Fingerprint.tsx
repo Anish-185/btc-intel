@@ -1,17 +1,31 @@
-/** Wallet-construction fingerprints: which software family or construction
- *  pattern likely built a transaction. Wording is fixed: a fingerprint names
- *  how a transaction was built, never who built it, and "unknown" is an
- *  answer, shown with its reason. */
+/** Construction fingerprints: which construction pattern likely built a
+ *  transaction. Wording is fixed: a fingerprint names how a transaction was
+ *  built, never which software or who built it, and "unknown" is an answer,
+ *  shown with its reason. Hidden by default unless the API says the console
+ *  may show it (config features.fingerprint.console_display). */
 import type { FingerprintAnswer, FingerprintDistribution } from "../api/types";
 import { Chip, Label } from "./ui";
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
+export const FINGERPRINT_STATEMENT =
+  "The label describes how the transaction was built, not which software built it.";
+
+/** What the console shows in a fingerprint's place when display is off. */
+export function FingerprintHidden() {
+  return (
+    <p className="soft" role="note">
+      Construction fingerprints are hidden by default (features.fingerprint.console_display is off;
+      eval/results.md §12 says why). The API still answers.
+    </p>
+  );
+}
+
 export function FingerprintPanel({ answer }: { answer: FingerprintAnswer }) {
   const unknown = answer.label === "unknown";
   return (
-    <div className="stat" aria-label="Wallet fingerprint">
-      <h3>Wallet fingerprint</h3>
+    <div className="stat" aria-label="Construction fingerprint">
+      <h3>Construction fingerprint</h3>
       <Label>
         {answer.condition === "structural"
           ? "from structure only: this dataset carries no version, locktime or sequence"
@@ -22,6 +36,9 @@ export function FingerprintPanel({ answer }: { answer: FingerprintAnswer }) {
         {answer.confidence != null && !unknown && (
           <span className="num"> · {answer.confidence.toFixed(2)}</span>
         )}
+      </p>
+      <p className="soft" style={{ fontSize: "var(--fs-small)" }}>
+        {answer.statement ?? FINGERPRINT_STATEMENT}
       </p>
       {unknown && answer.unknown_reason && (
         <p className="soft" style={{ fontSize: "var(--fs-small)" }}>{answer.unknown_reason}</p>
@@ -66,7 +83,8 @@ export function FingerprintSplit({
       ))}{" "}
       <span className="soft" style={{ fontSize: "var(--fs-small)" }}>
         over {dist.transactions} transaction{dist.transactions === 1 ? "" : "s"}
-        {dist.without_structure ? `; ${dist.without_structure} without structure` : ""}
+        {dist.without_structure ? `; ${dist.without_structure} without structure` : ""}.{" "}
+        {dist.statement ?? FINGERPRINT_STATEMENT}
       </span>
     </p>
   );

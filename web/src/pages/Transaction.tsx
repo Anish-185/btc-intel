@@ -11,7 +11,7 @@ import { token } from "../lib/tokens";
 import { Chip, ErrorNote, Label, SkeletonRows, ValidityChip, validityLabel } from "../components/ui";
 import type { Answer, Propagation } from "../api/types";
 import { Shell } from "../components/Shell";
-import { FingerprintPanel } from "../components/Fingerprint";
+import { FingerprintHidden, FingerprintPanel } from "../components/Fingerprint";
 
 const FieldGraph = lazy(() =>
   import("../components/FieldGraph").then((m) => ({ default: m.FieldGraph })),
@@ -145,7 +145,7 @@ function TxFingerprintBlock({ txid }: { txid: string }) {
   if (error || !data) return null;
   return (
     <div className="stat-grid" style={{ marginTop: "var(--sp-5)" }}>
-      <FingerprintPanel answer={data} />
+      {data.console_display ? <FingerprintPanel answer={data} /> : <FingerprintHidden />}
     </div>
   );
 }

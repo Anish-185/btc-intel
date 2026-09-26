@@ -1,11 +1,13 @@
-"""Which wallet software family, or which construction pattern, built this
-transaction — from on-chain structure only.
+"""How this transaction was built — a construction pattern — from on-chain
+structure only. Not which software built it.
 
     python -m features.fingerprint fit       # fit + calibrate on the fingerprint corpus
 
-A fingerprint names a *construction pattern*: "Bitcoin Core-like", "a
-coordinator CoinJoin", "a batched withdrawal". It never names a person or an
-organisation, and it is a probability, not a finding. Every tell, what it
+A fingerprint names a *construction pattern*: "Core-like construction",
+"coordinator CoinJoin shape", "batch-withdrawal shape". It never names the
+software, a person or an organisation, and it is a probability, not a finding.
+A construction unlike every trained pattern is answered `unknown` (the novelty
+check, docs/FINGERPRINTS.md "Open-set revision"). Every tell, what it
 indicates, which families exhibit it and where it is ambiguous is in
 docs/FINGERPRINTS.md.
 
@@ -55,14 +57,20 @@ import numpy as np
 import config
 
 UNKNOWN = "unknown"
-#: The labels, and how they are written for a reader. Families and patterns only.
+#: The labels, and how they are written for a reader: construction patterns,
+#: never software identity (docs/FINGERPRINTS.md, "Open-set revision").
 LABELS = {
-    "core_like": "Bitcoin Core-like construction",
+    "core_like": "Core-like construction",
     "electrum_like": "Electrum-like construction",
-    "legacy_naive": "legacy / naive wallet construction",
-    "coordinator_coinjoin": "coordinator CoinJoin construction",
-    "batch_withdrawal": "batched withdrawal construction",
+    "legacy_naive": "legacy/naive construction",
+    "coordinator_coinjoin": "coordinator CoinJoin shape",
+    "batch_withdrawal": "batch-withdrawal shape",
 }
+#: Carried by every answer and shown wherever a label is.
+STATEMENT = "The label describes how the transaction was built, not which software built it."
+#: The novelty threshold is this quantile of the novelty score on the
+#: validation (calibration) rows of the known profiles. Pre-registered.
+NOVELTY_QUANTILE = 0.99
 TELLS = ("version", "locktime", "sequence", "ordering", "change_position", "fee",
          "script_mix", "change_type", "io_shape", "batching")
 #: Tells only a raw transaction shows. A relay log in the NTRO schema carries
@@ -266,6 +274,7 @@ class FingerprintModel:
     vocab: dict = field(default_factory=dict)        # tell -> sorted values
     priors: dict = field(default_factory=dict)       # label -> share of training rows
     iso: dict = field(default_factory=dict)          # condition -> [x, y], posterior -> P(true)
+    novelty: dict = field(default_factory=dict)      # condition -> threshold on novelty_score
     meta: dict = field(default_factory=dict)
 
     @classmethod
@@ -301,10 +310,31 @@ class FingerprintModel:
         z = sum(math.exp(v - top) for v in logp.values())
         return {y: math.exp(v - top) / z for y, v in logp.items()}
 
+    def novelty_score(self, t: dict, label: str) -> float:
+        """The named family's worst-supported tell: the largest surprisal,
+        -log p(value | label), over the observed tells. The counts are the
+        training rows' own, smoothed as `posterior` smooths them."""
+        alpha = self.meta.get("alpha", 1.0)
+        worst = 0.0
+        for tell, value in t.items():
+            if value is None or tell not in self.vocab:
+                continue
+            k = len(self.vocab[tell]) + (value not in self.vocab[tell])
+            c = self.counts.get(label, {}).get(tell, {}).get(value, 0)
+            p = (c + alpha) / (self.totals.get(label, {}).get(tell, 0) + alpha * k)
+            worst = max(worst, -math.log(p))
+        return worst
+
+    def _top(self, t: dict, cond: str) -> str:
+        post = self.posterior(t)
+        return min(post, key=lambda y: (-self.calibrated(post[y], cond), -post[y], y))
+
     def calibrate(self, rows: list[dict], labels: list[str]) -> FingerprintModel:
         """One isotonic map per condition: the calibration rows as they are
         (full), and the same rows with the construction tells masked
-        (structural). Pooled one-vs-rest over the labels."""
+        (structural). Pooled one-vs-rest over the labels. Then, on the same
+        rows, each condition's novelty threshold: the NOVELTY_QUANTILE of the
+        novelty score under the family the model would name."""
         from sklearn.isotonic import IsotonicRegression
         for name, view in ((FULL, lambda t: t), (STRUCTURAL, structural)):
             xs, ys = [], []
@@ -315,6 +345,9 @@ class FingerprintModel:
             iso = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip").fit(xs, ys)
             self.iso[name] = [[float(x) for x in iso.X_thresholds_],
                               [float(y) for y in iso.y_thresholds_]]
+        for name, view in ((FULL, lambda t: t), (STRUCTURAL, structural)):
+            scores = [self.novelty_score(view(t), self._top(view(t), name)) for t in rows]
+            self.novelty[name] = float(np.quantile(scores, NOVELTY_QUANTILE)) if scores else None
         self.meta["calibration_rows"] = len(rows)
         return self
 
@@ -332,9 +365,15 @@ class FingerprintModel:
         ranked = sorted(((y, self.calibrated(p, cond), p) for y, p in self.posterior(t).items()),
                         key=lambda r: (-r[1], -r[2], r[0]))
         top, conf, _ = ranked[0]
+        score, limit = self.novelty_score(t, top), self.novelty.get(cond)
+        novel = limit is not None and score > limit
         if len(observed) < f["min_tells"]:
             answer, why = UNKNOWN, (f"only {len(observed)} tells observable; at least "
                                     f"{f['min_tells']} are needed")
+        elif novel:
+            answer, why = UNKNOWN, (f"out of distribution: a tell this construction's "
+                                    f"training transactions almost never show (novelty "
+                                    f"{score:.2f} over {limit:.2f})")
         elif conf < f["unknown_below"]:
             answer, why = UNKNOWN, (f"top confidence {conf:.2f} is under "
                                     f"{f['unknown_below']}")
@@ -345,6 +384,10 @@ class FingerprintModel:
                 "ranked": [{"label": y, "display": LABELS[y], "confidence": round(c, 4),
                             "posterior": round(p, 4)} for y, c, p in ranked],
                 "tells": t, "observed_tells": observed, "condition": cond,
+                "novelty": {"score": round(score, 4),
+                            "threshold": None if limit is None else round(limit, 4),
+                            "novel": novel},
+                "statement": STATEMENT,
                 "basis": (f"naive Bayes over the observable tells, isotonic-calibrated for "
                           f"the {cond} condition on simulated captures "
                           "(docs/FINGERPRINTS.md)")}
@@ -373,7 +416,7 @@ def fingerprint(v: View, model: FingerprintModel | None, cfg: dict | None = None
         return {"label": UNKNOWN, "display": "unknown construction", "confidence": None,
                 "unknown_reason": "no fitted fingerprint model; run "
                                   "`python -m features.fingerprint fit`",
-                "ranked": [], "tells": t,
+                "ranked": [], "tells": t, "statement": STATEMENT,
                 "observed_tells": sorted(k for k, x in t.items() if x is not None)}
     return model.classify(t, cfg)
 
@@ -405,11 +448,17 @@ def answers_for(txs, cfg: dict | None = None,
     return {tx.txid: fingerprint(View.of_tx(tx), model, cfg) for tx in txs}
 
 
+def console_display(cfg: dict | None = None) -> bool:
+    """Whether the console shows fingerprints by default. The API answers
+    either way; see the display rule in docs/FINGERPRINTS.md."""
+    return bool((cfg or config.load())["features"]["fingerprint"].get("console_display", False))
+
+
 def distribution(answers: list[dict]) -> dict:
     """How a set of transactions' fingerprints split, unknown included."""
     counts = Counter(a["label"] for a in answers)
     n = sum(counts.values())
-    return {"transactions": n,
+    return {"transactions": n, "statement": STATEMENT,
             "labels": [{"label": y, "display": LABELS.get(y, "unknown construction"),
                         "count": c, "share": round(c / n, 4)}
                        for y, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]}
@@ -507,14 +556,51 @@ def evaluate(fitted: dict, cfg: dict | None = None) -> dict:
     return out
 
 
-def leave_one_profile_out(truth, cfg: dict | None = None, test_role: str = "cross_test"):
-    """The generalization test: software the model has never seen.
+#: A (tell, value) is defining for a pattern when at least this share of the
+#: pattern's training rows that observe the tell show that value. Pre-registered.
+DEFINING_SHARE = 0.8
+OPEN_SET, CLOSED_SET = "open-set (novelty check)", "P8.1 (no novelty check)"
 
-    For each profile, fit and calibrate on every other profile's train and
-    calibration rows, then classify the held-out profile's `test_role` rows.
-    The model cannot name the held-out family, so every answer it gives is a
-    confident mislabel; `unknown` is the right answer. One row per held-out
-    profile and condition, plus a pooled row per condition.
+
+def defining_tells(rows: list[dict], labels: list[str]) -> dict[str, dict[str, str]]:
+    """label -> {tell: value} for every tell whose value is DEFINING_SHARE-dominant
+    among that label's rows (the training rows, never test rows)."""
+    seen: dict[str, dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
+    for t, y in zip(rows, labels):
+        for tell, value in t.items():
+            if value is not None:
+                seen[y][tell][value] += 1
+    out = {}
+    for y, by in seen.items():
+        out[y] = {}
+        for tell, c in by.items():
+            value, n = c.most_common(1)[0]
+            if n / sum(c.values()) >= DEFINING_SHARE:
+                out[y][tell] = value
+    return out
+
+
+def outcome(t: dict, label: str, defining: dict[str, dict[str, str]]) -> str:
+    """How a held-out transaction's answer is scored: `unknown`; `shared pattern`
+    when it shows every defining tell of the named pattern that it observes (at
+    least one); otherwise `harmful mislabel`. Reads only the tells and the
+    training-row definitions, never the model's scores."""
+    if label == UNKNOWN:
+        return "unknown"
+    rules = {k: v for k, v in defining.get(label, {}).items() if t.get(k) is not None}
+    if rules and all(t[k] == v for k, v in rules.items()):
+        return "shared pattern"
+    return "harmful mislabel"
+
+
+def leave_one_profile_out(truth, cfg: dict | None = None, test_role: str = "cross_test"):
+    """The generalization test: constructions the model has never seen.
+
+    For each profile, fit and calibrate (isotonic maps and novelty thresholds)
+    on every other profile's train and calibration rows, then answer the
+    held-out profile's `test_role` rows twice: with the novelty check, and
+    without it (P8.1's rule). Each answer is scored by `outcome`, with the
+    defining tells taken from the fold's own training rows.
     """
     import pandas as pd
     cfg = cfg or config.load()
@@ -525,24 +611,61 @@ def leave_one_profile_out(truth, cfg: dict | None = None, test_role: str = "cros
         train, cal = rest[rest["role"] == "train"], rest[rest["role"] == "calibration"]
         model = FingerprintModel.fit(list(train["_tells"]), list(train["wallet_profile"]), alpha)
         model.calibrate(list(cal["_tells"]), list(cal["wallet_profile"]))
+        closed = FingerprintModel(**{**model.__dict__, "novelty": {}})
+        defining = defining_tells(list(train["_tells"]), list(train["wallet_profile"]))
         test = truth[(truth["wallet_profile"] == held) & (truth["role"] == test_role)]
         for cond, view in ((FULL, lambda t: t), (STRUCTURAL, structural)):
-            said = Counter(model.classify(view(t), cfg)["label"] for t in test["_tells"])
-            wrong = {k: v for k, v in said.items() if k != UNKNOWN}
-            rows.append({"held-out profile": held, "condition": cond, "transactions": len(test),
-                         "unknown": said[UNKNOWN], "confidently mislabelled": sum(wrong.values()),
-                         "most often named": max(wrong, key=wrong.get) if wrong else "—"})
+            for name, m in ((CLOSED_SET, closed), (OPEN_SET, model)):
+                said = Counter()
+                named = Counter()
+                for t in test["_tells"]:
+                    v = view(t)
+                    label = m.classify(v, cfg)["label"]
+                    kind = outcome(v, label, defining)
+                    said[kind] += 1
+                    if kind == "harmful mislabel":
+                        named[label] += 1
+                rows.append({"held-out profile": held, "condition": cond, "model": name,
+                             "transactions": len(test), "unknown": said["unknown"],
+                             "shared pattern": said["shared pattern"],
+                             "harmful mislabel": said["harmful mislabel"],
+                             "most often harmfully named": (named.most_common(1)[0][0]
+                                                            if named else "—")})
     frame = pd.DataFrame(rows)
-    pooled = (frame.groupby("condition", sort=False)[["transactions", "unknown",
-                                                      "confidently mislabelled"]]
-              .sum().reset_index().assign(**{"held-out profile": "all (pooled)",
-                                             "most often named": "—"}))
+    counts = ["transactions", "unknown", "shared pattern", "harmful mislabel"]
+    pooled = (frame.groupby(["condition", "model"], sort=False)[counts].sum().reset_index()
+              .assign(**{"held-out profile": "all (pooled)", "most often harmfully named": "—"}))
     frame = pd.concat([frame, pooled[frame.columns]], ignore_index=True)
     n = frame["transactions"].where(frame["transactions"] > 0)
-    frame["unknown rate"] = (frame["unknown"] / n).round(4)
-    frame["confident-mislabel rate"] = (frame["confidently mislabelled"] / n).round(4)
-    return frame[["held-out profile", "condition", "transactions", "unknown", "unknown rate",
-                  "confidently mislabelled", "confident-mislabel rate", "most often named"]]
+    for col in ("unknown", "shared pattern", "harmful mislabel"):
+        frame[f"{col} rate"] = (frame[col] / n).round(4)
+    return frame[["held-out profile", "condition", "model", "transactions",
+                  "unknown", "unknown rate", "shared pattern", "shared pattern rate",
+                  "harmful mislabel", "harmful mislabel rate", "most often harmfully named"]]
+
+
+def in_distribution_cost(fitted: dict, cfg: dict | None = None):
+    """Accuracy when answered and the unknown rate on the known-profile test
+    sets, with the novelty check and without it: what open-set costs."""
+    import pandas as pd
+    cfg = cfg or config.load()
+    model, truth = fitted["model"], fitted["truth"]
+    closed = FingerprintModel(**{**model.__dict__, "novelty": {}})
+    rows = []
+    for role, set_name in (("within_test", "within-topology"), ("cross_test", "cross-topology")):
+        part = truth[truth["role"] == role]
+        for cond, view in ((FULL, lambda t: t), (STRUCTURAL, structural)):
+            for name, m in ((CLOSED_SET, closed), (OPEN_SET, model)):
+                pred = [m.classify(view(t), cfg)["label"] for t in part["_tells"]]
+                y = list(part["wallet_profile"])
+                answered = [(a, b) for a, b in zip(pred, y) if a != UNKNOWN]
+                rows.append({"test set": f"{set_name}, {cond}", "model": name,
+                             "transactions": len(pred),
+                             "unknown rate": round(1 - len(answered) / len(pred), 4),
+                             "accuracy if answered": round(
+                                 sum(a == b for a, b in answered) / len(answered), 4)
+                             if answered else None})
+    return pd.DataFrame(rows)
 
 def transfer(model: FingerprintModel, cfg: dict | None = None, n_transactions: int = 3000,
              seed: int = 42) -> dict:

@@ -128,6 +128,11 @@ features:
     # type has not shown how it was built.
     min_tells: 4
     laplace: 1.0
+    # Whether the console shows fingerprints by default (the API answers
+    # either way). Set by the pre-registered rule in docs/FINGERPRINTS.md
+    # ("Open-set revision"): off while the leave-one-profile-out
+    # harmful-mislabel rate (all tells) is above 0.10.
+    console_display: false
 
   # "suspiciously round": a multiple of one of these, to within the tolerance
   round_units: [1.0, 0.5, 0.1, 0.05, 0.01]

@@ -12,7 +12,7 @@ import { formatId } from "../lib/formatId";
 import { Gauge } from "../components/Gauge";
 import { EvidenceList } from "../components/EvidenceList";
 import { LeadsPanel } from "../components/LeadsPanel";
-import { FingerprintSplit } from "../components/Fingerprint";
+import { FingerprintHidden, FingerprintSplit } from "../components/Fingerprint";
 import { Chip, CopyValue, ErrorNote, Label, SkeletonRows } from "../components/ui";
 import { Shell } from "../components/Shell";
 import { useToast } from "../components/Toasts";
@@ -29,7 +29,7 @@ const ANCHORS = [
   { id: "evidence", label: "Evidence" },
   { id: "graph", label: "Link analysis" },
   { id: "leads", label: "Investigative leads" },
-  { id: "fingerprints", label: "Wallet fingerprints" },
+  { id: "fingerprints", label: "Construction fingerprints" },
 ];
 
 const SIGNALS: [keyof NonNullable<ReturnType<typeof scoresOf>>, string][] = [
@@ -199,10 +199,14 @@ export function Entity() {
       {data?.fingerprints && (
         <section className="section" id="fingerprints">
           <div className="section-head">
-            <h2>Wallet fingerprints</h2>
-            <span className="label">how this cluster's spends were built · not who</span>
+            <h2>Construction fingerprints</h2>
+            <span className="label">how this cluster's spends were built · not which software, not who</span>
           </div>
-          <FingerprintSplit dist={data.fingerprints} empty="No spend of these wallets in the data." />
+          {data.fingerprints.console_display ? (
+            <FingerprintSplit dist={data.fingerprints} empty="No spend of these wallets in the data." />
+          ) : (
+            <FingerprintHidden />
+          )}
           <p className="soft" style={{ marginTop: "var(--sp-2)" }}>
             Cluster confidence{" "}
             <span className="num">{data.fingerprints.cluster_confidence.toFixed(2)}</span> —{" "}

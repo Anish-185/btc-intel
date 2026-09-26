@@ -306,17 +306,31 @@ def test_the_answer_is_ranked_calibrated_or_unknown(model, profiled_truth):
 
 
 
-def test_leave_one_profile_out_never_names_the_held_out_profile(profiled_truth):
+def test_leave_one_profile_out_scores_three_outcomes(profiled_truth):
     truth = pd.DataFrame(profiled_truth)
     truth["_tells"] = [F.tells(F.View.of_record(r)) for r in profiled_truth]
     truth["role"] = [("train", "calibration", "cross_test")[i % 3] for i in range(len(truth))]
     table = F.leave_one_profile_out(truth, CFG)
     per = table[table["held-out profile"] != "all (pooled)"]
     assert set(per["held-out profile"]) == set(F.LABELS)
-    assert (per["most often named"] != per["held-out profile"]).all()
-    assert (per["unknown"] + per["confidently mislabelled"] == per["transactions"]).all()
-    pooled = table[table["held-out profile"] == "all (pooled)"].set_index("condition")
-    assert pooled.loc["full", "transactions"] == (truth["role"] == "cross_test").sum()
+    assert set(per["model"]) == {F.OPEN_SET, F.CLOSED_SET}
+    assert (per["unknown"] + per["shared pattern"] + per["harmful mislabel"]
+            == per["transactions"]).all()
+    assert (per["most often harmfully named"] != per["held-out profile"]).all()
+    # the novelty check can only add unknowns
+    both = per.pivot_table(index=["held-out profile", "condition"], columns="model",
+                           values="unknown")
+    assert (both[F.OPEN_SET] >= both[F.CLOSED_SET]).all()
+
+
+def test_the_outcome_rule_reads_defining_tells_not_scores():
+    rows = [{"fee": "integer_rate", "version": "v2"}] * 9 + [{"fee": "round_btc", "version": "v2"}]
+    defining = F.defining_tells(rows, ["k"] * 10)
+    assert defining == {"k": {"fee": "integer_rate", "version": "v2"}}
+    assert F.outcome({"fee": "integer_rate", "version": "v2"}, "k", defining) == "shared pattern"
+    assert F.outcome({"fee": "round_btc", "version": "v2"}, "k", defining) == "harmful mislabel"
+    assert F.outcome({"fee": None, "version": None}, "k", defining) == "harmful mislabel"
+    assert F.outcome({"fee": "round_btc"}, F.UNKNOWN, defining) == "unknown"
 
 def test_too_few_tells_is_unknown_whatever_the_score(model):
     sparse = dict.fromkeys(F.TELLS)
@@ -345,11 +359,13 @@ def test_a_structural_answer_uses_its_own_calibration(model):
     assert set(model.iso) == {F.FULL, F.STRUCTURAL}
 
 
-def test_labels_name_software_families_and_patterns_never_parties():
+def test_labels_name_construction_patterns_never_software_or_parties():
     for label, text in F.LABELS.items():
-        assert text.endswith("construction")
-        for word in ("owner", "person", "user", "operator", "exchange", "company"):
+        assert text.endswith(("construction", "shape"))
+        for word in ("owner", "person", "user", "operator", "exchange", "company",
+                     "bitcoin core", "wallet", "software"):
             assert word not in text.lower(), (label, word)
+    assert "not which software built it" in F.STATEMENT
 
 
 def test_the_model_round_trips_through_json(model, tmp_path):
@@ -388,6 +404,62 @@ def test_a_fingerprint_mismatch_lowers_a_merge_but_keeps_it():
                                                        "t3": "core_like"})
     assert agreeing.confidence[agreeing.cluster_of(P2WPKH[0])] == 1.0
 
+
+
+class _Answers:
+    """A stand-in model: fixed answers per txid, as `classify` would give them."""
+
+    def __init__(self, by_txid):
+        self.by_txid, self.i = by_txid, iter(by_txid)
+
+    def classify(self, t, cfg=None):
+        return {"label": self.by_txid[next(self.i)]}
+
+
+def test_an_unknown_side_never_lowers_a_merge():
+    """Downstream rule (docs/FINGERPRINTS.md, Open-set revision §4): a mismatch
+    lowers a merge only when both sides are confident, in-distribution labels.
+    Out of distribution is answered unknown, and unknown has no effect."""
+    txs = [_tx("t1", [P2WPKH[0]], [P2PKH[0]]), _tx("t2", [P2WPKH[1]], [P2PKH[1]]),
+           _tx("t3", [P2WPKH[0], P2WPKH[1]], [P2PKH[2]])]
+    on = {**CFG, "graph": {**CFG["graph"], "fingerprint": {**CFG["graph"]["fingerprint"],
+                                                            "corroborate": True}}}
+    both = F.confident_labels(txs, on, _Answers({"t1": "core_like", "t2": "legacy_naive",
+                                                 "t3": F.UNKNOWN}))
+    one_unknown = F.confident_labels(txs, on, _Answers({"t1": "core_like", "t2": F.UNKNOWN,
+                                                        "t3": F.UNKNOWN}))
+    assert one_unknown == {"t1": "core_like"}
+    lowered = cluster_wallets(txs, on, fingerprints=both)
+    kept = cluster_wallets(txs, on, fingerprints=one_unknown)
+    factor = CFG["graph"]["fingerprint"]["mismatch_factor"]
+    assert lowered.confidence[lowered.cluster_of(P2WPKH[0])] == factor
+    assert kept.confidence[kept.cluster_of(P2WPKH[0])] == 1.0
+    assert kept.clusters == lowered.clusters
+
+
+def test_a_construction_unlike_any_trained_pattern_is_unknown(model, profiled_truth):
+    t = F.tells(F.View.of_record(next(r for r in profiled_truth
+                                      if r["wallet_profile"] == "core_like")))
+    odd = {**t, "fee": "never_seen_policy", "script_mix": "never_seen_type"}
+    answer = model.classify(odd, CFG)
+    assert answer["novelty"]["novel"] and answer["label"] == F.UNKNOWN
+    assert answer["unknown_reason"].startswith("out of distribution")
+    assert answer["statement"] == F.STATEMENT
+
+
+def test_the_novelty_threshold_flags_about_one_percent_of_validation_rows(profiled_truth):
+    rows = [F.tells(F.View.of_record(r)) for r in profiled_truth]
+    labels = [r["wallet_profile"] for r in profiled_truth]
+    m = F.FingerprintModel.fit(rows[::2], labels[::2]).calibrate(rows[1::2], labels[1::2])
+    for cond, view in ((F.FULL, lambda t: t), (F.STRUCTURAL, F.structural)):
+        cal = [view(t) for t in rows[1::2]]
+        flagged = sum(m.novelty_score(t, m._top(t, cond)) > m.novelty[cond] for t in cal)
+        assert flagged / len(cal) <= 1 - F.NOVELTY_QUANTILE + 1e-9
+
+
+def test_the_novelty_threshold_survives_a_save(model, tmp_path):
+    again = F.FingerprintModel.load(model.save(tmp_path / "m.json"))
+    assert again.novelty == model.novelty and set(model.novelty) == {F.FULL, F.STRUCTURAL}
 
 def test_fingerprints_never_change_a_real_clustering(model):
     """On a generated dataset, any fingerprint assignment — the model's, or an

@@ -122,6 +122,7 @@ export interface EntityDetail {
     cluster_confidence: number;
     conflicts: { txid: string; heuristic: string; fingerprints: Record<string, string[]> }[];
     note: string;
+    console_display?: boolean;
   };
   caveat: string;
 }
@@ -269,6 +270,7 @@ export interface PeerProfile {
     originated: FingerprintDistribution & { without_structure: number };
     propagation_origin: FingerprintDistribution & { without_structure: number };
     statement: string;
+    console_display?: boolean;
   };
   excluded_links: { txid: string; reason: string; statement: string }[];
   vantage: Vantage[];
@@ -336,7 +338,7 @@ export interface TxOrigination {
   note: string | null;
 }
 
-/** features/fingerprint.py — a wallet software family or construction
+/** features/fingerprint.py — a construction pattern (how, not which software)
  *  pattern, never a party. */
 export interface FingerprintAnswer {
   label: string;
@@ -348,13 +350,19 @@ export interface FingerprintAnswer {
   observed_tells: string[];
   condition?: "full" | "structural";
   basis?: string;
+  /** "The label describes how the transaction was built, not which software built it." */
+  statement?: string;
+  novelty?: { score: number; threshold: number | null; novel: boolean };
 }
 
 export interface FingerprintDistribution {
   transactions: number;
+  statement?: string;
   labels: { label: string; display: string; count: number; share: number }[];
 }
 
 export interface TxFingerprint extends FingerprintAnswer {
   txid: string;
+  /** config features.fingerprint.console_display: show by default or not. */
+  console_display?: boolean;
 }

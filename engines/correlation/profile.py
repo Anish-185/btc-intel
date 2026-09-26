@@ -553,17 +553,18 @@ def peer_profile(peer: str, src: Sources, cfg: dict | None = None) -> dict | Non
 
 
 def _fingerprints(claims: list[dict], propagation_txids: list[str], src: Sources) -> dict:
-    """How the transactions this peer originated were built: software families
-    and construction patterns, never who. Only transactions whose structure is
+    """How the transactions this peer originated were built: construction
+    patterns, never which software or who. Only transactions whose structure is
     in the chain data can be fingerprinted; the rest are counted, not guessed."""
     def split(txids):
         known = [src.fingerprints[t] for t in txids if t in src.fingerprints]
         return {**fingerprint.distribution(known), "without_structure": len(txids) - len(known)}
     return {"originated": split(list(dict.fromkeys(c["txid"] for c in claims))),
             "propagation_origin": split(propagation_txids),
-            "statement": ("wallet-construction fingerprints of the transactions this peer "
-                          "is named origin of (features/fingerprint.py): a software family "
-                          "or pattern per transaction, or unknown")}
+            "statement": ("construction fingerprints of the transactions this peer is "
+                          "named origin of (features/fingerprint.py): a construction "
+                          "pattern per transaction, or unknown. " + fingerprint.STATEMENT),
+            "console_display": fingerprint.console_display()}
 
 
 def _network(peer: str, mine: pd.DataFrame | None, hops: pd.DataFrame | None,

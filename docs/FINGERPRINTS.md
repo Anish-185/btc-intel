@@ -1,13 +1,14 @@
-# Wallet-construction fingerprints
+# Construction fingerprints
 
-`features/fingerprint.py` estimates which **wallet software family or
-construction pattern** built a transaction, using only its on-chain structure.
-The output is a ranked label set with calibrated confidences, or `unknown`.
+`features/fingerprint.py` estimates which **construction pattern** built a
+transaction, using only its on-chain structure. The output is a ranked label
+set with calibrated confidences, or `unknown`.
 
-A fingerprint names *how* a transaction was built. It never names who built
-it. "Bitcoin Core-like construction" means the transaction's structure
-matches what this system models for Bitcoin Core's wallet. It does not mean
-Bitcoin Core built it, and it says nothing about a person or an organisation.
+**The label describes how the transaction was built, not which software built
+it.** Every surface that shows a label says so. "Core-like construction" means
+the transaction's structure matches what this system models for Bitcoin
+Core's wallet defaults. It does not mean Bitcoin Core built it, and it says
+nothing about a person or an organisation.
 Many unrelated parties run the same software, and one party can run several
 wallets.
 
@@ -22,12 +23,15 @@ well it would identify real software. Results are in section 12 of
 
 | label | written as | what it stands for |
 | --- | --- | --- |
-| `core_like` | Bitcoin Core-like construction | a full-node wallet's defaults as modelled here |
+| `core_like` | Core-like construction | a full-node wallet's defaults as modelled here |
 | `electrum_like` | Electrum-like construction | a light wallet's defaults as modelled here |
-| `legacy_naive` | legacy / naive wallet construction | old or minimal wallet software: v1, no locktime, fixed fees, address reuse |
-| `coordinator_coinjoin` | coordinator CoinJoin construction | a coordinated equal-denomination mix (Wasabi/Whirlpool-style) |
-| `batch_withdrawal` | batched withdrawal construction | many payees and one change output in one transaction: a pattern, not a product |
-| `unknown` | unknown construction | the evidence is too weak to name one |
+| `legacy_naive` | legacy/naive construction | v1, no locktime, fixed fees, address reuse |
+| `coordinator_coinjoin` | coordinator CoinJoin shape | a coordinated equal-denomination mix (Wasabi/Whirlpool-style) |
+| `batch_withdrawal` | batch-withdrawal shape | many payees and one change output in one transaction: a pattern, not a product |
+| `unknown` | unknown construction | too few tells, ambiguous between patterns, or unlike every trained pattern (novelty check) |
+
+The keys are the generator's profile names and stay as they are; what a
+reader sees is the right-hand column (Open-set revision, §2).
 
 ## The tells
 
@@ -132,7 +136,9 @@ did.
 
 `graph.clustering.corroborate` compares, for every union the heuristics made,
 the confident fingerprints of the transactions that spend the merged wallets.
-If two different families appear, the union is kept but its confidence is
+Only confident, in-distribution labels take part: a transaction answered
+`unknown`, whether ambiguous, short of tells, or out of distribution, has no
+effect. If two different patterns appear, the union is kept but its confidence is
 multiplied by `graph.fingerprint.mismatch_factor` (0.5). A cluster's
 confidence is its least confident merge. Mismatches are listed under
 `conflicts`.
@@ -147,8 +153,14 @@ merges and changes no union. The tests check this in both directions:
 
 ## Surfaces
 
+* **Console display**: off by default (`features.fingerprint.console_display`;
+  see the display rule under "Open-set revision"). Each surface below then shows
+  a notice in place of fingerprints. The API answers either way, and each answer
+  carries `statement` and `console_display`.
 * **TXID page**: `GET /transactions/{txid}/fingerprint`, shown as a panel with
-  the label, confidence, ranked alternatives, the tells and the condition.
+  the label, confidence, ranked alternatives, the tells, the condition and
+  the statement. An `unknown` answer gives its reason, including the novelty
+  score against its threshold.
 * **Entity page**: the fingerprint distribution of the transactions spending
   the entity's wallets, the cluster's merge confidence, and any conflicts.
 * **Peer profile**: the distribution among the transactions the peer is named
@@ -179,12 +191,14 @@ them.
   is scored on. The transfer check in section 12 (the same model on the
   generator's own typologies) shows how much accuracy falls under a shift
   inside the simulator. Real software will shift further.
-* **Unseen software is named, not flagged.** Leave-one-profile-out (§12 of
-  `eval/results.md`, `features.fingerprint.leave_one_profile_out`) fits on four
-  profiles and asks about the fifth. Pooled, 0.948 of those transactions get a
-  known family's name with all tells and 0.994 structure only. `unknown`
-  catches confusion between known families, not software the model has never
-  seen, so a fingerprint on real traffic can be a confident wrong name.
+* **Unseen constructions are often still named.** Leave-one-profile-out (§12
+  of `eval/results.md`) fits on four profiles and asks about the fifth. With
+  the novelty check, 0.336 of held-out transactions (all tells; 0.315
+  structure only) still get a known pattern whose defining tells they
+  contradict, down from 0.804 in P8.1. Most of what remains is Core-like and
+  Electrum-like constructions standing in for each other: their profiles
+  share most tells, and the novelty check cannot tell one from a variant of
+  the other. Fingerprints are therefore off in the console by default.
 * On real data, fee-rate tells depend on an estimated vsize, BIP-69 output
   order uses addresses in place of scriptPubKeys, and relay logs lack
   version, locktime, nSequence and outpoints. The `structural` condition
@@ -192,9 +206,10 @@ them.
 * The served demo dataset is generated with `--wallet-profiles` (seed 41 plus
   its recorded red-team injections, which `generator.inject` profiles too), so
   its transactions carry the `full` tells. Its fingerprints recover the
-  simulator's profiles, not real wallets. On it, 81 of 1247 are unknown and
-  0.851 are right when answered; typology transactions carry fewer tells than
-  ordinary payments, as above.
+  simulator's profiles, not real wallets. On it, 601 of 1247 are unknown
+  (564 of them out of distribution to the corpus-trained model) and 0.853 are
+  right when answered. The generator's transactions differ from the corpus's
+  shapes, and typology transactions carry fewer tells than ordinary payments.
 
 ## Open-set revision
 
@@ -339,3 +354,29 @@ tells is above 0.10, the console's fingerprint display goes behind a config
 flag, `features.fingerprint.console_display`, defaulting to off. §12 then
 says so plainly. The API keeps answering either way, since what is computed
 is not in question, only whether a reader sees it by default.
+
+### Result (appended after the pre-registered run; nothing above was changed)
+
+The first run under the rules above, `python -m eval.report` (§12):
+
+| pooled over five hold-outs | unknown | shared pattern | harmful mislabel |
+| --- | --- | --- | --- |
+| P8.1, all tells | 0.052 | 0.144 | 0.804 |
+| open-set, all tells | 0.574 | 0.090 | **0.336** |
+| P8.1, structure only | 0.006 | 0.160 | 0.833 |
+| open-set, structure only | 0.578 | 0.108 | 0.315 |
+
+The P8.1 rows reproduce P8.1's unknown counts exactly (1138 and 138 of
+21758), so the baseline is the same model and rule scored three ways. Where
+the novelty check works, it works well: held-out legacy/naive goes to 0.999
+unknown and held-out CoinJoin to 0.936. Where it does not: held-out Core-like
+is harmfully named Electrum-like 0.455 of the time, held-out Electrum-like
+is harmfully named Core-like 0.560 of the time, and held-out batch
+withdrawals are called CoinJoins 0.264 of the time. Cost on known profiles
+(cross-topology, all tells): unknown 0.060 → 0.070, accuracy when answered
+unchanged at 0.976.
+
+**The harmful-mislabel rate, 0.336, is above the pre-registered 0.10.** Per
+the display rule, `features.fingerprint.console_display` stays `false`: the
+console shows a notice in place of fingerprints, and the API still answers.
+

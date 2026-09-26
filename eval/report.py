@@ -645,6 +645,10 @@ FINGERPRINT_OMISSIONS = (
     "standard single-key estimate, exact here because the generator uses the same table.")
 
 
+#: Above this pooled harmful-mislabel rate (all tells, open-set), fingerprints
+#: stay out of the console by default. Pre-registered in docs/FINGERPRINTS.md.
+FINGERPRINT_HARM_LIMIT = 0.10
+
 #: §12's transfer figures from the generator before P8.1 (commit 74c404e). That
 #: generator no longer exists, so they are copied through, not regenerated.
 TRANSFER_PRE_8_1 = """
@@ -682,7 +686,12 @@ def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
     result = F.evaluate(fitted, cfg)
     transfer = F.transfer(fitted["model"], cfg)
     lopo = F.leave_one_profile_out(fitted["truth"], cfg)
-    pooled = lopo[lopo["held-out profile"] == "all (pooled)"].set_index("condition")
+    cost = F.in_distribution_cost(fitted, cfg)
+    pooled = lopo[lopo["held-out profile"] == "all (pooled)"].set_index(["condition", "model"])
+    harm = {(c, m): pooled.loc[(c, m), "harmful mislabel rate"]
+            for c in (F.FULL, F.STRUCTURAL) for m in (F.OPEN_SET, F.CLOSED_SET)}
+    high = harm[(F.FULL, F.OPEN_SET)] > FINGERPRINT_HARM_LIMIT
+    shown = cfg["features"]["fingerprint"].get("console_display", True)
     note = f"\n*`condition=\"simulated\"`.* {FINGERPRINT_OMISSIONS}\n"
     f = cfg["features"]["fingerprint"]
     out = [
@@ -696,24 +705,38 @@ def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
         f"calibrated confidence {f['unknown_below']} or with fewer than {f['min_tells']} "
         "observable tells (config.yaml, with the rationale).\n"),
         ("\n### Generalization: leave one profile out\n\n"
-        "**This is the generalization result.** Every figure above scores the model on "
-        "profiles it was fitted to. Here each profile is held out in turn: the model is "
-        "fitted and calibrated on the other four and asked about the held-out one's "
-        "cross-topology test transactions. It cannot name software it has never seen, so "
-        "`unknown` is the right answer and any other answer is a confident mislabel.\n\n"
-        f"**Confident-mislabel rate on never-seen profiles: "
-        f"{pooled.loc['full', 'confident-mislabel rate']:.3f} with all tells, "
-        f"{pooled.loc['structural', 'confident-mislabel rate']:.3f} structure only** "
-        "(pooled over the five hold-outs; a lower rate is better). "
-        + ("The unknown rule does not catch unfamiliar software: it abstains when known "
-           "families are hard to tell apart, and most held-out transactions get a known "
-           f"family's name at or above the {f['unknown_below']} confidence cutoff. A "
-           "fingerprint of real traffic may be a confident wrong name. "
-           if pooled.loc["full", "confident-mislabel rate"] > 0.5 else "")
-        + "Still simulated: the "
-        "held-out family is another of this simulator's profiles, so real unseen software "
-        "may sit closer to or further from the known ones.\n\n"),
+        "**This is the generalization result.** Every other table here scores the model on "
+        "profiles it was fitted to. Here each profile is held out in turn. The model is "
+        "fitted and calibrated (isotonic maps and novelty thresholds) on the other four "
+        "and asked about the held-out one's cross-topology test transactions. Scoring is "
+        "pre-registered (docs/FINGERPRINTS.md, \"Open-set revision\"). `unknown` is right. "
+        "A **shared pattern** names a known pattern whose defining tells (at least 80% of "
+        "its training rows) the transaction shows. A **harmful mislabel** names one it "
+        "contradicts. `P8.1 (no novelty check)` is the same fitted model without the "
+        "check: P8.1's decision rule, scored the same way.\n\n"
+        f"**Harmful-mislabel rate on never-seen profiles: "
+        f"{harm[(F.FULL, F.OPEN_SET)]:.3f} with all tells, "
+        f"{harm[(F.STRUCTURAL, F.OPEN_SET)]:.3f} structure only** (pooled over the "
+        f"five hold-outs; lower is better). P8.1: {harm[(F.FULL, F.CLOSED_SET)]:.3f} and "
+        f"{harm[(F.STRUCTURAL, F.CLOSED_SET)]:.3f}. "
+        + ((f"That is above the pre-registered {FINGERPRINT_HARM_LIMIT}: the fingerprint "
+            "still gives many never-seen constructions a known label they contradict. "
+            "Under the pre-registered rule the console hides fingerprints unless "
+            "`features.fingerprint.console_display` is turned on"
+            + (" (it is off)." if not shown else
+               " — **but config.yaml has it on, contrary to the rule.**") + " ")
+           if high else
+           (f"That is within the pre-registered {FINGERPRINT_HARM_LIMIT}, so the console "
+            "shows fingerprints by default. "))
+        + "Still simulated: the held-out construction is another of this simulator's "
+        "profiles, so real unseen software may sit closer to or further from the known "
+        "ones.\n\n"),
         md_table(lopo), note,
+        ("\n### What the novelty check costs on known profiles\n\n"
+        "The five-profile model on the known-profile test sets, with and without the "
+        "novelty check. Its threshold is the 99th percentile of the novelty score on the "
+        "calibration rows, per condition, fixed before any evaluation.\n\n"),
+        md_table(cost), note,
         "\n### Unknown rate and accuracy when answered\n\n", md_table(result["unknown"]), note,
         ("\n### Per class\n\n`recall` counts an unknown as a miss; `recall if answered` does "
         "not.\n\n"), md_table(result["per_class"]), note,
