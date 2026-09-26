@@ -157,3 +157,171 @@ export interface Propagation {
   layout: { name: string; roots: string[] };
   elements: GraphElements;
 }
+
+/** engines/correlation/profile.py — the reverse direction. A profile describes
+ *  a peer's observed network behaviour; it never names who operates it. */
+export interface OriginClaim {
+  txid: string;
+  capture_id: string;
+  observer: string;
+  probability: number;
+  calibration_basis: string;
+  tier: Validity["tier"];
+  validity: Validity;
+  answer: Answer;
+  statement: string;
+}
+
+export interface EvidenceRow {
+  source: string;
+  txid: string;
+  row?: number;
+  timestamp?: string;
+  src?: string;
+  dst?: string;
+  capture_id?: string;
+  peer?: string;
+  announce_ts?: string;
+  capture_source?: string;
+}
+
+export interface LinkedCluster {
+  cluster: string;
+  cluster_id: string;
+  basis: "origination" | "correlation lead" | "both";
+  confidence: number;
+  confidence_rule: string;
+  statement: string;
+  evidence_chain: string;
+  evidence: {
+    basis: string;
+    txid: string;
+    probability: number;
+    tier?: string;
+    rows: EvidenceRow[];
+    inputs: string[];
+  }[];
+  evidence_total: number;
+}
+
+export interface Vantage {
+  source: string;
+  capture_id: string | null;
+  capture_source: string | null;
+  provenance: string | null;
+  observer: string[];
+  direction: string[];
+  vantage: string;
+  announcements: number;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export interface Timing {
+  sufficient: boolean;
+  announcements: number;
+  threshold: number;
+  statement: string;
+  announce_rate_per_min?: number | null;
+  active_hours_utc?: number[];
+  inter_announcement_s?: Record<"mean" | "median" | "stdev" | "min" | "max", number | null>;
+}
+
+export interface ClientHistory {
+  value: string | number;
+  hex?: string;
+  first_seen: string | null;
+  last_seen: string | null;
+  captures: string[];
+}
+
+export interface PeerProfile {
+  subject: string;
+  peer: string;
+  kind: "ip" | "onion_identity";
+  header: { simulated_only: boolean; provenance: string[]; statement: string };
+  originated: {
+    claimed: number;
+    by_tier: Record<"PASS" | "QUALIFIED" | "ANNOTATE", number>;
+    claims: OriginClaim[];
+    basis: string;
+  };
+  propagation_origin: { count: number; statement: string };
+  withheld: {
+    count: number;
+    by_reason: Record<string, number>;
+    items: { txid: string; capture_id: string; tier: string; reason: string; statement: string }[];
+  };
+  relayed: {
+    count: number;
+    by_source: Record<string, number>;
+    sample: { source: string; txid: string; capture_id: string | null; rank: number | null; candidates: number | null }[];
+  };
+  timing: Timing;
+  clients: { user_agents: ClientHistory[]; services: ClientHistory[]; statement: string | null };
+  linked_clusters: LinkedCluster[];
+  excluded_links: { txid: string; reason: string; statement: string }[];
+  vantage: Vantage[];
+  /** Absent on an onion identity: it has no IP to enrich. */
+  network?: {
+    ip: string;
+    asn: number | null;
+    asn_org: string | null;
+    country: string | null;
+    ip_class: IpClass | null;
+    basis: string;
+  };
+  caveat: string;
+}
+
+export interface AsnMember {
+  peer: string;
+  subject: string;
+  originated: number;
+  by_tier: Record<"PASS" | "QUALIFIED" | "ANNOTATE", number>;
+  withheld: number;
+  relayed: number;
+  linked_clusters: string[];
+  timing_sufficient: boolean;
+  captures: string[];
+  asn_org: string | null;
+  country: string | null;
+}
+
+export interface AsnProfile {
+  subject: string;
+  asn: number;
+  peers: number;
+  header: { simulated_only: boolean; statement: string };
+  totals: {
+    originated: number;
+    by_tier: Record<"PASS" | "QUALIFIED" | "ANNOTATE", number>;
+    withheld: number;
+    relayed: number;
+    linked_clusters: number;
+  };
+  members: AsnMember[];
+  caveat: string;
+}
+
+/** The origination model's answer for one txid, per capture. */
+export interface CaptureOrigination {
+  capture_id: string;
+  observer: string;
+  capture_source: string;
+  provenance: string;
+  named_peer: string;
+  probability: number;
+  calibration_basis: string;
+  validity: Validity;
+  answered: boolean;
+  abstention_reason: string | null;
+  answer: Answer | null;
+  n_candidates: number;
+}
+
+export interface TxOrigination {
+  txid: string;
+  captures: CaptureOrigination[];
+  note: string | null;
+}

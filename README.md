@@ -332,6 +332,12 @@ The alert id is the entity id: there is one alert per entity.
 `GET /transactions/{txid}/propagation` — the propagation tree as Cytoscape
 elements, with `layout: {name: dagre, roots: [origin]}`, the estimated origin
 marked `origin`, runner-ups `runner_up`, and an IP-class badge on every node.
+`GET /transactions/{txid}/origination` — the origination model's answer per
+capture the txid was seen in.
+`GET /peers/{peer}/profile`, `GET /asns/{asn}/profile` — the reverse
+direction: what a peer (IP or onion identity) or every peer of an ASN did on
+the network. Each lookup is written to the custody ledger. See
+docs/CORRELATION.md.
 
 **No authentication**, deliberately, for the demo — it binds to localhost and
 serves synthetic data. A deployment would need auth, per-case authorisation, an

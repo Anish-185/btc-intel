@@ -297,3 +297,42 @@ def test_to_frame_has_the_canonical_columns():
 def test_detect_format_refuses_to_guess():
     with pytest.raises(ValueError):
         cr.detect_format(FIXTURES.parent / "capture")   # a directory is not a capture
+
+
+# --- the version handshake: user agent and service flags ---------------------
+def version_message(agent: str, services: int) -> bytes:
+    """version, services, time, addr_recv, addr_from, nonce, user agent, height."""
+    payload = (struct.pack("<iQq", 70016, services, 1_790_244_000) + b"\x00" * 26
+               + b"\x00" * 26 + struct.pack("<Q", 7)
+               + bytes([len(agent)]) + agent.encode() + struct.pack("<i", 850_000))
+    return p2p_message("version", payload)
+
+
+def test_pcap_reads_the_peers_version_message_for_agent_and_services(tmp_path):
+    packets = [
+        (1_790_244_000.5, tcp_frame(PEER, NODE, 8333, 51000,
+                                    version_message("/Satoshi:27.0.0/", 0x409))),
+        (1_790_244_001.0, tcp_frame(PEER, NODE, 8333, 51000,
+                                    inv_message([(cr.INV_TX, TX_GENESIS)]))),
+        # Our own version to another peer says nothing about that peer.
+        (1_790_244_001.1, tcp_frame(NODE, "198.51.100.77", 51001, 8333,
+                                    version_message("/Satoshi:26.0.0/", 1))),
+        (1_790_244_001.2, tcp_frame(NODE, "198.51.100.77", 51001, 8333,
+                                    inv_message([(cr.INV_TX, TX_GENESIS)]))),
+    ]
+    events = cr.read_capture(write_pcap(tmp_path / "v.pcap", packets), local_ips=[NODE])
+    theirs = next(e for e in events if e.peer_ip == PEER)
+    assert (theirs.user_agent, theirs.services) == ("/Satoshi:27.0.0/", 0x409)
+    ours = next(e for e in events if e.peer_ip == "198.51.100.77")
+    assert (ours.user_agent, ours.services) == (None, None)
+
+
+def test_btcap_services_accept_an_integer_or_hex_and_debug_log_leaves_them_unknown(tmp_path):
+    path = tmp_path / "s.btcap"
+    path.write_text(
+        '{"txid": "ab", "message_type": "inv", "peer_ip": "203.0.113.1", '
+        '"wall_clock_ts": 1790244000, "services": 1033}\n'
+        '{"txid": "cd", "message_type": "inv", "peer_ip": "203.0.113.2", '
+        '"wall_clock_ts": 1790244001, "service_flags": "0x409"}\n')
+    assert [e.services for e in cr.read_capture(path)] == [1033, 0x409]
+    assert all(e.services is None for e in cr.read_capture(FIXTURES / "node1.debug.log"))

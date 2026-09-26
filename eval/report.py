@@ -623,8 +623,55 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add(validity_eval.section(validity, md_table).replace("\n### ", "\n#### "))
     validity_eval.write_doc(validity, md_table, cfg["validity"]["results_doc"])
 
+    # --- 11. the reverse direction ---------------------------------------
+    add("\n## 11. Peer profiles: coverage\n")
+    add(profile_section(cfg, origination))
+
     add(CLOSING)
     return "\n".join(parts)
+
+
+def profile_section(cfg: dict, origination: dict) -> str:
+    """What share of peers get each part of a profile (engines/correlation/
+    profile.py), over what the API serves and over the base corpus's
+    cross-topology test captures."""
+    from engines.correlation import profile
+
+    served = profile.build_sources(cfg)
+    matrix = origination["parts"]["cross_test"]
+    corpus = profile.Sources(matrix=matrix, answers=profile.origination_answers(
+        origination["model"], matrix, cfg, shapes=origination["shapes"]))
+    columns = {"served (relay-hop dataset + relay matrix)": profile.coverage(served, cfg),
+               f"base corpus `{origination['corpus']}`, cross-topology test captures":
+               profile.coverage(corpus, cfg)}
+    rows = []
+    for measure in next(iter(columns.values())):
+        row = {"condition": "simulated", "measure": measure}
+        for name, counts in columns.items():
+            peers = counts.get("peers") or 0
+            n = counts.get(measure, 0)
+            row[name] = n if measure == "peers" else (
+                f"{n} ({n / peers:.1%})" if peers else "0")
+        rows.append(row)
+    need = cfg["engines"]["correlation"]["profile"]["min_timing_observations"]
+    in_chain = (served.matrix["txid"].isin(served.txs).sum()
+                if served.matrix is not None else 0)
+    relay_rows = 0 if served.matrix is None else len(served.matrix)
+    return (
+        "The reverse direction (docs/CORRELATION.md): peer -> profile. Each count is "
+        "the peers whose profile has that part. `originated claim` means the "
+        "origination model named the peer and `eval.origin.flagged_at` did not "
+        "withhold it; QUALIFIED and ANNOTATE claims are counted apart, never folded "
+        f"into it. A timing signature needs {need} announcements "
+        "(`engines.correlation.profile.min_timing_observations`). A cluster link "
+        "needs the originated transaction's inputs: the corpus has no chain data, and "
+        f"{in_chain} of the served relay matrix's {relay_rows} rows have a txid in the "
+        "relay-hop dataset; the rest of the served links come from correlation leads. "
+        + ("No capture here carries a version handshake, hence no user agents or "
+           "service flags. " if not any(c.get("with a user agent") or c.get(
+               "with service flags") for c in columns.values()) else "")
+        + "Every profile counted is built from simulated or fixture data and "
+        "says so in its header.\n\n" + md_table(pd.DataFrame(rows)) + "\n")
 
 
 def anomaly_section(fusion: dict, redteam: dict) -> str:
@@ -904,7 +951,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 11. Decisions taken in this pass
+## 12. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

@@ -84,7 +84,7 @@ STRICT_COLUMNS = ["peer_txids_before", "peer_firsts_before", "peer_fraction_firs
 
 CONTEXT_COLUMNS = ["peer_port", "non_standard_port", "is_ipv6", "is_onion", "transport_v2",
                    "unreadable_flows",
-                   "user_agent", "user_agent_class", "ip_class", "is_tor_exit",
+                   "user_agent", "user_agent_class", "services", "ip_class", "is_tor_exit",
                    "connection_age_s", "connection_age_known"]
 
 ENRICHMENT_COLUMNS = ["geo_country", "asn", "asn_org", "high_risk_asn", "asn_source"]
@@ -255,6 +255,7 @@ def compute_relay_features(events, capture_id: str, local_ips=None,
 
     strict = _strict_history(usable)
     agents = _agents(events)
+    services = _services(events)
     relay_classes = set(cfg["engines"]["propagation"]["low_confidence_classes"])
 
     rows = []
@@ -272,7 +273,7 @@ def compute_relay_features(events, capture_id: str, local_ips=None,
         scope_out = candidate_count == 0 or all(c in relay_classes for c in classes.values())
         for peer_ip, event in earliest.items():
             rows.append(_row(txid, peer_ip, event, capture_id, observer_ip, observers,
-                             basis, window, candidate_count, strict, agents,
+                             basis, window, candidate_count, strict, agents, services,
                              classes[peer_ip], estimators.get(txid, {}), geoip, cfg,
                              scope_out, len(group)))
 
@@ -373,8 +374,15 @@ def _agents(events) -> dict[str, str]:
     return {e.peer_ip: e.user_agent for e in events if e.peer_ip and e.user_agent}
 
 
+def _services(events) -> dict[str, int]:
+    """The service bits each peer advertised in its version message; capture-
+    wide for the same reason as `_agents`."""
+    return {e.peer_ip: e.services for e in events
+            if e.peer_ip and getattr(e, "services", None) is not None}
+
+
 def _row(txid, peer_ip, event, capture_id, observer_ip, observers, basis, window,
-         candidate_count, strict, agents, ip_class, estimators, geoip, cfg,
+         candidate_count, strict, agents, services, ip_class, estimators, geoip, cfg,
          scope_out, announcements_of_txid) -> dict:
     delta_first = event.wall_clock_ts - window["first"]
     stdev = window["stdev"]
@@ -402,6 +410,7 @@ def _row(txid, peer_ip, event, capture_id, observer_ip, observers, basis, window
         "transport_v2": getattr(event, "transport", None) == "v2",
         "unreadable_flows": getattr(event, "unreadable_flows", None),
         "user_agent": agents.get(peer_ip), "user_agent_class": user_agent_class(agents.get(peer_ip)),
+        "services": services.get(peer_ip),
         "ip_class": ip_class, "is_tor_exit": ip_class == TOR_EXIT,
         # The reader's event stream carries announcements, not connection
         # lifecycle, so the true connection time is not derivable from it.

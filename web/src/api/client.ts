@@ -3,7 +3,16 @@
  *
  *  VITE_API_BASE defaults to same-origin, which is what FastAPI serving
  *  web/dist gives us; the dev server proxies instead (see vite.config.ts). */
-import type { AlertsPage, EntityDetail, EntityGraph, Propagation, Stats } from "./types";
+import type {
+  AlertsPage,
+  AsnProfile,
+  EntityDetail,
+  EntityGraph,
+  PeerProfile,
+  Propagation,
+  Stats,
+  TxOrigination,
+} from "./types";
 
 export const API_BASE = (import.meta.env?.VITE_API_BASE ?? "").replace(/\/$/, "");
 
@@ -62,6 +71,13 @@ export const api = {
     get<EntityGraph>(`/entities/${encodeURIComponent(id)}/graph?hops=${hops}`, signal),
   propagation: (txid: string, signal?: AbortSignal) =>
     get<Propagation>(`/transactions/${encodeURIComponent(txid)}/propagation`, signal),
+  origination: (txid: string, signal?: AbortSignal) =>
+    get<TxOrigination>(`/transactions/${encodeURIComponent(txid)}/origination`, signal),
+  /** Every call is recorded in the custody ledger by the server. */
+  peerProfile: (peer: string, signal?: AbortSignal) =>
+    get<PeerProfile>(`/peers/${encodeURIComponent(peer)}/profile`, signal),
+  asnProfile: (asn: string, signal?: AbortSignal) =>
+    get<AsnProfile>(`/asns/${encodeURIComponent(asn)}/profile`, signal),
 
   reportUrl: (id: string) => `${API_BASE}/entities/${encodeURIComponent(id)}/report`,
 

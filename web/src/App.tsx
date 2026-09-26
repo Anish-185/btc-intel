@@ -8,6 +8,7 @@ import { Transaction } from "./pages/Transaction";
 import { RedTeam } from "./pages/RedTeam";
 import { Monitor } from "./pages/Monitor";
 import { Custody } from "./pages/Custody";
+import { Asn, Peer, Peers } from "./pages/Peer";
 
 // The investigation graph pulls in Cytoscape and its extensions — the heaviest
 // thing the console loads, and only this route needs it.
@@ -23,6 +24,9 @@ export function App() {
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/entities/:id" element={<Entity />} />
         <Route path="/tx/:txid" element={<Transaction />} />
+        <Route path="/peers" element={<Peers />} />
+        <Route path="/peers/:peer" element={<Peer />} />
+        <Route path="/asns/:asn" element={<Asn />} />
         <Route path="/redteam" element={<RedTeam />} />
         <Route path="/monitor" element={<Monitor />} />
         <Route path="/custody" element={<Custody />} />

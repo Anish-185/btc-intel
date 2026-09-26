@@ -18,6 +18,7 @@ const PAGES = [
   { to: "/monitor", label: "Live monitor" },
   { to: "/alerts", label: "Alert queue" },
   { to: "/investigate", label: "Investigation graph" },
+  { to: "/peers", label: "Peer lookup" },
   { to: "/redteam", label: "Red team" },
   { to: "/custody", label: "Chain of custody" },
 ];
@@ -41,7 +42,9 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
     ? { label: `Case ${params.id.slice(0, 10)}…`, to: pathname }
     : params.txid
       ? { label: `Transaction ${params.txid.slice(0, 8)}…`, to: pathname }
-      : null;
+      : params.peer
+        ? { label: `Peer ${params.peer.slice(0, 15)}`, to: pathname }
+        : null;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -88,7 +91,7 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
             </NavLink>
           ))}
           {open && (
-            <NavLink to={open.to} className="rail-link" title={params.id ?? params.txid}>
+            <NavLink to={open.to} className="rail-link" title={params.id ?? params.txid ?? params.peer}>
               <span className="mono" style={{ fontSize: "var(--fs-small)" }}>{open.label}</span>
             </NavLink>
           )}

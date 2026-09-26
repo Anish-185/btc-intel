@@ -32,6 +32,8 @@ const ACTION_LABEL: Record<string, string> = {
   "redteam.inject": "red-team injection",
   "redteam.reset": "dataset restored",
   "monitor.arrival": "traffic arrived",
+  "lookup.peer_profile": "peer profile looked up",
+  "lookup.asn_profile": "ASN profile looked up",
 };
 
 export function Custody() {
@@ -201,6 +203,7 @@ function Detail({ entry }: { entry: CustodyEntry }) {
   say("quarantined");
   say("duplicates", "duplicate tx");
   if (d.entity_id) bits.push(String(d.entity_id).slice(0, 14) + "…");
+  if (d.subject) bits.push(`${d.subject}${d.found === false ? " (not found)" : ""}`);
   if (d.status) bits.push(String(d.status));
   if (d.typology) bits.push(String(d.typology));
   if (d.report_sha256) bits.push(`report ${String(d.report_sha256).slice(0, 10)}…`);

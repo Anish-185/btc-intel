@@ -1,7 +1,7 @@
 /** One transaction's broadcast: where it was seen, and the best guess at
  *  where it started — with the size of that guess stated plainly. */
 import { Suspense, lazy, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import type { ElementDefinition, LayoutOptions } from "cytoscape";
 import { api } from "../api/client";
 import { useApi } from "../lib/useApi";
@@ -9,7 +9,7 @@ import { ipClass } from "../lib/format";
 import { formatId } from "../lib/formatId";
 import { token } from "../lib/tokens";
 import { Chip, ErrorNote, Label, SkeletonRows, ValidityChip, validityLabel } from "../components/ui";
-import type { Propagation } from "../api/types";
+import type { Answer, Propagation } from "../api/types";
 import { Shell } from "../components/Shell";
 
 const FieldGraph = lazy(() =>
@@ -113,7 +113,13 @@ export function Transaction() {
                 <span className="label">observed propagation</span>
                 {data.runner_ups.length > 0 && (
                   <span className="label">
-                    runner-ups: {data.runner_ups.map((r) => r.ip).join(", ")}
+                    runner-ups:{" "}
+                    {data.runner_ups.map((r, i) => (
+                      <span key={r.ip}>
+                        {i > 0 && ", "}
+                        <Link to={peerLink(r.ip)}>{r.ip}</Link>
+                      </span>
+                    ))}
                   </span>
                 )}
               </div>
@@ -124,8 +130,74 @@ export function Transaction() {
             </div>
           </>
         )}
+        <CaptureOrigins txid={txid} />
       </section>
     </Shell>
+  );
+}
+
+const peerLink = (peer: string) => `/peers/${encodeURIComponent(peer)}`;
+
+/** The origination model's answer, once per capture this txid was seen in —
+ *  the same answers a peer profile's "originated" lists. */
+function CaptureOrigins({ txid }: { txid: string }) {
+  const { data, error } = useApi((signal) => api.origination(txid, signal), [txid]);
+  if (error || !data || data.captures.length === 0) return null;
+  return (
+    <div style={{ marginTop: "var(--sp-5)" }}>
+      <h2>Origination model, per capture</h2>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Capture · observer</th>
+              <th>Origin</th>
+              <th>Validity</th>
+              <th className="num">Probability</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.captures.map((c) => (
+              <tr key={c.capture_id}>
+                <td className="soft">
+                  {c.capture_id} · {c.observer} · {c.provenance}
+                </td>
+                <td>
+                  {c.answer ? (
+                    <AnswerCell answer={c.answer} />
+                  ) : (
+                    <span className="soft">withheld: {c.abstention_reason}</span>
+                  )}
+                </td>
+                <td>
+                  <ValidityChip validity={c.validity} />
+                </td>
+                <td className="num" title={c.calibration_basis}>{c.probability.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AnswerCell({ answer }: { answer: Answer }) {
+  if (answer.kind === "onion_identity") {
+    return (
+      <>
+        onion identity <Link className="mono" to={peerLink(answer.onion!)}>{answer.onion}</Link>
+      </>
+    );
+  }
+  const prefix = answer.kind === "broadcasting_peer"
+    ? "broadcasting peer (input ownership not attributable) "
+    : "peer ";
+  return (
+    <>
+      {prefix}
+      <Link className="mono" to={peerLink(answer.ip!)}>{answer.ip}</Link>
+    </>
   );
 }
 
@@ -150,7 +222,7 @@ function OriginStat({ data }: { data: Propagation }) {
         <h3>Onion identity</h3>
         <Label>Tor hidden service · not for IP-level follow-up</Label>
         <p className="mono" style={{ ...big, fontSize: "var(--fs-body)", wordBreak: "break-all" }}>
-          {answer.onion}
+          <Link to={peerLink(answer.onion!)}>{answer.onion}</Link>
         </p>
       </div>
     );
@@ -160,7 +232,7 @@ function OriginStat({ data }: { data: Propagation }) {
       <div className="stat">
         <h3>Broadcasting peer</h3>
         <Label>CoinJoin · input ownership not attributable</Label>
-        <p className="num" style={big}>{answer.ip}</p>
+        <p className="num" style={big}><Link to={peerLink(answer.ip!)}>{answer.ip}</Link></p>
       </div>
     );
   }
@@ -168,7 +240,7 @@ function OriginStat({ data }: { data: Propagation }) {
     <div className="stat">
       <h3>Estimated origin</h3>
       <Label>{ipClass(data.ip_class).label}</Label>
-      <p className="num" style={big}>{answer.ip}</p>
+      <p className="num" style={big}><Link to={peerLink(answer.ip!)}>{answer.ip}</Link></p>
     </div>
   );
 }

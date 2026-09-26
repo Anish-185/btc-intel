@@ -51,11 +51,54 @@ def isolate_custody_ledger(tmp_path_factory):
         yield sink
 
 
-def test_the_production_ledger_is_unreachable_from_the_suite(isolate_custody_ledger):
-    """The rail itself, asserted — a fixture that silently stopped working
-    would put the test noise back without anyone noticing until the demo."""
-    production = Path(config.load()["custody"]["ledger_path"]).resolve()
-    custody.record("ingest", {"rows": 1})
-    assert custody.ledger_path().resolve() != production
-    assert custody.read(), "the entry went somewhere, but not where it was asked to"
-    assert isolate_custody_ledger.exists()
+@pytest.fixture(scope="session", autouse=True)
+def isolate_stacker_model(tmp_path_factory):
+    """The same rail for the fitted stacker. `fusion.pipeline.run` saves it to
+    `fusion.model_path` whenever its dataset has ground truth, so every test
+    that runs the pipeline on a generated dataset was overwriting
+    models/stacker.joblib — which the red-team path and `eval.report` then
+    load. A suite run silently changed the canonical report's numbers."""
+    from fusion import pipeline
+
+    production = Path(config.load()["fusion"]["model_path"]).resolve()
+    sink = tmp_path_factory.mktemp("models") / "stacker.joblib"
+    original = pipeline.save
+
+    def redirected(stacker, path):
+        return original(stacker, sink if Path(path).resolve() == production else path)
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(pipeline, "save", redirected)
+        yield sink
+
+
+#: Every production artifact the suite could reach. Hashed when the session
+#: starts; tests/test_zz_artifacts.py checks them again at the end.
+ARTIFACTS = [
+    ("custody", "ledger_path"), ("fusion", "model_path"), ("fusion", "alerts_json"),
+    ("fusion", "alerts_parquet"), ("fusion", "feedback_parquet"),
+    ("ingest", "output_path"), ("ingest", "quarantine_path"),
+    ("features", "relay_path"), ("origination", "model_path"),
+    ("engines", "correlation"),
+]
+
+
+def artifact_paths() -> list[Path]:
+    cfg = config.load()
+    paths = []
+    for block, key in ARTIFACTS:
+        value = cfg[block][key]
+        paths.append(Path(value["output_path"] if isinstance(value, dict) else value))
+    return paths
+
+
+def artifact_hashes() -> dict[str, str | None]:
+    import hashlib
+    return {str(p): hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
+            for p in artifact_paths()}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def artifacts_at_start():
+    return artifact_hashes()
+

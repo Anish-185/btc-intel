@@ -319,6 +319,27 @@ Same test transactions for every row. `off`: no validity layer. `binary`: P6's g
 
 **Verdict (variant, cross-topology): the revised layer beats no-validity on the revised metric only** — 0.053 against 0.028; on the P6 metric it scores 0.057 against 0.057. As pre-registered, that is reported as exactly this and not as an unqualified improvement: the difference comes from pricing the CoinJoin ownership claim, not from the policy answering better by P6's measure. P6's binary gate, rescored on the same transactions: revised 0.037, P6 metric 0.037.
 
+### Why each answer was withheld
+
+Every abstention, by the one reason code `eval.origin.abstention_reasons` gives it — the validity verdict's leading reason when its tier is withheld, then `RELAY_AT_TOP` (a listed public relay ranked first), then `BELOW_CUTOFF` (calibrated confidence under the policy's cutoff). Same frames and revised-metric cutoffs as the table above; the codes sum to `abstained`, so coverage (1 − abstention rate) is explained next to `acc if answered`.
+
+| condition | corpus | test set | policy | n | abstained | abstention rate | acc if answered | DEGENERATE | NOT_REACHABLE | COINJOIN | TOR_ONION | DANDELION_STEM | V2_PASSIVE_TAP | RELAY_AT_TOP | BELOW_CUTOFF |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| simulated | variant | within-topology | off | 12223 | 10878 | 0.890 | 0.924 | 0 | 0 | 0 | 0 | 0 | 0 | 1125 | 9753 |
+| simulated | variant | within-topology | binary | 12223 | 11337 | 0.928 | 0.903 | 1107 | 914 | 878 | 153 | 625 | 0 | 93 | 7567 |
+| simulated | variant | within-topology | tiered | 12223 | 10842 | 0.887 | 0.919 | 1107 | 914 | 0 | 0 | 0 | 0 | 118 | 8703 |
+| simulated | variant | cross-topology | off | 19250 | 17073 | 0.887 | 0.903 | 0 | 0 | 0 | 0 | 0 | 0 | 1768 | 15305 |
+| simulated | variant | cross-topology | binary | 19250 | 17798 | 0.925 | 0.873 | 1482 | 1446 | 1340 | 308 | 968 | 0 | 167 | 12087 |
+| simulated | variant | cross-topology | tiered | 19250 | 17029 | 0.885 | 0.900 | 1482 | 1446 | 0 | 0 | 0 | 0 | 221 | 13880 |
+| simulated | base | within-topology | off | 12279 | 10007 | 0.815 | 0.915 | 0 | 0 | 0 | 0 | 0 | 0 | 987 | 9020 |
+| simulated | base | within-topology | binary | 12279 | 10136 | 0.825 | 0.907 | 1305 | 808 | 0 | 0 | 521 | 0 | 86 | 7416 |
+| simulated | base | within-topology | tiered | 12279 | 10007 | 0.815 | 0.915 | 1305 | 808 | 0 | 0 | 0 | 0 | 91 | 7803 |
+| simulated | base | cross-topology | off | 19414 | 15681 | 0.808 | 0.906 | 0 | 0 | 0 | 0 | 0 | 0 | 1599 | 14082 |
+| simulated | base | cross-topology | binary | 19414 | 15855 | 0.817 | 0.896 | 1802 | 1380 | 0 | 0 | 815 | 0 | 120 | 11738 |
+| simulated | base | cross-topology | tiered | 19414 | 15681 | 0.808 | 0.906 | 1802 | 1380 | 0 | 0 | 0 | 0 | 129 | 12370 |
+
+*`condition="simulated"`.* The simulator omits: Bitcoin Core's per-peer Poisson INV trickling (one exponential delay per hop stands in for it), clock skew between observers, inbound/outbound connection asymmetry, peer churn during a capture, re-announcement, wtxid relay, user agents and real GeoIP; senders keep one address and one peer set for a whole capture, and the share of senders connected directly to an observer is a sampled parameter, not a measurement. The validity variant adds, per capture: a Dandelion stem phase in BIP-156's shape (serial single-peer forwarding for a geometrically drawn number of hops, then an ordinary broadcast; the stem successor is drawn fresh per hop rather than from two per-epoch destinations, stem hops use the ordinary per-hop delay, and there is no embargo timer), senders reachable only over Tor (one uniform circuit latency on their first hop, entry only through mixed-transport nodes), BIP-324 v2 links (a label only: the simulated v2 link is timed like v1), and CoinJoin and equal-value batch-payout transaction shapes. Onion traffic between two relays, Tor latency on later hops, and Dandelion++'s per-epoch routing remain unsimulated.
+
 ### Verdicts by tier
 
 | condition | corpus | test set | tier | transactions | reasons fired |

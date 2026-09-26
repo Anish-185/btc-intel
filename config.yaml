@@ -26,6 +26,11 @@ ingest:
   output_path: data/processed/transactions.parquet
   timestamp_unit: iso    # s | ms | iso
   list_separator: ";"    # how list fields are packed into a single CSV cell
+  # Where output_path's rows came from: simulated | real. Nothing in a relay
+  # log says whether it was generated, so it is declared here and a peer
+  # profile built from it states it in its header. The demo dataset is
+  # generator/ output; set `real` only for an actual case dataset.
+  provenance: simulated
 
 intel:
   # Public IP intelligence, fetched once by offline/fetch_intel.sh. Read from
@@ -274,6 +279,18 @@ engines:
     shared_ip:
       free_entities: 3          # an IP tied to this many clusters is not penalised
       min_factor: 0.02          # floor, so a link is weakened but never erased
+
+    # The reverse direction: peer -> behavioural profile (profile.py).
+    profile:
+      # Below this many announcements a peer gets no timing signature, only a
+      # sentence saying so. Rationale: the standard error of an inter-arrival
+      # standard deviation is about sd/sqrt(2(n-1)) — 16% at 20 announcements,
+      # 50% at 3 — and an active-hours histogram over 24 bins from fewer than
+      # 20 events is mostly empty bins, which reads as a schedule it is not.
+      # Fixed from that arithmetic, not tuned on any profile.
+      min_timing_observations: 20
+      relayed_sample: 10          # relayed transactions listed; the rest are counted
+      evidence_rows: 20           # raw rows listed per linked cluster; the rest counted
 
 risk_weights:
   rules: 0.35

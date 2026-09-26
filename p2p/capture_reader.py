@@ -72,6 +72,7 @@ class RelayEvent:
     capture_source: str                  # "<format>:<file name>"
     transport: str | None = None         # v1 | v2 (BIP-324) | None when unknown
     unreadable_flows: int | None = None  # pcap only: port-8333 flows never decoded
+    services: int | None = None          # the peer's version-message service bits
 
 
 #: `transport` is known from bitcoind's connect line ("transport: v2", Core
@@ -81,6 +82,11 @@ class RelayEvent:
 #: their bytes never decode — so it records `unreadable_flows` instead: flows
 #: on the P2P port that carried payload and never yielded a message. That count
 #: is the evidence behind V2_PASSIVE_TAP.
+#:
+#: `services` is the service-flag field of the peer's `version` message: decoded
+#: from a pcap, or a .btcap field. bitcoind's debug.log never writes it (the
+#: version line carries only the user agent), so a debug.log capture leaves it
+#: None — unknown, not zero.
 #:
 #: `monotonic_or_derived_ts` is the capture's own clock: a monotonic reading when
 #: the source supplies one (.btcap may), otherwise seconds since the first event
@@ -461,12 +467,15 @@ def parse_pcap(path: Path, cfg: dict | None = None,
     ours = _local_ip(buffers.keys(), local_ips)
     events: list[RelayEvent] = []
     pairs: dict[str, str] = {}
+    handshakes: dict[str, tuple[str | None, int]] = {}
     source = f"pcap:{path.name}"
     for ts, (src, dst, sport, dport), command, payload in decoded:
         inbound = src not in ours
         peer_ip, peer_port = (src, sport) if inbound else (dst, dport)
         direction = "inbound" if inbound else "outbound"
-        if command == "inv":
+        if command == "version" and inbound and (hello := _version_fields(payload)):
+            handshakes[peer_ip] = hello
+        elif command == "inv":
             for kind, digest in _inv_entries(payload):
                 events.append(RelayEvent(
                     digest, peer_ip, peer_port, None, None, ts, None,
@@ -484,9 +493,25 @@ def parse_pcap(path: Path, cfg: dict | None = None,
     unreadable = len(set(buffers) - readable)
     for event in events:
         event.unreadable_flows = unreadable
+        event.user_agent, event.services = handshakes.get(event.peer_ip, (None, None))
     _resolve_wtxids(events, pairs)
     _derive_clock(events)
     return events
+
+
+def _version_fields(payload: bytes) -> tuple[str | None, int] | None:
+    """(user agent, services) from a `version` payload: int32 version, uint64
+    services, int64 time, two 26-byte addresses, uint64 nonce, then the user
+    agent as a var_str at offset 80."""
+    if len(payload) < 81:
+        return None
+    services = int.from_bytes(payload[4:12], "little")
+    try:
+        length, i = _varint(payload, 80)
+    except IndexError:
+        return None, services
+    agent = payload[i:i + length].decode("utf-8", errors="replace") or None
+    return agent, services
 
 
 def _inv_entries(payload: bytes) -> list[tuple[int, str]]:
@@ -510,7 +535,8 @@ def _inv_entries(payload: bytes) -> list[tuple[int, str]]:
 _ALIASES = {"time": "wall_clock_ts", "timestamp": "wall_clock_ts", "ts": "wall_clock_ts",
             "monotonic": "monotonic_or_derived_ts", "monotonic_ts": "monotonic_or_derived_ts",
             "ip": "peer_ip", "port": "peer_port", "command": "message_type",
-            "subver": "user_agent", "hash": "txid"}
+            "subver": "user_agent", "hash": "txid",
+            "service_flags": "services"}
 
 
 def parse_btcap(path: Path, cfg: dict | None = None) -> list[RelayEvent]:
@@ -549,11 +575,22 @@ def parse_btcap(path: Path, cfg: dict | None = None) -> list[RelayEvent]:
                 message_type=str(row["message_type"]),
                 direction=str(row.get("direction") or "inbound"),
                 capture_source=str(row.get("capture_source") or source),
-                transport=row.get("transport")))
+                transport=row.get("transport"),
+                services=_services(row.get("services"))))
     if skipped:
         log.warning("%s: %d unusable line(s) skipped", path.name, skipped)
     _derive_clock(events)
     return events
+
+
+def _services(value) -> int | None:
+    """An integer, or the hex string some collectors write (`"0x409"`)."""
+    if value is None or value == "":
+        return None
+    try:
+        return int(value, 0) if isinstance(value, str) else int(value)
+    except ValueError:
+        return None
 
 
 def _epoch(value) -> float | None:

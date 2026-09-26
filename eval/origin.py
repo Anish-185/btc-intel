@@ -140,6 +140,38 @@ def flagged_at(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None) -> p
     return flagged
 
 
+#: Why `flagged_at` withheld an answer, when the reason is not a validity code.
+RELAY_AT_TOP = "RELAY_AT_TOP"          # a known public relay ranked first
+BELOW_CUTOFF = "BELOW_CUTOFF"          # calibrated confidence under the chosen cutoff
+
+
+def abstention_reasons(frame: pd.DataFrame, cfg: dict,
+                       cutoff: float | None = None) -> pd.Series:
+    """One reason code per row `flagged_at` flags, None where it answers.
+
+    The same three clauses, in severity order, so each abstention is counted
+    once: the validity verdict's leading reason when its tier is withheld
+    (DEGENERATE, NOT_REACHABLE; any non-PASS reason in binary mode), then
+    RELAY_AT_TOP, then BELOW_CUTOFF. `notna()` of this equals `flagged_at`.
+    """
+    p = cfg["engines"]["propagation"]
+    cut = p["low_confidence_cutoff"] if cutoff is None else cutoff
+    tiers = frame["validity_tier"] if "validity_tier" in frame else [validity.PASS] * len(frame)
+    leads = frame["validity"] if "validity" in frame else [validity.PASS] * len(frame)
+    out = []
+    for tier, lead, ip_class, confidence in zip(tiers, leads, frame["ip_class"],
+                                                frame["confidence"]):
+        if validity.withholds(tier, cfg):
+            out.append(lead)
+        elif ip_class in p["low_confidence_classes"]:
+            out.append(RELAY_AT_TOP)
+        elif confidence < cut:
+            out.append(BELOW_CUTOFF)
+        else:
+            out.append(None)
+    return pd.Series(out, index=frame.index, dtype=object)
+
+
 def outcomes(frame: pd.DataFrame, cfg: dict, cutoff: float | None = None,
              metric: str = "revised") -> pd.Series:
     """One outcome per estimate, per docs/detection_unit_protocol.md and the

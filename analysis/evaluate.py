@@ -163,6 +163,31 @@ def withheld_table(frame: pd.DataFrame, cuts: dict, cfg: dict, corpus_name: str,
     return pd.DataFrame(rows)
 
 
+#: Every code `eval.origin.abstention_reasons` can return, in its order.
+ABSTENTION_CODES = (*validity.REASONS, origin_eval.RELAY_AT_TOP, origin_eval.BELOW_CUTOFF)
+
+
+def abstention_breakdown(frame: pd.DataFrame, cuts: dict, cfg: dict, corpus_name: str,
+                         label: str) -> list[dict]:
+    """Why each policy withheld what it withheld, one count per reason code, at
+    the same (revised-metric) cutoff as `policy_rows`' abstention rate — so the
+    codes sum to the abstentions and coverage is explained beside accuracy."""
+    rows = []
+    for p in POLICIES:
+        pcfg = with_cutoff(policy(cfg, p), cuts[(p, "revised")])
+        reasons = origin_eval.abstention_reasons(frame, pcfg)
+        kept = frame[reasons.isna()]
+        counts = reasons.value_counts()
+        rows.append({
+            "condition": "simulated", "corpus": corpus_name, "test set": label,
+            "policy": p, "n": len(frame), "abstained": int(reasons.notna().sum()),
+            "abstention rate": round(float(reasons.notna().mean()), 3) if len(frame) else None,
+            "acc if answered": round(float(kept["correct"].mean()), 3) if len(kept) else None,
+            **{code: int(counts.get(code, 0)) for code in ABSTENTION_CODES},
+        })
+    return rows
+
+
 def tier_counts(frame: pd.DataFrame, corpus_name: str, label: str) -> list[dict]:
     reasons = frame["validity_reasons"].explode().dropna().value_counts()
     return [{"condition": "simulated", "corpus": corpus_name, "test set": label,
@@ -180,15 +205,16 @@ def score_corpus(result: dict, cfg: dict, name: str) -> dict:
     calibration = label_coinjoins(
         model.decide(parts["calibration"], truth, cfg, result["shapes"]), mixes)
     cuts = cutoffs(calibration, cfg)
-    systems, withheld, tiers = [], [], []
+    systems, withheld, tiers, abstentions = [], [], [], []
     for role, label in TEST_SETS.items():
         frame = result["decided"][role]
         systems += policy_rows(frame, cuts, cfg, name, label)
         withheld.append(withheld_table(frame, cuts, cfg, name, label))
         tiers += tier_counts(frame, name, label)
+        abstentions += abstention_breakdown(frame, cuts, cfg, name, label)
     return {"systems": pd.DataFrame(systems),
             "withheld": pd.concat(withheld, ignore_index=True),
-            "tiers": pd.DataFrame(tiers)}
+            "tiers": pd.DataFrame(tiers), "abstentions": pd.DataFrame(abstentions)}
 
 
 def run(cfg: dict | None = None, rebuild: bool = False, base: dict | None = None) -> dict:
@@ -221,6 +247,7 @@ def run(cfg: dict | None = None, rebuild: bool = False, base: dict | None = None
             "base_corpus": base["corpus"] if base else None,
             "precision_recall": pd.DataFrame(pr), "systems": joined("systems"),
             "withheld": joined("withheld"), "tiers": joined("tiers"),
+            "abstentions": joined("abstentions"),
             "base_false_alarms": false_alarms, "omissions": OMISSIONS}
 
 
@@ -351,6 +378,14 @@ def section(result: dict, md_table) -> str:
         "\n#### Base corpus (no invalidating condition simulated)\n\n",
         md_table(systems[systems["corpus"] == "base"]), _omitted(om),
         "\n" + verdict(result) + "\n",
+        ("\n### Why each answer was withheld\n\n"
+        "Every abstention, by the one reason code `eval.origin.abstention_reasons` gives "
+        "it — the validity verdict's leading reason when its tier is withheld, then "
+        "`RELAY_AT_TOP` (a listed public relay ranked first), then `BELOW_CUTOFF` "
+        "(calibrated confidence under the policy's cutoff). Same frames and "
+        "revised-metric cutoffs as the table above; the codes sum to `abstained`, so "
+        "coverage (1 − abstention rate) is explained next to `acc if answered`.\n\n"),
+        md_table(result["abstentions"]), _omitted(om),
         "\n### Verdicts by tier\n\n", md_table(result["tiers"]), _omitted(om),
         "\n### What each reason fires on, and what the answers were (P6's table, again)\n\n"
         "At the layer-off policy's P6-metric cutoff, P6's method exactly: the "

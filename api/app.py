@@ -40,7 +40,9 @@ from analysis.validity import NOT_ASSESSED
 from engines.propagation.estimators import CALIBRATION_BASIS, estimate_origin
 from graph.builder import iter_transactions
 from engines.propagation.tree import build_trees, degraded_mode
+from engines.correlation import profile as correlation_profile
 from engines.rules.detectors import FeatureSet
+from origination.model import OriginationModel
 from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
 from ingest.ip_intel import load_intel
 
@@ -89,13 +91,16 @@ def _commit() -> str:
 # Where the API reads from. Defaults come from config.yaml; configure() points
 # the app at another set of artefacts (a second case, or a test fixture).
 STATE: dict = {"transactions": None, "intel_dir": None, "alerts_json": None,
-               "feedback": None}
+               "feedback": None, "relay": None, "model": None}
 
 
 def configure(transactions=None, node_intel=None, alerts_json=None,
-              feedback=None) -> None:
+              feedback=None, relay=None, model=None) -> None:
+    """`relay` and `model` are the relay matrix and origination model the peer
+    profiles read; None means config.yaml's paths."""
     STATE.update({"transactions": transactions, "intel_dir": node_intel,
-                  "alerts_json": alerts_json, "feedback": feedback})
+                  "alerts_json": alerts_json, "feedback": feedback,
+                  "relay": relay, "model": model})
     invalidate()
 
 
@@ -105,7 +110,7 @@ def invalidate() -> None:
     Called when the artefacts change under us — a red-team injection, or a
     reset — so the next request rebuilds rather than serving the old case.
     """
-    for cached in (_transactions, _intel, _features):
+    for cached in (_transactions, _intel, _features, _profiles):
         cached.cache_clear()
     BUNDLE.clear()
 
@@ -132,6 +137,21 @@ def _features() -> tuple:
     cfg = config.load()
     graph = build_graph(_transactions(), cfg)
     return graph, FeatureSet.from_graph(graph, cfg)
+
+
+@lru_cache(maxsize=1)
+def _profiles() -> correlation_profile.Sources:
+    """The reverse direction's inputs: the hop dataset this API serves, the
+    relay matrix, and the origination model's answers over it. Built once."""
+    cfg = config.load()
+    try:
+        df = _transactions()
+    except FileNotFoundError:
+        df = None
+    graph_features = _features()[1] if df is not None else None
+    matrix = pd.read_parquet(STATE["relay"]) if STATE["relay"] else None
+    model = OriginationModel.load(STATE["model"]) if STATE["model"] else None
+    return correlation_profile.build_sources(cfg, df, matrix, model, graph_features, _intel())
 
 
 # The full signal bundle: every engine's output for every entity. Built on
@@ -172,7 +192,7 @@ def commit_bundle(updated: dict) -> None:
             "alerts": json.loads(alerts.to_json(orient="records")),
         }
         Path(cfg["fusion"]["alerts_json"]).write_text(json.dumps(payload, indent=2))
-    for cached in (_transactions, _intel, _features):
+    for cached in (_transactions, _intel, _features, _profiles):
         cached.cache_clear()
     BUNDLE.clear()
     BUNDLE.update(updated)
@@ -371,6 +391,7 @@ def entity(entity_id: str) -> dict:
         "caveat": ("scores rank leads for a human; an entity without an alert is not "
                    "cleared, only unremarkable"),
     }
+
 
 
 def subgraph(entity_id: str, hops: int) -> dict:
@@ -635,6 +656,50 @@ def propagation(txid: str) -> dict:
         "layout": {"name": "dagre", "roots": [estimate.ip] if estimate.ip else []},
         "elements": {"nodes": nodes, "edges": edges},
     }
+
+
+@app.get("/transactions/{txid}/origination")
+def origination(txid: str) -> dict:
+    """The origination model's answer for this txid, once per capture it was
+    seen in. The same frame a peer profile's `originated` reads, so every
+    transaction a profile claims shows the same peer here."""
+    answers = correlation_profile.transaction_origination(txid, _profiles())
+    return {"txid": txid, "captures": answers,
+            "note": None if answers else "no capture in the relay matrix contains this txid"}
+
+
+# --- the reverse direction: peer -> profile -------------------------------
+def _lookup_record(kind: str, subject: str, profile: dict | None) -> dict:
+    """Every profile lookup goes in the custody ledger, found or not: which
+    peers an investigation asked about is itself part of the record."""
+    return custody.record(f"lookup.{kind}_profile", {
+        "subject": subject, "found": profile is not None,
+        "simulated_only": (profile or {}).get("header", {}).get("simulated_only"),
+        "files": _evidence_seal()["files"]})
+
+
+@app.get("/peers/{peer}/profile")
+def peer_profile(peer: str) -> dict:
+    """What one peer — an IP or an onion identity — did on the network."""
+    peer = peer.strip()
+    profile = correlation_profile.peer_profile(peer, _profiles())
+    entry = _lookup_record("peer", peer, profile)
+    if profile is None:
+        raise HTTPException(404, f"peer {peer} is not in any capture or the relay-hop dataset")
+    return {**profile, "custody": {"seq": entry.get("seq")}}
+
+
+@app.get("/asns/{asn}/profile")
+def asn_profile(asn: str) -> dict:
+    """Every peer seen in an ASN, aggregated, with the per-peer breakdown."""
+    digits = asn.upper().removeprefix("AS")
+    if not digits.isdigit():
+        raise HTTPException(422, "an ASN is a number, optionally prefixed AS")
+    profile = correlation_profile.asn_profile(int(digits), _profiles())
+    entry = _lookup_record("asn", f"AS{int(digits)}", profile)
+    if profile is None:
+        raise HTTPException(404, f"no peer seen in AS{int(digits)}")
+    return {**profile, "custody": {"seq": entry.get("seq")}}
 
 
 # The investigation graph endpoints, sharing this module's cached graph and
