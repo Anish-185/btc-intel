@@ -195,3 +195,147 @@ them.
   simulator's profiles, not real wallets. On it, 81 of 1247 are unknown and
   0.851 are right when answered; typology transactions carry fewer tells than
   ordinary payments, as above.
+
+## Open-set revision
+
+*Pre-registered on 2026-09-26, committed before any novelty-detection code was
+written or any revised figure computed. The P8.1 figures below are the only
+LOPO results seen so far. Later changes to this section are marked as
+amendments; nothing here is edited to fit a result.*
+
+### Why
+
+P8.1's leave-one-profile-out evaluation (§12 of `eval/results.md`) fits the
+classifier on four profiles and asks about the fifth. Pooled over the five
+hold-outs, 0.948 of held-out transactions got a known family's name with all
+tells and 0.994 with structure only. The only abstention rules were ambiguity
+between known families (calibrated confidence under 0.6) and too few tells
+(under 4). Naive Bayes posteriors are relative: they say which known family
+explains a transaction least badly, never whether any of them explains it.
+
+P8.1 LOPO, kept as the baseline (cross-topology test rows of the held-out
+profile; the model fitted and calibrated without it):
+
+| held-out profile | condition | transactions | unknown | confidently mislabelled | confident-mislabel rate |
+| --- | --- | --- | --- | --- | --- |
+| core_like | full | 7909 | 0 | 7909 | 1.000 |
+| core_like | structural | 7909 | 0 | 7909 | 1.000 |
+| electrum_like | full | 5659 | 0 | 5659 | 1.000 |
+| electrum_like | structural | 5659 | 0 | 5659 | 1.000 |
+| legacy_naive | full | 4544 | 1131 | 3413 | 0.751 |
+| legacy_naive | structural | 4544 | 138 | 4406 | 0.970 |
+| coordinator_coinjoin | full | 1602 | 0 | 1602 | 1.000 |
+| coordinator_coinjoin | structural | 1602 | 0 | 1602 | 1.000 |
+| batch_withdrawal | full | 2044 | 7 | 2037 | 0.997 |
+| batch_withdrawal | structural | 2044 | 0 | 2044 | 1.000 |
+| all (pooled) | full | 21758 | 1138 | 20620 | 0.948 |
+| all (pooled) | structural | 21758 | 138 | 21620 | 0.994 |
+
+### 1. The novelty detector
+
+**Score: the named family's worst-supported tell.** Let ŷ be the family the
+classifier ranks first. For each observed tell t with value v, the surprisal
+is `-log p(v | ŷ)`. Here `p` is the classifier's own Laplace-smoothed
+per-family frequency from the training rows, with an unseen value counted as
+one extra category. The novelty score is the largest surprisal over the
+observed tells:
+
+    s(x) = max_t  -log p(x_t | ŷ)
+
+**Why this one.** It is a per-family distance to training support: it asks
+whether the family we are about to name ever produces every tell this
+transaction shows. A different construction shows up as one or two tells
+the named family essentially never produces: another fee policy, a script
+type it never spends, BIP-69 order from a wallet that never sorts. A maximum
+catches that single tell; the joint likelihood would average it away among
+the ordinary tells. The joint likelihood also shrinks with the number of
+observed tells, so one threshold could not serve both the full and the
+structural condition. The score is checked against the family being named,
+not the best-fitting one, because the question is whether *this label* is
+supported. It needs nothing but the fitted counts, so it adds no model and no
+dependency.
+
+**Fitted on training profiles only.** The per-family frequencies come from
+the training rows of the profiles the model knows. In a LOPO fold, the
+held-out profile appears in neither the counts nor the threshold's
+validation rows.
+
+**Threshold-selection rule, fixed now.** θ is set separately for each
+condition (`full`, `structural`, each on its own view of the rows). It is
+the 99th percentile of `s` over the validation split, which is the
+`calibration`-role rows of the known profiles: the same rows the isotonic
+maps are fitted on, and never test rows. A transaction is novel if
+`s(x) > θ`. The target is fixed at no more than 1% of in-distribution
+validation transactions flagged novel. It is chosen for its in-distribution
+cost and will not be moved after any LOPO or test result is seen. θ is
+stored in the model file with the fitted counts.
+
+**Decision.** The answer is `unknown` if the transaction is novel, OR if
+calibrated confidence is under `unknown_below` (0.6, unchanged), OR if it
+shows fewer than `min_tells` (4, unchanged). The answer states which of the
+three applied.
+
+### 2. Vocabulary
+
+The labels describe how a transaction was built, not which software built it.
+What a reader sees changes to:
+
+| key (unchanged) | label shown |
+| --- | --- |
+| `core_like` | Core-like construction |
+| `electrum_like` | Electrum-like construction |
+| `legacy_naive` | legacy/naive construction |
+| `coordinator_coinjoin` | coordinator CoinJoin shape |
+| `batch_withdrawal` | batch-withdrawal shape |
+
+The keys stay as they are. They are the generator's profile names, and
+renaming them would change every cached corpus's identity and the ground truth
+format for no change in meaning. Every surface that shows a label (the API
+answer, the TXID page, the entity page, peer profiles, this document) also
+carries one statement: *the label describes how the transaction was built,
+not which software built it.*
+
+### 3. Scoring held-out profiles
+
+Each held-out transaction lands in exactly one of three outcomes:
+
+1. **unknown**: the right answer for a construction never seen.
+2. **shared pattern**: labelled with a known pattern K whose defining tells it
+   genuinely shows.
+3. **harmful mislabel**: labelled with a known pattern K while contradicting
+   at least one of K's defining tells.
+
+**Defining tells**, from data the model is allowed to see: a (tell, value) pair
+is defining for K if, among K's training rows where the tell is observed, that
+value occurs in at least 80% of them. The fold that holds a profile out
+computes K's defining tells from K's own training rows only.
+
+**Shares.** A transaction labelled K shares K's pattern if, for every defining
+tell of K that the transaction observes, it shows K's defining value. It must
+observe at least one of them. Otherwise, or on any contradiction, the label is
+a harmful mislabel. The test uses only the generated tells and the training
+frequencies, never the classifier's scores or the novelty score, so it grades
+the decision independently. (A "shares" rule based on the model's own
+likelihood would pass anything the novelty check passed.)
+
+**Headline:** the pooled harmful-mislabel rate, with all tells. It is reported
+beside the structural rate, per held-out profile, and beside P8.1's model
+scored by the same three outcomes.
+
+### 4. Downstream
+
+A fingerprint mismatch lowers a merge's confidence only when both sides are
+confident, in-distribution labels. A side answered `unknown`, for any of the
+three reasons, has no effect.
+
+### 5. What gets reported, and what follows
+
+§12 gets the revised LOPO table beside P8.1's, plus the in-distribution cost
+of the novelty check: accuracy when answered and the unknown rate on the
+known-profile test sets, with and without it.
+
+**Display rule, fixed now.** If the pooled harmful-mislabel rate with all
+tells is above 0.10, the console's fingerprint display goes behind a config
+flag, `features.fingerprint.console_display`, defaulting to off. §12 then
+says so plainly. The API keeps answering either way, since what is computed
+is not in question, only whether a reader sees it by default.
