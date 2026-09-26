@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import config
@@ -150,6 +151,85 @@ def test_an_ingest_without_construction_fields_has_exactly_the_old_columns(tmp_p
         load(tmp_path / "t.parquet").columns)
 
 
+
+@pytest.fixture(scope="module")
+def typology_pair(tmp_path_factory):
+    """One seed generated twice, profiles off and on, ingested."""
+    from generator.main import build_parser, generate
+    from ingest.pipeline import run as ingest_run
+    out = {}
+    for name, extra in (("plain", []), ("profiled", ["--wallet-profiles"])):
+        d = tmp_path_factory.mktemp(name)
+        generate(build_parser().parse_args([
+            "--n-actors", "120", "--n-transactions", "900", "--output", str(d),
+            "--seed", "6", "--formats", "csv", *extra]), CFG)
+        ingest_run(d / "transactions.csv", d / "t.parquet", d / "q.parquet", "csv",
+                   record_custody=False)
+        out[name] = d
+    return out
+
+
+def test_peel_chain_detection_is_the_same_with_profiles_on(typology_pair):
+    """Profiles on a peel chain move no amount and no chained address, so the
+    detector walks the same hops to the same alerts. Ordinary payments do get
+    fee and change tells, so a run of them that only happened to look
+    peel-shaped may not survive; those chains are not the typology's."""
+    from engines.rules.detectors import FeatureSet, detect_peel_chain
+    from graph.builder import build_graph, load
+    gt = json.loads((typology_pair["plain"] / "ground_truth.json").read_text())["transactions"]
+
+    def peels(d):
+        g = build_graph(load(d / "t.parquet"), CFG)
+        return sorted((tuple(a.evidence), a.score, a.reason)
+                      for a in detect_peel_chain(FeatureSet.from_graph(g, CFG), g, CFG)
+                      if any(gt[t]["pattern"] != "normal" for t in a.evidence))
+
+    plain, profiled = peels(typology_pair["plain"]), peels(typology_pair["profiled"])
+    assert plain, "the dataset has no peel chain to compare"
+    assert profiled == plain
+
+
+def test_typology_transactions_record_which_tells_they_got(typology_pair):
+    from generator.main import NEUTRAL_TELLS
+    gt = json.loads((typology_pair["profiled"] / "ground_truth.json").read_text())["transactions"]
+    plain = json.loads((typology_pair["plain"] / "ground_truth.json").read_text())["transactions"]
+    rows = {r["txid"]: r for r in pd.read_parquet(typology_pair["plain"] / "t.parquet")
+            .drop_duplicates("txid").to_dict("records")}
+    got = {r["txid"]: r for r in pd.read_parquet(typology_pair["profiled"] / "t.parquet")
+           .drop_duplicates("txid").to_dict("records")}
+    typology = [t for t, m in gt.items() if m["pattern"] != "normal"]
+    assert typology and set(gt) == set(plain)
+    for txid in typology:
+        tells = gt[txid]["wallet_tells"]
+        assert set(NEUTRAL_TELLS) <= set(tells["applied"])
+        assert {"fee", "change_type"} <= set(tells["skipped"])
+        a, b = rows[txid], got[txid]
+        assert a["fee"] == b["fee"]
+        assert sorted(zip(a["output_addresses"], a["output_amounts"])) == sorted(
+            zip(b["output_addresses"], b["output_amounts"]))
+        assert sorted(a["input_amounts"]) == sorted(b["input_amounts"])
+        if "script_type" not in tells["applied"]:
+            assert sorted(a["input_addresses"]) == sorted(b["input_addresses"])
+    assert any("script_type" in gt[t]["wallet_tells"]["applied"] for t in typology)
+    normal = [m["wallet_tells"] for m in gt.values() if m["pattern"] == "normal"]
+    assert normal and all("fee" in t["applied"] for t in normal)
+
+
+def test_an_injection_into_a_profiled_dataset_is_profiled_and_ingests(typology_pair, tmp_path):
+    import shutil
+
+    from generator.inject import inject_pattern
+    from ingest.pipeline import run as ingest_run
+    d = tmp_path / "d"
+    shutil.copytree(typology_pair["profiled"], d)
+    res = inject_pattern(d, "ransomware_collector", {"n_counterparties": 10}, seed=99)
+    gt = json.loads((d / "ground_truth.json").read_text())["transactions"]
+    assert all("fee" in gt[t]["wallet_tells"]["skipped"] for t in res["txids"])
+    summary = ingest_run(d / "transactions.csv", d / "t.parquet", d / "q.parquet", "csv",
+                         record_custody=False)
+    assert summary["quarantined"] == 0
+    assert set(res["txids"]) <= set(pd.read_parquet(d / "t.parquet")["txid"])
+
 # --- 2. every tell can fire and can fail ------------------------------------------------
 P2WPKH = [f"bc1q{i:038x}" for i in range(1, 9)]
 P2PKH = [f"1{i:033x}" for i in range(1, 9)]
@@ -224,6 +304,19 @@ def test_the_answer_is_ranked_calibrated_or_unknown(model, profiled_truth):
     assert {r["label"] for r in answer["ranked"]} == set(F.LABELS)
     assert answer["label"] in {*F.LABELS, F.UNKNOWN}
 
+
+
+def test_leave_one_profile_out_never_names_the_held_out_profile(profiled_truth):
+    truth = pd.DataFrame(profiled_truth)
+    truth["_tells"] = [F.tells(F.View.of_record(r)) for r in profiled_truth]
+    truth["role"] = [("train", "calibration", "cross_test")[i % 3] for i in range(len(truth))]
+    table = F.leave_one_profile_out(truth, CFG)
+    per = table[table["held-out profile"] != "all (pooled)"]
+    assert set(per["held-out profile"]) == set(F.LABELS)
+    assert (per["most often named"] != per["held-out profile"]).all()
+    assert (per["unknown"] + per["confidently mislabelled"] == per["transactions"]).all()
+    pooled = table[table["held-out profile"] == "all (pooled)"].set_index("condition")
+    assert pooled.loc["full", "transactions"] == (truth["role"] == "cross_test").sum()
 
 def test_too_few_tells_is_unknown_whatever_the_score(model):
     sparse = dict.fromkeys(F.TELLS)

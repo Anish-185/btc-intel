@@ -66,8 +66,7 @@ of the evidence and never counted as a vote.
   confidence its meaning. There are two conditions:
   * `full`: the tells a raw transaction shows.
   * `structural`: version, nLockTime and nSequence masked. This is what a
-    relay log in the NTRO schema carries, and what the served demo dataset
-    carries.
+    relay log in the NTRO schema carries.
 
   A transaction is calibrated under the condition it actually shows, because a
   structure-only guess is a different and weaker measurement.
@@ -102,9 +101,20 @@ paths use it:
   construction columns are written to CSV, JSON and XML, and
   `ground_truth.json` records `wallet_profile` per transaction. The batch
   profile does not arise on this path, because its typologies never build a
-  batch. Rebuilding recomputes change values and may pay change back to an
-  input address, so peel-chain amounts and addresses no longer chain exactly.
-  Do not evaluate peel-chain detection on a profiled dataset.
+  batch. An ordinary payment gets every tell. A typology transaction (peel
+  chain, layering, collector payments, CoinJoin) gets only the tells that move
+  no amount and rename no chained address: version, nLockTime, nSequence and
+  input/output order (a hop spends an address, not an output index), plus the
+  input script type when its inputs are one-off wallets no other transaction
+  touches. Fee rounding, dust dropping and paying change back to an input are
+  skipped: the next hop spends those outputs. `ground_truth.json` records per
+  transaction `wallet_tells.applied` and `wallet_tells.skipped` (tell → why).
+  The typology's peel chains are therefore detected exactly as on the
+  unprofiled dataset; `tests/test_fingerprint.py` checks it on a seed where
+  rebuilding every transaction in full used to break chains. Ordinary
+  payments still get fee and change tells, so a run of them that only looked
+  peel-shaped by chance may not be flagged (on the demo dataset, 2 such
+  three-payment look-alikes of 9 peel alerts).
 
 **Off means untouched.** Every profile draw comes from a random stream of its
 own. With profiles off, generator files and corpus captures are
@@ -169,9 +179,19 @@ them.
   is scored on. The transfer check in section 12 (the same model on the
   generator's own typologies) shows how much accuracy falls under a shift
   inside the simulator. Real software will shift further.
+* **Unseen software is named, not flagged.** Leave-one-profile-out (§12 of
+  `eval/results.md`, `features.fingerprint.leave_one_profile_out`) fits on four
+  profiles and asks about the fifth. Pooled, 0.948 of those transactions get a
+  known family's name with all tells and 0.994 structure only. `unknown`
+  catches confusion between known families, not software the model has never
+  seen, so a fingerprint on real traffic can be a confident wrong name.
 * On real data, fee-rate tells depend on an estimated vsize, BIP-69 output
   order uses addresses in place of scriptPubKeys, and relay logs lack
   version, locktime, nSequence and outpoints. The `structural` condition
   covers the last of these.
-* The served demo dataset was generated without profiles, so its fingerprints
-  are `structural` and are not measurements of anything real.
+* The served demo dataset is generated with `--wallet-profiles` (seed 41 plus
+  its recorded red-team injections, which `generator.inject` profiles too), so
+  its transactions carry the `full` tells. Its fingerprints recover the
+  simulator's profiles, not real wallets. On it, 81 of 1247 are unknown and
+  0.851 are right when answered; typology transactions carry fewer tells than
+  ordinary payments, as above.

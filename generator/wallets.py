@@ -95,6 +95,22 @@ def build(inputs: list[tuple[str, float]], outputs: list[tuple[str, float]],
         single[0][1] = int(rest - fee)
     outs = [o for o in outs if not o[2] or o[1] >= DUST_SATS]
 
+    ins, outs, finish = _order_and_lock(inputs, outs, p, rng, height)
+    total_out = sum(o[1] for o in outs)
+    return {
+        "in_addrs": [a for (a, _), _ in ins], "in_vals": [v for (_, v), _ in ins],
+        "out_addrs": [o[0] for o in outs], "out_vals": [round(o[1] / SATS, 8) for o in outs],
+        **finish,
+        "fee": round((sum(in_sats) - total_out) / SATS, 8),
+        "wallet_profile": profile,
+        "change_indices": [i for i, o in enumerate(outs) if o[2]],
+    }
+
+
+def _order_and_lock(inputs, outs, p: dict, rng: random.Random, height: int):
+    """The tells that move no amount and rename no address: outpoints, input
+    and output order, nLockTime, nSequence and version. `outs` rows are
+    [address, value, is_change, funding input]."""
     outpoints = [f"{rng.getrandbits(256):064x}:{rng.randint(0, 3)}" for _ in inputs]
     ins = list(zip(inputs, outpoints))
     if rng.random() < p["bip69"]:
@@ -117,14 +133,25 @@ def build(inputs: list[tuple[str, float]], outputs: list[tuple[str, float]],
         # back (docs/FINGERPRINTS.md, locktime).
         locktime = height - (rng.randint(0, 100) if rng.random() < 0.1 else 0)
     sequence = RBF if rng.random() < p["rbf"] else (LOCKTIME_ONLY if locktime else FINAL)
-    total_out = sum(o[1] for o in outs)
+    return ins, outs, {"outpoints": [op for _, op in ins], "sequences": [sequence] * len(ins),
+                       "tx_version": int(draw(rng, p["version"])), "locktime": int(locktime)}
+
+
+def neutral(inputs: list[tuple[str, float]], outputs: list[tuple[str, float]],
+            change: int | None, profile: str, rng: random.Random, height: int,
+            cfg: dict) -> dict:
+    """`profile`'s tells on a typology transaction, keeping every amount and
+    address: a peel chain's or a layering's next hop spends these outputs by
+    address and value, so fee rounding, dust dropping and paying change back
+    to an input are left out. Order changes nothing downstream: a hop spends an
+    address, not an output index. `fee` is None: the caller keeps its own."""
+    p = cfg["generator"]["wallet_profiles"]["profiles"][profile]
+    outs = [[a, v, i == change, None] for i, (a, v) in enumerate(outputs)]
+    ins, outs, finish = _order_and_lock(inputs, outs, p, rng, height)
     return {
         "in_addrs": [a for (a, _), _ in ins], "in_vals": [v for (_, v), _ in ins],
-        "out_addrs": [o[0] for o in outs], "out_vals": [round(o[1] / SATS, 8) for o in outs],
-        "outpoints": [op for _, op in ins], "sequences": [sequence] * len(ins),
-        "tx_version": int(draw(rng, p["version"])), "locktime": int(locktime),
-        "fee": round((sum(in_sats) - total_out) / SATS, 8),
-        "wallet_profile": profile,
+        "out_addrs": [o[0] for o in outs], "out_vals": [o[1] for o in outs],
+        **finish, "fee": None, "wallet_profile": profile,
         "change_indices": [i for i, o in enumerate(outs) if o[2]],
     }
 

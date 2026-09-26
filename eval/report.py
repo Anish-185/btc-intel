@@ -645,6 +645,33 @@ FINGERPRINT_OMISSIONS = (
     "standard single-key estimate, exact here because the generator uses the same table.")
 
 
+#: §12's transfer figures from the generator before P8.1 (commit 74c404e). That
+#: generator no longer exists, so they are copied through, not regenerated.
+TRANSFER_PRE_8_1 = """
+#### Typologies rebuilt in full under profiles (pre-P8.1 generator, 74c404e)
+
+Copied from commit 74c404e's report, not regenerated: that generator is gone. It
+rebuilt every typology transaction with the full profile, including fee rounding,
+dust-dropping and paying change back to an input. That gave typology transactions
+every tell but broke peel chains (their amounts and change addresses no longer
+linked hop to hop), which is why P8.1 replaced it. Same seed, same model.
+
+| condition | typology | transactions | unknown rate | accuracy if answered |
+| --- | --- | --- | --- | --- |
+| simulated | coinjoin | 88 | 0.511 | 0.767 |
+| simulated | layering | 123 | 0.081 | 0.434 |
+| simulated | normal | 2523 | 0.080 | 0.898 |
+| simulated | ransomware_collector | 176 | 0.528 | 0.795 |
+| simulated | same_actor_cluster | 90 | 0.044 | 0.442 |
+
+| true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
+| --- | --- | --- | --- | --- | --- | --- |
+| coordinator_coinjoin | 0 | 0 | 0 | 33 | 10 | 45 |
+| core_like | 976 | 113 | 0 | 0 | 1 | 190 |
+| electrum_like | 188 | 513 | 3 | 1 | 0 | 96 |
+| legacy_naive | 1 | 3 | 748 | 55 | 0 | 24 |
+"""
+
 def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
     """Section 12: per-class precision/recall, confusion matrices and unknown
     rates on the fingerprint corpus's test sets, the CoinJoin agreement with
@@ -654,6 +681,8 @@ def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
     fitted = F.fit(cfg, rebuild)
     result = F.evaluate(fitted, cfg)
     transfer = F.transfer(fitted["model"], cfg)
+    lopo = F.leave_one_profile_out(fitted["truth"], cfg)
+    pooled = lopo[lopo["held-out profile"] == "all (pooled)"].set_index("condition")
     note = f"\n*`condition=\"simulated\"`.* {FINGERPRINT_OMISSIONS}\n"
     f = cfg["features"]["fingerprint"]
     out = [
@@ -666,6 +695,25 @@ def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
         "NTRO schema shows — with its own calibration. The answer is `unknown` under "
         f"calibrated confidence {f['unknown_below']} or with fewer than {f['min_tells']} "
         "observable tells (config.yaml, with the rationale).\n"),
+        ("\n### Generalization: leave one profile out\n\n"
+        "**This is the generalization result.** Every figure above scores the model on "
+        "profiles it was fitted to. Here each profile is held out in turn: the model is "
+        "fitted and calibrated on the other four and asked about the held-out one's "
+        "cross-topology test transactions. It cannot name software it has never seen, so "
+        "`unknown` is the right answer and any other answer is a confident mislabel.\n\n"
+        f"**Confident-mislabel rate on never-seen profiles: "
+        f"{pooled.loc['full', 'confident-mislabel rate']:.3f} with all tells, "
+        f"{pooled.loc['structural', 'confident-mislabel rate']:.3f} structure only** "
+        "(pooled over the five hold-outs; a lower rate is better). "
+        + ("The unknown rule does not catch unfamiliar software: it abstains when known "
+           "families are hard to tell apart, and most held-out transactions get a known "
+           f"family's name at or above the {f['unknown_below']} confidence cutoff. A "
+           "fingerprint of real traffic may be a confident wrong name. "
+           if pooled.loc["full", "confident-mislabel rate"] > 0.5 else "")
+        + "Still simulated: the "
+        "held-out family is another of this simulator's profiles, so real unseen software "
+        "may sit closer to or further from the known ones.\n\n"),
+        md_table(lopo), note,
         "\n### Unknown rate and accuracy when answered\n\n", md_table(result["unknown"]), note,
         ("\n### Per class\n\n`recall` counts an unknown as a miss; `recall if answered` does "
         "not.\n\n"), md_table(result["per_class"]), note,
@@ -711,10 +759,19 @@ def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
         ("\n### Transfer: the generator's own typologies\n\n"
         f"The model above, on a `generator.main --wallet-profiles` dataset (seed "
         f"{transfer['seed']}, {transfer['transactions']} transactions): the same profiles, "
-        "built on peel chains, layering fan-outs and same-actor spends the corpus never "
-        "shows. Still simulated; a distribution shift inside the simulator.\n\n"),
+        "on peel chains, layering fan-outs and same-actor spends the corpus never shows. "
+        "Two generator versions, two different shifts. Neither is a generalization claim "
+        "(that is the leave-one-profile-out table above): both are the simulator's own "
+        "profiles, scored by a model fitted to them.\n\n"
+        "#### Typologies with chain-neutral tells only (current generator, P8.1)\n\n"
+        "Ordinary payments get every tell. Typology transactions get version, nLockTime, "
+        "nSequence and ordering, plus an input script type only where no other "
+        "transaction sees the inputs. Their fees and change are the typology's own. So "
+        "they carry fewer profile tells than the corpus does, and the figure reflects "
+        "how the dataset is generated now.\n\n"),
         md_table(transfer["by_typology"]), note,
         "\n", md_table(transfer["confusion"].reset_index()), note,
+        TRANSFER_PRE_8_1,
     ]
     return "".join(out)
 

@@ -507,6 +507,43 @@ def evaluate(fitted: dict, cfg: dict | None = None) -> dict:
     return out
 
 
+def leave_one_profile_out(truth, cfg: dict | None = None, test_role: str = "cross_test"):
+    """The generalization test: software the model has never seen.
+
+    For each profile, fit and calibrate on every other profile's train and
+    calibration rows, then classify the held-out profile's `test_role` rows.
+    The model cannot name the held-out family, so every answer it gives is a
+    confident mislabel; `unknown` is the right answer. One row per held-out
+    profile and condition, plus a pooled row per condition.
+    """
+    import pandas as pd
+    cfg = cfg or config.load()
+    alpha = cfg["features"]["fingerprint"]["laplace"]
+    rows = []
+    for held in LABELS:
+        rest = truth[truth["wallet_profile"] != held]
+        train, cal = rest[rest["role"] == "train"], rest[rest["role"] == "calibration"]
+        model = FingerprintModel.fit(list(train["_tells"]), list(train["wallet_profile"]), alpha)
+        model.calibrate(list(cal["_tells"]), list(cal["wallet_profile"]))
+        test = truth[(truth["wallet_profile"] == held) & (truth["role"] == test_role)]
+        for cond, view in ((FULL, lambda t: t), (STRUCTURAL, structural)):
+            said = Counter(model.classify(view(t), cfg)["label"] for t in test["_tells"])
+            wrong = {k: v for k, v in said.items() if k != UNKNOWN}
+            rows.append({"held-out profile": held, "condition": cond, "transactions": len(test),
+                         "unknown": said[UNKNOWN], "confidently mislabelled": sum(wrong.values()),
+                         "most often named": max(wrong, key=wrong.get) if wrong else "—"})
+    frame = pd.DataFrame(rows)
+    pooled = (frame.groupby("condition", sort=False)[["transactions", "unknown",
+                                                      "confidently mislabelled"]]
+              .sum().reset_index().assign(**{"held-out profile": "all (pooled)",
+                                             "most often named": "—"}))
+    frame = pd.concat([frame, pooled[frame.columns]], ignore_index=True)
+    n = frame["transactions"].where(frame["transactions"] > 0)
+    frame["unknown rate"] = (frame["unknown"] / n).round(4)
+    frame["confident-mislabel rate"] = (frame["confidently mislabelled"] / n).round(4)
+    return frame[["held-out profile", "condition", "transactions", "unknown", "unknown rate",
+                  "confidently mislabelled", "confident-mislabel rate", "most often named"]]
+
 def transfer(model: FingerprintModel, cfg: dict | None = None, n_transactions: int = 3000,
              seed: int = 42) -> dict:
     """The model, fitted on corpus shapes, on a `generator.main --wallet-profiles`

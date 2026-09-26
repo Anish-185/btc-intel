@@ -77,35 +77,87 @@ def relay_rows(tx: Tx, origin: Ip, net: GossipNet, rng: random.Random, cfg: dict
         }
 
 
+#: The tells `construct` can give a transaction (features/fingerprint.py reads them).
+NEUTRAL_TELLS = ["version", "locktime", "sequence", "ordering"]
+
+
 def construct(tx: Tx, world: World, profiles: dict, fr: random.Random, t0: float,
-              cfg: dict) -> str:
+              cfg: dict, instance: list[Tx] = (), seen: set[str] = frozenset(),
+              base: set[int] = frozenset()) -> dict:
     """Rebuild `tx` under its sender's wallet profile (generator/wallets.py).
 
     A CoinJoin is a coordinator's construction whoever joined it; every other
     transaction takes the profile of the actor who built it, drawn once per
     actor. Batched-withdrawal structure is not produced by these typologies, so
     that profile comes only from the corpus's batch shape.
+
+    An ordinary payment gets every tell. A typology transaction (peel chain,
+    layering, collector, CoinJoin, ...) gets only the tells that keep amounts
+    and addresses — its outputs are the next hop's inputs — plus an input
+    script type where no other transaction can see the inputs (`chain_safe`).
+    Returns the profile and, per tell, whether it was applied or why not.
     """
     if tx.pattern == "coinjoin":
         profile = "coordinator_coinjoin"
     else:
         profile = profiles.setdefault(tx.origin_actor, wallets.payment_profile(fr, cfg))
+    p = cfg["generator"]["wallet_profiles"]["profiles"][profile]
     owned = [i for i, (a, _) in enumerate(tx.outputs)
              if world.wallet_owner.get(a) == tx.origin_actor]
-    outputs = list(tx.outputs)
-    change = {}
-    if len(owned) == 1 and len(outputs) > 1 and profile != "coordinator_coinjoin":
-        change = {owned[0]: None}
-        p = cfg["generator"]["wallet_profiles"]["profiles"][profile]
-        if wallets.draw(fr, p["change_type"]) == "reuse_input":
-            outputs[owned[0]] = (tx.inputs[0][0], outputs[owned[0]][1])
-    built = wallets.build(tx.inputs, outputs, change, profile, fr,
-                          wallets.height_at(tx.ts, t0, cfg), cfg)
+    change = owned[0] if len(owned) == 1 and len(tx.outputs) > 1 else None
+    height = wallets.height_at(tx.ts, t0, cfg)
+    applied = list(NEUTRAL_TELLS)
+    if tx.pattern == "normal":
+        outputs = list(tx.outputs)
+        if change is not None:
+            if wallets.draw(fr, p["change_type"]) == "reuse_input":
+                outputs[change] = (tx.inputs[0][0], outputs[change][1])
+            applied += ["change_position", "change_type"]
+        built = wallets.build(tx.inputs, outputs, {} if change is None else {change: None},
+                              profile, fr, height, cfg)
+        tx.fee = built["fee"]
+        skipped = {"script_type": "inputs are the actor's existing addresses"}
+        applied.append("fee")
+    else:
+        skipped = {"fee": "would change the amounts the next hop spends",
+                   "change_type": "would rename the address the next hop spends"}
+        if chain_safe(tx, world, instance, seen, base):
+            retype(tx, world, wallets.draw(fr, p["input_types"]))
+            applied.append("script_type")
+        else:
+            skipped["script_type"] = "inputs are spent or paid elsewhere in the chain"
+        if change is not None:
+            applied.append("change_position")
+        built = wallets.neutral(tx.inputs, tx.outputs, change, profile, fr, height, cfg)
     tx.inputs = list(zip(built["in_addrs"], built["in_vals"]))
     tx.outputs = list(zip(built["out_addrs"], built["out_vals"]))
-    tx.fee = built["fee"]
     tx.construction = built
-    return profile
+    return {"wallet_profile": profile, "wallet_tells": {"applied": applied, "skipped": skipped}}
+
+
+def chain_safe(tx: Tx, world: World, instance, seen: set[str], base: set[int]) -> bool:
+    """Every input is a one-off wallet of this actor that no other transaction
+    has touched or will touch: not a standing actor's (those are reused across
+    instances), not already written, not referenced elsewhere in the instance.
+    Renaming such an address changes nothing any other transaction sees."""
+    if tx.origin_actor in base:
+        return False
+    ins = {a for a, _ in tx.inputs}
+    if any(world.wallet_owner.get(a) != tx.origin_actor or a in seen for a in ins):
+        return False
+    return not any(a in ins for other in instance if other is not tx
+                   for a, _ in (*other.inputs, *other.outputs))
+
+
+def retype(tx: Tx, world: World, script_type: str) -> None:
+    """Re-address `tx`'s inputs as `script_type`, everywhere the world records them."""
+    actor = world.actor(tx.origin_actor)
+    renamed = {a: wallets.typed(a, script_type) for a, _ in tx.inputs}
+    for old, new in renamed.items():
+        world.wallet_owner[new] = world.wallet_owner.pop(old)
+    actor.wallets = [renamed.get(a, a) for a in actor.wallets]
+    tx.inputs = [(renamed[a], v) for a, v in tx.inputs]
+    tx.script_type = script_type
 
 
 def spread_instance(txs, name: str, rng: random.Random, cfg: dict) -> None:
@@ -254,6 +306,8 @@ def generate(args, cfg: dict | None = None) -> dict:
     # byte-identical to a run from before profiles existed.
     fr = random.Random(args.seed + 13) if profiled else None
     profiles: dict[int, str] = {}
+    seen: set[str] = set()                   # addresses already written
+    base = set(world.base_actors)
     writers = open_writers(out_dir, args.formats, cfg, construction=profiled)
     n_rows = 0
     try:
@@ -276,8 +330,9 @@ def generate(args, cfg: dict | None = None) -> dict:
                     "broadcast": kind, "timestamp": iso(tx.ts),
                 }
                 if fr:
-                    tx_meta[tx.txid]["wallet_profile"] = construct(
-                        tx, world, profiles, fr, world_start, cfg)
+                    tx_meta[tx.txid].update(construct(
+                        tx, world, profiles, fr, world_start, cfg, txs, seen, base))
+                    seen.update(a for a, _ in (*tx.inputs, *tx.outputs))
                 for row in relay_rows(tx, origin, net, rng, cfg,
                                       args.relay_observation_rate, args.single_row):
                     for wr in writers:

@@ -25,7 +25,7 @@ before any of this was measured. Wallet recall is reported as secondary.
 | cluster ARI | 0.2126 | 0.2316 | our wallet partition vs the generator's | 2348 / 2931 wallets |
 | red-team detection rate, crimes only | — | 0.667 | criminal injection raised at least one alert (section 7) | 30 injections, shifted set |
 | red-team detection rate, all typologies | — | 0.400 | includes the two patterns that are not crimes — see section 7 | 50 injections |
-| red-team median time-to-detect | — | 4.25s | inject to alert, incremental re-run, crimes only | 20 detected |
+| red-team median time-to-detect | — | 3.83s | inject to alert, incremental re-run, crimes only | 20 detected |
 | attribution leads naming the true IP | 0.526 | 0.613 | leads shown beside an alert (not an AUC — see section 6) | 38 / 62 leads |
 
 
@@ -901,7 +901,7 @@ so this measures a system whose dataset is growing under it, which is the
 condition the demo runs in.
 
 
-**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 4.25s.
+**20 of 30 criminal injections were detected — 0.667** at threshold 0.5, median time-to-detect 3.83s.
 
 
 Over **all 50** injections including the two non-crime patterns the figure is 20 detected, 0.400 — shown so the exclusion below cannot be mistaken for
@@ -927,10 +927,10 @@ a legal privacy tool.
 
 | typology | is a crime | runs | detected | detection rate | median time-to-detect (s) | origin named (rank 1) | true origin in candidates |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
-| layering | yes | 10 | 4 | 0.400 | 4.110 | 5 | 5 |
-| peel_chain | yes | 10 | 7 | 0.700 | 4.280 | 5 | 5 |
-| ransomware_collector | yes | 10 | 9 | 0.900 | 4.250 | 5 | 5 |
+| coinjoin | no — not an actor | 10 | 0 | 0.000 | n/a | 3 | 4 |
+| layering | yes | 10 | 4 | 0.400 | 5.000 | 5 | 5 |
+| peel_chain | yes | 10 | 7 | 0.700 | 3.500 | 5 | 5 |
+| ransomware_collector | yes | 10 | 9 | 0.900 | 3.760 | 5 | 5 |
 | same_actor_cluster | no — not an actor | 10 | 0 | 0.000 | n/a | 5 | 5 |
 
 
@@ -941,7 +941,7 @@ a legal privacy tool.
 | --- | --- | --- | --- | --- |
 | hosting | 10 | 0.400 | 0.000 | 0.000 |
 | relay_heavy | 10 | 0.400 | 1.000 | 1.000 |
-| residential | 15 | 0.333 | 1.000 | 1.000 |
+| residential | 15 | 0.333 | 0.933 | 0.867 |
 | tor_exit | 15 | 0.467 | 0.000 | 0.000 |
 
 
@@ -956,7 +956,7 @@ entities, one actor's wallets pulled together.
 | typology | runs | alerted (a false positive) | clustering correct | handled correctly |
 | --- | --- | --- | --- | --- |
 | coinjoin | 10 | 0 | 10 / 10 | 10 |
-| same_actor_cluster | 10 | 0 | 8 / 10 | 8 |
+| same_actor_cluster | 10 | 0 | 9 / 10 | 9 |
 
 
 ### The misses
@@ -970,35 +970,35 @@ not in this table — they are not misses.
 | run | typology | broadcast | rule | anomaly | gnn | taint | fused | threshold | short by |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | batch003 | layering | residential | 0.000 | 0.141 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch003 | layering | residential | 0.000 | 0.173 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch003 | layering | residential | 0.000 | 0.141 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch003 | layering | residential | 0.000 | 0.381 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch007 | peel_chain | tor_exit | 0.000 | 0.798 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch007 | peel_chain | tor_exit | 0.000 | 0.864 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch007 | peel_chain | tor_exit | 0.000 | 0.381 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch023 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch007 | peel_chain | tor_exit | 0.000 | 0.375 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch023 | layering | residential | 0.000 | 0.265 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch023 | layering | residential | 0.000 | 0.309 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch023 | layering | residential | 0.000 | 0.416 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch032 | peel_chain | hosting | 0.000 | 0.355 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch032 | peel_chain | hosting | 0.000 | 0.213 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch032 | peel_chain | hosting | 0.000 | 0.229 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch032 | peel_chain | hosting | 0.000 | 0.922 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch033 | layering | hosting | 0.000 | 0.290 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch033 | layering | hosting | 0.000 | 0.248 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch033 | layering | hosting | 0.000 | 0.257 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.289 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch033 | layering | hosting | 0.000 | 0.291 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch033 | layering | hosting | 0.000 | 0.176 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.367 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch037 | peel_chain | relay_heavy | 0.000 | 0.929 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch037 | peel_chain | relay_heavy | 0.000 | 0.268 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch037 | peel_chain | relay_heavy | 0.000 | 0.297 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch038 | layering | relay_heavy | 0.000 | 0.263 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch038 | layering | relay_heavy | 0.000 | 0.285 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch038 | layering | relay_heavy | 0.000 | 0.272 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch038 | layering | relay_heavy | 0.000 | 0.268 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch041 | ransomware_collector | residential | 0.000 | 0.691 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.359 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch041 | ransomware_collector | residential | 0.000 | 0.394 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch043 | layering | residential | 0.000 | 0.795 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.661 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch041 | ransomware_collector | residential | 0.000 | 0.424 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch043 | layering | residential | 0.000 | 0.825 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch043 | layering | residential | 0.000 | 0.284 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch043 | layering | residential | 0.000 | 0.354 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch043 | layering | residential | 0.000 | 0.344 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 | batch048 | layering | tor_exit | 0.000 | 0.202 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch048 | layering | tor_exit | 0.000 | 0.026 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
-| batch048 | layering | tor_exit | 0.000 | 0.006 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch048 | layering | tor_exit | 0.000 | 0.021 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
+| batch048 | layering | tor_exit | 0.000 | 0.008 | 0.000 | 0.000 | 0.375 | 0.500 | 0.125 |
 
 
 One thing this table says loudly: **the fused score does not move with the anomaly
@@ -1028,7 +1028,7 @@ identical either way; the difference is the constrained refit landing on a
 different optimum once the column is gone, which is worth knowing but is not
 evidence the signal was doing harm.
 
-The red-team misses make it concrete. Two injected entities, one scoring **0.006** on anomaly and one **0.929** — a difference of 0.923 on the signal — both come out of the stacker at **0.375** and **0.375**. The fused score does not move, because nothing is multiplying it.
+The red-team misses make it concrete. Two injected entities, one scoring **0.008** on anomaly and one **0.929** — a difference of 0.921 on the signal — both come out of the stacker at **0.375** and **0.375**. The fused score does not move, because nothing is multiplying it.
 
 **Why it comes out below chance.** IsolationForest finds the population's
 outliers, and on this data the outliers are the exchanges: enormous fan-in,
@@ -1609,29 +1609,52 @@ On the base corpus `3f2d3bbe9a1f7088` (cross-topology test set), where no transa
 
 ## 11. Peer profiles: coverage
 
-The reverse direction (docs/CORRELATION.md): peer -> profile. Each count is the peers whose profile has that part. `originated claim` means the origination model named the peer and `eval.origin.flagged_at` did not withhold it; QUALIFIED and ANNOTATE claims are counted apart, never folded into it. A timing signature needs 20 announcements (`engines.correlation.profile.min_timing_observations`). A cluster link needs the originated transaction's inputs: the corpus has no chain data, and 1948 of the served relay matrix's 1948 rows have a txid in the relay-hop dataset; the rest of the served links come from correlation leads. No capture here carries a version handshake, hence no user agents or service flags. Every profile counted is built from simulated or fixture data and says so in its header.
+The reverse direction (docs/CORRELATION.md): peer -> profile. Each count is the peers whose profile has that part. `originated claim` means the origination model named the peer and `eval.origin.flagged_at` did not withhold it; QUALIFIED and ANNOTATE claims are counted apart, never folded into it. A timing signature needs 20 announcements (`engines.correlation.profile.min_timing_observations`). A cluster link needs the originated transaction's inputs: the corpus has no chain data, and 1943 of the served relay matrix's 1943 rows have a txid in the relay-hop dataset; the rest of the served links come from correlation leads. No capture here carries a version handshake, hence no user agents or service flags. Every profile counted is built from simulated or fixture data and says so in its header.
 
 | condition | measure | served (relay-hop dataset + relay matrix) | base corpus `3f2d3bbe9a1f7088`, cross-topology test captures |
 | --- | --- | --- | --- |
-| simulated | peers | 584 | 6724 |
+| simulated | peers | 573 | 6724 |
 | simulated | onion identities | 0 (0.0%) | 0 (0.0%) |
-| simulated | with an originated claim | 250 (42.8%) | 1917 (28.5%) |
+| simulated | with an originated claim | 244 (42.6%) | 1917 (28.5%) |
 | simulated | with a QUALIFIED claim | 15 (2.6%) | 0 (0.0%) |
 | simulated | with an ANNOTATE claim | 0 (0.0%) | 272 (4.0%) |
-| simulated | with a withheld top rank | 378 (64.7%) | 4292 (63.8%) |
-| simulated | relay only | 221 (37.8%) | 4235 (63.0%) |
-| simulated | with a timing signature | 41 (7.0%) | 3587 (53.3%) |
+| simulated | with a withheld top rank | 376 (65.6%) | 4292 (63.8%) |
+| simulated | relay only | 220 (38.4%) | 4235 (63.0%) |
+| simulated | with a timing signature | 41 (7.2%) | 3587 (53.3%) |
 | simulated | with a user agent | 0 (0.0%) | 0 (0.0%) |
 | simulated | with service flags | 0 (0.0%) | 0 (0.0%) |
-| simulated | with a linked cluster | 454 (77.7%) | 0 (0.0%) |
-| simulated | with an ASN | 584 (100.0%) | 4514 (67.1%) |
-| simulated | simulated/fixture only | 584 (100.0%) | 6724 (100.0%) |
+| simulated | with a linked cluster | 444 (77.5%) | 0 (0.0%) |
+| simulated | with an ASN | 573 (100.0%) | 4514 (67.1%) |
+| simulated | simulated/fixture only | 573 (100.0%) | 6724 (100.0%) |
 
 
 
 ## 12. Wallet-construction fingerprints
 
 Corpus `0b102851d7cfd6c4` (`origination/manifest_fingerprint.json`): the validity variant with every transaction built under a wallet-construction profile (`generator/wallets.py`). Naive Bayes over the tells, fitted on the training captures, isotonic-calibrated on the calibration captures, scored on the within- and cross-topology test captures. **full**: every tell the corpus records. **structural**: version, nLockTime and nSequence masked — what a relay log in the NTRO schema shows — with its own calibration. The answer is `unknown` under calibrated confidence 0.6 or with fewer than 4 observable tells (config.yaml, with the rationale).
+
+### Generalization: leave one profile out
+
+**This is the generalization result.** Every figure above scores the model on profiles it was fitted to. Here each profile is held out in turn: the model is fitted and calibrated on the other four and asked about the held-out one's cross-topology test transactions. It cannot name software it has never seen, so `unknown` is the right answer and any other answer is a confident mislabel.
+
+**Confident-mislabel rate on never-seen profiles: 0.948 with all tells, 0.994 structure only** (pooled over the five hold-outs; a lower rate is better). The unknown rule does not catch unfamiliar software: it abstains when known families are hard to tell apart, and most held-out transactions get a known family's name at or above the 0.6 confidence cutoff. A fingerprint of real traffic may be a confident wrong name. Still simulated: the held-out family is another of this simulator's profiles, so real unseen software may sit closer to or further from the known ones.
+
+| held-out profile | condition | transactions | unknown | unknown rate | confidently mislabelled | confident-mislabel rate | most often named |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| core_like | full | 7909 | 0 | 0.000 | 7909 | 1.000 | electrum_like |
+| core_like | structural | 7909 | 0 | 0.000 | 7909 | 1.000 | electrum_like |
+| electrum_like | full | 5659 | 0 | 0.000 | 5659 | 1.000 | core_like |
+| electrum_like | structural | 5659 | 0 | 0.000 | 5659 | 1.000 | core_like |
+| legacy_naive | full | 4544 | 1131 | 0.249 | 3413 | 0.751 | coordinator_coinjoin |
+| legacy_naive | structural | 4544 | 138 | 0.030 | 4406 | 0.970 | core_like |
+| coordinator_coinjoin | full | 1602 | 0 | 0.000 | 1602 | 1.000 | batch_withdrawal |
+| coordinator_coinjoin | structural | 1602 | 0 | 0.000 | 1602 | 1.000 | batch_withdrawal |
+| batch_withdrawal | full | 2044 | 7 | 0.003 | 2037 | 0.997 | coordinator_coinjoin |
+| batch_withdrawal | structural | 2044 | 0 | 0.000 | 2044 | 1.000 | coordinator_coinjoin |
+| all (pooled) | full | 21758 | 1138 | 0.052 | 20620 | 0.948 | — |
+| all (pooled) | structural | 21758 | 138 | 0.006 | 21620 | 0.994 | — |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
 
 ### Unknown rate and accuracy when answered
 
@@ -1755,7 +1778,38 @@ Rows are the generator's profile, columns the fingerprint.
 
 ### Transfer: the generator's own typologies
 
-The model above, on a `generator.main --wallet-profiles` dataset (seed 42, 3000 transactions): the same profiles, built on peel chains, layering fan-outs and same-actor spends the corpus never shows. Still simulated; a distribution shift inside the simulator.
+The model above, on a `generator.main --wallet-profiles` dataset (seed 42, 3000 transactions): the same profiles, on peel chains, layering fan-outs and same-actor spends the corpus never shows. Two generator versions, two different shifts. Neither is a generalization claim (that is the leave-one-profile-out table above): both are the simulator's own profiles, scored by a model fitted to them.
+
+#### Typologies with chain-neutral tells only (current generator, P8.1)
+
+Ordinary payments get every tell. Typology transactions get version, nLockTime, nSequence and ordering, plus an input script type only where no other transaction sees the inputs. Their fees and change are the typology's own. So they carry fewer profile tells than the corpus does, and the figure reflects how the dataset is generated now.
+
+| condition | typology | transactions | unknown rate | accuracy if answered |
+| --- | --- | --- | --- | --- |
+| simulated | coinjoin | 88 | 0.000 | 0.989 |
+| simulated | layering | 123 | 0.171 | 0.725 |
+| simulated | normal | 2523 | 0.090 | 0.892 |
+| simulated | ransomware_collector | 176 | 0.045 | 0.732 |
+| simulated | same_actor_cluster | 90 | 0.044 | 0.628 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+| true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
+| --- | --- | --- | --- | --- | --- | --- |
+| coordinator_coinjoin | 0 | 0 | 0 | 87 | 1 | 0 |
+| core_like | 989 | 119 | 2 | 0 | 0 | 173 |
+| electrum_like | 212 | 571 | 0 | 0 | 1 | 86 |
+| legacy_naive | 3 | 2 | 740 | 14 | 0 | 0 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+#### Typologies rebuilt in full under profiles (pre-P8.1 generator, 74c404e)
+
+Copied from commit 74c404e's report, not regenerated: that generator is gone. It
+rebuilt every typology transaction with the full profile, including fee rounding,
+dust-dropping and paying change back to an input. That gave typology transactions
+every tell but broke peel chains (their amounts and change addresses no longer
+linked hop to hop), which is why P8.1 replaced it. Same seed, same model.
 
 | condition | typology | transactions | unknown rate | accuracy if answered |
 | --- | --- | --- | --- | --- |
@@ -1765,16 +1819,12 @@ The model above, on a `generator.main --wallet-profiles` dataset (seed 42, 3000 
 | simulated | ransomware_collector | 176 | 0.528 | 0.795 |
 | simulated | same_actor_cluster | 90 | 0.044 | 0.442 |
 
-*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
-
 | true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
 | --- | --- | --- | --- | --- | --- | --- |
 | coordinator_coinjoin | 0 | 0 | 0 | 33 | 10 | 45 |
 | core_like | 976 | 113 | 0 | 0 | 1 | 190 |
 | electrum_like | 188 | 513 | 3 | 1 | 0 | 96 |
 | legacy_naive | 1 | 3 | 748 | 55 | 0 | 24 |
-
-*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
 
 
 ## 13. Decisions taken in this pass

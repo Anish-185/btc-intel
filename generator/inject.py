@@ -16,7 +16,7 @@ from pathlib import Path
 
 import config
 
-from .main import (GROUND_TRUTH, ground_truth, iso, observed_origin, relay_rows,
+from .main import (GROUND_TRUTH, construct, ground_truth, iso, observed_origin, relay_rows,
                     spread_instance)
 from .net import build_net
 from .typologies import TYPOLOGIES, World
@@ -60,18 +60,32 @@ def inject_pattern(dataset_dir, typology: str, params: dict | None = None,
     formats = [f for f in WRITERS if (d / f"transactions.{f}").exists()]
     rate = params.get("relay_observation_rate", cfg["gossip"]["relay_observation_rate"])
     single = params.get("single_row", False)
-    writers = open_writers(d, formats, cfg, append=True)
+    # A dataset generated with --wallet-profiles gets its injections profiled
+    # too, or the appended rows would lack the construction columns.
+    profiled = any("wallet_profile" in t for t in gt["transactions"].values())
+    fr = random.Random(seed + 13) if profiled else None
+    seen, base = set(gt["wallets"]), set(world.base_actors)
+    t0 = _epoch(cfg["generator"]["start_time"])   # the height clock generate() used
+    # Relay timing and the observed origin draw from a stream of their own, so
+    # the rows an injection writes depend on its seed alone, not on how many
+    # draws the typology happened to take.
+    relay = random.Random(seed + 17)
+    writers = open_writers(d, formats, cfg, append=True, construction=profiled)
     rows = 0
     try:
         for tx in sorted(txs, key=lambda t: t.ts):
             actor = world.actor(tx.origin_actor)
-            origin, kind = observed_origin(actor, net, rng, cfg)
+            origin, kind = observed_origin(actor, net, relay, cfg)
             gt["transactions"][tx.txid] = {
                 "pattern": tx.pattern, "typology": typology, "cluster_id": actor.cluster_id,
                 "true_origin_ip": actor.home_ip.addr, "observed_origin_ip": origin.addr,
                 "broadcast": kind, "timestamp": iso(tx.ts), "injected": True,
             }
-            for row in relay_rows(tx, origin, net, rng, cfg, rate, single):
+            if fr:
+                gt["transactions"][tx.txid].update(
+                    construct(tx, world, {}, fr, t0, cfg, txs, seen, base))
+                seen.update(a for a, _ in (*tx.inputs, *tx.outputs))
+            for row in relay_rows(tx, origin, net, relay, cfg, rate, single):
                 for w in writers:
                     w.write(row)
                 rows += 1
@@ -88,6 +102,8 @@ def inject_pattern(dataset_dir, typology: str, params: dict | None = None,
     gt["ips"]["shared_nat"] = sorted(set(gt["ips"]["shared_nat"]) | set(fresh["ips"]["shared_nat"]))
     gt.setdefault("injections", []).append(
         {"typology": typology, "seed": seed, "params": params,
+         # the config the rows depend on: a red-team run overrides these
+         "broadcast": cfg["generator"]["broadcast"], "relay_observation_rate": rate,
          "txids": [t.txid for t in txs], "clusters": sorted(fresh["clusters"])})
     (d / GROUND_TRUTH).write_text(json.dumps(gt, separators=(",", ":")))
     return {"typology": typology, "transactions": len(txs), "rows": rows,
