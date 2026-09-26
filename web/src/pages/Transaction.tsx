@@ -11,6 +11,7 @@ import { token } from "../lib/tokens";
 import { Chip, ErrorNote, Label, SkeletonRows, ValidityChip, validityLabel } from "../components/ui";
 import type { Answer, Propagation } from "../api/types";
 import { Shell } from "../components/Shell";
+import { FingerprintPanel } from "../components/Fingerprint";
 
 const FieldGraph = lazy(() =>
   import("../components/FieldGraph").then((m) => ({ default: m.FieldGraph })),
@@ -130,9 +131,22 @@ export function Transaction() {
             </div>
           </>
         )}
+        <TxFingerprintBlock txid={txid} />
         <CaptureOrigins txid={txid} />
       </section>
     </Shell>
+  );
+}
+
+/** How the transaction was built; absent when the served dataset has no
+ *  structure for it (a capture-only txid). */
+function TxFingerprintBlock({ txid }: { txid: string }) {
+  const { data, error } = useApi((signal) => api.fingerprint(txid, signal), [txid]);
+  if (error || !data) return null;
+  return (
+    <div className="stat-grid" style={{ marginTop: "var(--sp-5)" }}>
+      <FingerprintPanel answer={data} />
+    </div>
   );
 }
 

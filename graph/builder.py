@@ -17,6 +17,10 @@ import pandas as pd
 import config
 
 WALLET, TRANSACTION, IP = "wallet", "transaction", "ip"
+#: Tx attribute -> the ingested column it comes from. Optional: absent columns
+#: leave the attributes None.
+CONSTRUCTION = {"version": "tx_version", "locktime": "locktime",
+                "sequences": "input_sequences", "outpoints": "input_outpoints"}
 
 
 @dataclass
@@ -30,6 +34,16 @@ class Tx:
     script_type: str = ""
     timestamp: pd.Timestamp | None = None
     ips: list[str] = field(default_factory=list)
+    # Construction fields, when the dataset carries them (a wallet-profile
+    # generator run, or a dump with raw transactions): features/fingerprint.py.
+    version: int | None = None
+    locktime: int | None = None
+    sequences: list[int] | None = None
+    outpoints: list[str] | None = None
+
+    @property
+    def construction(self) -> dict:
+        return {k: getattr(self, k) for k in CONSTRUCTION if getattr(self, k) is not None}
 
     @property
     def input_addresses(self) -> list[str]:
@@ -79,7 +93,17 @@ def iter_transactions(df: pd.DataFrame, ip_meta: dict | None = None) -> Iterator
             script_type=str(first.get("script_type", "") or ""),
             timestamp=first.get("timestamp"),
             ips=ips,
+            **{attr: _optional(first.get(column), attr)
+               for attr, column in CONSTRUCTION.items() if column in rows},
         )
+
+
+def _optional(value, attr: str):
+    if value is None or (not hasattr(value, "__len__") and pd.isna(value)):
+        return None
+    if attr in ("version", "locktime"):
+        return int(value)
+    return [int(v) for v in value] if attr == "sequences" else [str(v) for v in value]
 
 
 def build_graph(source, cfg: dict | None = None) -> nx.MultiDiGraph:
@@ -92,7 +116,7 @@ def build_graph(source, cfg: dict | None = None) -> nx.MultiDiGraph:
         ts = tx.timestamp
         g.add_node(tx.txid, node_type=TRANSACTION, fee=tx.fee, script_type=tx.script_type,
                    timestamp=ts, n_inputs=len(tx.inputs), n_outputs=len(tx.outputs),
-                   value_out=sum(tx.output_values))
+                   value_out=sum(tx.output_values), **tx.construction)
         for i, (addr, amount) in enumerate(tx.inputs):
             _wallet(g, addr)
             g.add_edge(addr, tx.txid, key=f"in:{i}", kind="input", index=i, amount=amount,
@@ -128,7 +152,8 @@ def graph_transactions(g: nx.MultiDiGraph) -> Iterator[Tx]:
         yield Tx(txid, [(a, v) for _, a, v in ins], [(a, v) for _, a, v in outs],
                  fee=d.get("fee", 0.0), script_type=d.get("script_type", ""),
                  timestamp=d.get("timestamp"),
-                 ips=[u for u, _, e in g.in_edges(txid, data=True) if e["kind"] == "broadcast"])
+                 ips=[u for u, _, e in g.in_edges(txid, data=True) if e["kind"] == "broadcast"],
+                 **{k: d[k] for k in CONSTRUCTION if d.get(k) is not None})
 
 
 def from_parquet(path=None, cfg: dict | None = None) -> nx.MultiDiGraph:

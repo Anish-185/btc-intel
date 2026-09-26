@@ -20,8 +20,15 @@ FIELDS = ["timestamp", "src_ip", "dst_ip", "src_port", "dst_port", "txid",
           # optional in a dump; used as the GeoIP fallback (see geoip.enrich)
           "asn", "geo_country"]
 
-LIST_FIELDS = {"input_addresses", "output_addresses", "input_amounts", "output_amounts"}
-NUMERIC_LISTS = {"input_amounts", "output_amounts"}
+#: Construction fields: present only in datasets that carry them (a
+#: `generator.main --wallet-profiles` run, a dump with raw transactions). An
+#: absent one is left out of the record, not set empty.
+OPTIONAL = ["tx_version", "locktime", "input_sequences", "input_outpoints"]
+FIELDS = FIELDS + OPTIONAL
+
+LIST_FIELDS = {"input_addresses", "output_addresses", "input_amounts", "output_amounts",
+               "input_sequences", "input_outpoints"}
+NUMERIC_LISTS = {"input_amounts", "output_amounts", "input_sequences"}
 
 
 def _mapping(cfg: dict) -> dict[str, str]:
@@ -51,6 +58,8 @@ def _normalise(raw: dict, m: dict[str, str], sep: str) -> dict:
     out = {}
     for field, key in m.items():
         value = raw.get(key)
+        if field in OPTIONAL and value in (None, "", []):
+            continue
         out[field] = _split(value, sep, field in NUMERIC_LISTS) if field in LIST_FIELDS else value
     return out
 

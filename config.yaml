@@ -91,6 +91,16 @@ graph:
     min_votes: 2                # below this the change output is left undecided
     # a tie between outputs is never resolved — guessing here corrupts clusters
 
+  # Wallet fingerprints corroborate merges; they never make one
+  # (graph.clustering.corroborate). A merge joining wallets whose spending
+  # transactions carry two different confident fingerprints keeps its union
+  # but has its confidence multiplied by this. Half, because one software
+  # mismatch is a reason to doubt a merge, not proof it is wrong: people run
+  # two wallets over one seed, and a fingerprint is itself a probability.
+  fingerprint:
+    corroborate: true
+    mismatch_factor: 0.5
+
   collapse_guard:
     max_cluster_wallets: 500    # above this a cluster is flagged, not trusted
     reason: "suspicious_merge — needs review"
@@ -103,6 +113,21 @@ features:
   # file rather than into the matrix, following ingest/'s convention.
   relay_path: data/processed/features_relay.parquet
   relay_quarantine_path: data/processed/features_relay_quarantine.parquet
+
+  # Wallet-construction fingerprints (features/fingerprint.py, docs/FINGERPRINTS.md).
+  fingerprint:
+    model_path: data/processed/fingerprint_model.json
+    # Below this calibrated confidence the answer is "unknown". Rationale: at
+    # 0.6 a named family is right at least 1.5 times as often as it is wrong
+    # on the calibration captures. Under that, a label points an analyst at a
+    # software family more often wrongly than a coin flip's margin justifies.
+    # Fixed before the first evaluation and not tuned on a test capture.
+    unknown_below: 0.6
+    # Fewer observable tells than this and the answer is "unknown" whatever the
+    # score: a transaction showing only its input/output counts and script
+    # type has not shown how it was built.
+    min_tells: 4
+    laplace: 1.0
 
   # "suspiciously round": a multiple of one of these, to within the tolerance
   round_units: [1.0, 0.5, 0.1, 0.05, 0.01]
@@ -555,6 +580,66 @@ generator:
     tor_exit:
       - {asn: 208294, name: TorExit, country: DE, prefix: "185.220"}
       - {asn: 4224, name: CalyxTor, country: US, prefix: "162.247"}
+
+  # Wallet-construction profiles (generator/wallets.py; tells and their basis in
+  # docs/FINGERPRINTS.md). OFF unless `generator.main --wallet-profiles` or a
+  # corpus manifest with a `fingerprint` block asks for them: every draw comes
+  # from its own stream, so with profiles off the output is byte-identical to
+  # what it was (pinned in tests/test_fingerprint.py). Each value is a
+  # probability map drawn per transaction. These are this simulation's
+  # stand-ins for the families named, not measurements of them: which parts
+  # are documented behaviour and which are assumptions is in the doc.
+  wallet_profiles:
+    start_height: 850000            # block height at the simulated clock's start
+    payment_mix: {core_like: 0.45, electrum_like: 0.30, legacy_naive: 0.25}
+    payee_types: {p2wpkh: 0.50, p2tr: 0.20, p2sh: 0.15, p2pkh: 0.15}
+    profiles:
+      core_like:
+        version: {2: 1.0}
+        anti_fee_sniping: 0.95      # nLockTime = height, else 0
+        rbf: 0.9                    # nSequence 0xFFFFFFFD
+        bip69: 0.0
+        change_position: {random: 1.0}
+        fee: {fractional: 1.0}
+        input_types: {p2wpkh: 0.6, p2tr: 0.4}
+        change_type: {match_inputs: 1.0}
+      electrum_like:
+        version: {2: 1.0}
+        anti_fee_sniping: 0.9
+        rbf: 0.85
+        bip69: 0.85
+        change_position: {random: 1.0}
+        fee: {integer: 0.8, fractional: 0.2}
+        input_types: {p2wpkh: 0.85, p2sh: 0.15}
+        change_type: {match_inputs: 1.0}
+      legacy_naive:
+        version: {1: 0.9, 2: 0.1}
+        anti_fee_sniping: 0.0
+        rbf: 0.0
+        bip69: 0.0
+        change_position: {last: 0.9, random: 0.1}
+        fee: {absolute: 0.85, fractional: 0.15}
+        input_types: {p2pkh: 0.8, p2sh: 0.2}
+        change_type: {reuse_input: 0.7, match_inputs: 0.3}
+      coordinator_coinjoin:
+        version: {1: 0.5, 2: 0.5}
+        anti_fee_sniping: 0.0
+        rbf: 0.0
+        bip69: 0.3
+        change_position: {random: 1.0}
+        fee: {integer: 0.7, fractional: 0.3}
+        input_types: {p2wpkh: 0.7, p2tr: 0.3}
+        change_type: {match_inputs: 1.0}
+        participant_change: 0.8     # share of participants given a change output
+      batch_withdrawal:
+        version: {2: 0.7, 1: 0.3}
+        anti_fee_sniping: 0.2
+        rbf: 0.1
+        bip69: 0.0
+        change_position: {last: 0.7, random: 0.3}
+        fee: {round: 0.7, integer: 0.3}
+        input_types: {p2wpkh: 0.6, p2sh: 0.4}
+        change_type: {match_inputs: 1.0}
 
 gossip:
   n_nodes: 500

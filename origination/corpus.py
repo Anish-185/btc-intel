@@ -74,6 +74,7 @@ import pandas as pd
 
 import config
 from features.relay import RELAY_COLUMNS, compute_relay_features, relay_frame
+from generator import wallets
 from generator.main import node_intel
 from generator.net import GossipNet, Ip, IpAllocator, build_net
 from generator.typologies import shape
@@ -88,6 +89,9 @@ MANIFEST = Path(__file__).with_name("manifest.json")
 #: capture — Dandelion stems, onion senders, v2 links, CoinJoins. Read by
 #: `analysis.evaluate`; the base corpus stays the model's headline.
 VALIDITY_MANIFEST = Path(__file__).with_name("manifest_validity.json")
+#: The validity variant with every transaction built under a wallet-construction
+#: profile (generator/wallets.py). Read by `features.fingerprint`.
+FINGERPRINT_MANIFEST = Path(__file__).with_name("manifest_fingerprint.json")
 
 #: The one sentence that sits next to every simulated number.
 OMISSIONS = (
@@ -136,6 +140,8 @@ def digest(manifest: dict, cfg: dict) -> str:
               "broadcast": cfg["generator"]["broadcast"],
               "asn_pools": cfg["generator"]["asn_pools"],
               "propagation": cfg["engines"]["propagation"]}
+    if manifest.get("fingerprint"):     # absent otherwise: older digests stand
+        blocks["wallet_profiles"] = cfg["generator"]["wallet_profiles"]
     return hashlib.sha256(json.dumps(blocks, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -181,6 +187,7 @@ def expand(manifest: dict) -> list[dict]:
                             "n_senders": rng.randint(*c["senders"]),
                             "tx_interval_s": c["tx_interval_s"],
                             **_validity_spec(manifest, capture_seed),
+                            **({"fingerprint": True} if manifest.get("fingerprint") else {}),
                         })
     unknown = held_out - {s["topology_id"] for s in specs}
     if unknown:
@@ -297,6 +304,10 @@ def simulate(spec: dict, cfg: dict) -> tuple[list[RelayEvent], dict[str, dict], 
     # all four toggles off is the base corpus's capture, draw for draw.
     vr = random.Random(_seed(spec["capture_seed"], "validity-sim"))
     world = _validity_world(spec, net, observers, vr) if variant else None
+    # Wallet profiles draw from a stream of their own too: with them off, not
+    # one draw anywhere else moves.
+    fr = random.Random(_seed(spec["capture_seed"], "fingerprint")) if spec.get("fingerprint") \
+        else None
 
     # Senders draw addresses from the same residential pools as relaying
     # nodes, so no enrichment column can tell a sender from a forwarder.
@@ -314,6 +325,8 @@ def simulate(spec: dict, cfg: dict) -> tuple[list[RelayEvent], dict[str, dict], 
         if adjacent:
             entries = sorted(set(entries) | {rng.choice(observers)})
         traits = {"cluster": f"s{k}", "onion": False, "dandelion": False, "v2": False}
+        if fr:
+            traits["wallet"] = wallets.payment_profile(fr, cfg)
         if world:
             home, entries, traits = _validity_sender(spec, world, home, entries, adjacent,
                                                      observers, traits, vr, cfg)
@@ -350,6 +363,10 @@ def simulate(spec: dict, cfg: dict) -> tuple[list[RelayEvent], dict[str, dict], 
                     else "batch" if vr.random() < spec["batch_rate"] else "payment")
             record.update(onion_origin=direct and traits["onion"],
                           **shape(vr, kind, traits["cluster"], cfg))
+            if fr:
+                profile = wallets.SHAPE_PROFILE.get(kind, traits["wallet"])
+                record.update(wallets.for_shape(record, profile, fr,
+                                                wallets.height_at(t, 1_790_000_000.0, cfg), cfg))
         if stem_length:
             stem_hops, fluff, t_fluff = net.stem(origin, t0, vr, entries, stem_length)
             fluff_hops = net.diffuse(net.nodes[fluff], t_fluff, rng, entries=net.peers[fluff])

@@ -1629,7 +1629,155 @@ The reverse direction (docs/CORRELATION.md): peer -> profile. Each count is the 
 
 
 
-## 12. Decisions taken in this pass
+## 12. Wallet-construction fingerprints
+
+Corpus `0b102851d7cfd6c4` (`origination/manifest_fingerprint.json`): the validity variant with every transaction built under a wallet-construction profile (`generator/wallets.py`). Naive Bayes over the tells, fitted on the training captures, isotonic-calibrated on the calibration captures, scored on the within- and cross-topology test captures. **full**: every tell the corpus records. **structural**: version, nLockTime and nSequence masked — what a relay log in the NTRO schema shows — with its own calibration. The answer is `unknown` under calibrated confidence 0.6 or with fewer than 4 observable tells (config.yaml, with the rationale).
+
+### Unknown rate and accuracy when answered
+
+| condition | test set | transactions | unknown | unknown rate | accuracy if answered |
+| --- | --- | --- | --- | --- | --- |
+| simulated | within-topology, full | 13681 | 792 | 0.058 | 0.976 |
+| simulated | within-topology, structural | 13681 | 647 | 0.047 | 0.970 |
+| simulated | cross-topology, full | 21758 | 1310 | 0.060 | 0.976 |
+| simulated | cross-topology, structural | 21758 | 1095 | 0.050 | 0.970 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+### Per class
+
+`recall` counts an unknown as a miss; `recall if answered` does not.
+
+| condition | test set | class | actual | named | true positives | precision | recall | recall if answered | unknown |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| simulated | within-topology, full | core_like | 4897 | 4704 | 4490 | 0.955 | 0.917 | 0.986 | 342 |
+| simulated | within-topology, full | electrum_like | 3438 | 2917 | 2852 | 0.978 | 0.830 | 0.930 | 372 |
+| simulated | within-topology, full | legacy_naive | 3057 | 3057 | 3057 | 1.000 | 1.000 | 1.000 | 0 |
+| simulated | within-topology, full | coordinator_coinjoin | 1004 | 951 | 940 | 0.988 | 0.936 | 0.979 | 44 |
+| simulated | within-topology, full | batch_withdrawal | 1285 | 1260 | 1240 | 0.984 | 0.965 | 0.991 | 34 |
+| simulated | within-topology, structural | core_like | 4897 | 4808 | 4554 | 0.947 | 0.930 | 0.987 | 283 |
+| simulated | within-topology, structural | electrum_like | 3438 | 2914 | 2842 | 0.975 | 0.827 | 0.916 | 334 |
+| simulated | within-topology, structural | legacy_naive | 3057 | 3053 | 3045 | 0.997 | 0.996 | 0.996 | 0 |
+| simulated | within-topology, structural | coordinator_coinjoin | 1004 | 940 | 940 | 1.000 | 0.936 | 0.936 | 0 |
+| simulated | within-topology, structural | batch_withdrawal | 1285 | 1319 | 1255 | 0.951 | 0.977 | 1.000 | 30 |
+| simulated | cross-topology, full | core_like | 7909 | 7559 | 7211 | 0.954 | 0.912 | 0.986 | 597 |
+| simulated | cross-topology, full | electrum_like | 5659 | 4818 | 4717 | 0.979 | 0.834 | 0.931 | 591 |
+| simulated | cross-topology, full | legacy_naive | 4544 | 4547 | 4544 | 0.999 | 1.000 | 1.000 | 0 |
+| simulated | cross-topology, full | coordinator_coinjoin | 1602 | 1511 | 1500 | 0.993 | 0.936 | 0.982 | 75 |
+| simulated | cross-topology, full | batch_withdrawal | 2044 | 2013 | 1986 | 0.987 | 0.972 | 0.994 | 47 |
+| simulated | cross-topology, structural | core_like | 7909 | 7720 | 7307 | 0.947 | 0.924 | 0.987 | 507 |
+| simulated | cross-topology, structural | electrum_like | 5659 | 4793 | 4692 | 0.979 | 0.829 | 0.917 | 541 |
+| simulated | cross-topology, structural | legacy_naive | 4544 | 4551 | 4538 | 0.997 | 0.999 | 0.999 | 0 |
+| simulated | cross-topology, structural | coordinator_coinjoin | 1602 | 1500 | 1500 | 1.000 | 0.936 | 0.936 | 0 |
+| simulated | cross-topology, structural | batch_withdrawal | 2044 | 2099 | 1997 | 0.951 | 0.977 | 1.000 | 47 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+### Confusion matrix — cross-topology, full
+
+Rows are the generator's profile, columns the fingerprint.
+
+| true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
+| --- | --- | --- | --- | --- | --- | --- |
+| batch_withdrawal | 0 | 0 | 0 | 11 | 1986 | 47 |
+| coordinator_coinjoin | 0 | 0 | 0 | 1500 | 27 | 75 |
+| core_like | 7211 | 101 | 0 | 0 | 0 | 597 |
+| electrum_like | 348 | 4717 | 3 | 0 | 0 | 591 |
+| legacy_naive | 0 | 0 | 4544 | 0 | 0 | 0 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+### Confusion matrix — cross-topology, structural
+
+Rows are the generator's profile, columns the fingerprint.
+
+| true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
+| --- | --- | --- | --- | --- | --- | --- |
+| batch_withdrawal | 0 | 0 | 0 | 0 | 1997 | 47 |
+| coordinator_coinjoin | 0 | 0 | 0 | 1500 | 102 | 0 |
+| core_like | 7307 | 95 | 0 | 0 | 0 | 507 |
+| electrum_like | 413 | 4692 | 13 | 0 | 0 | 541 |
+| legacy_naive | 0 | 6 | 4538 | 0 | 0 | 0 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+### Confusion matrix — within-topology, full
+
+Rows are the generator's profile, columns the fingerprint.
+
+| true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
+| --- | --- | --- | --- | --- | --- | --- |
+| batch_withdrawal | 0 | 0 | 0 | 11 | 1240 | 34 |
+| coordinator_coinjoin | 0 | 0 | 0 | 940 | 20 | 44 |
+| core_like | 4490 | 65 | 0 | 0 | 0 | 342 |
+| electrum_like | 214 | 2852 | 0 | 0 | 0 | 372 |
+| legacy_naive | 0 | 0 | 3057 | 0 | 0 | 0 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+### CoinJoin: the fingerprint against the validity layer
+
+`coordinator_coinjoin` named by the fingerprint, beside `analysis.validity`'s COINJOIN detector (`graph.clustering.is_coinjoin`) on the same transactions. They are compared, not reconciled: each keeps its own answer.
+
+| condition | test set | transactions | both CoinJoin | fingerprint only | detector only | neither | agreement rate |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| simulated | within-topology, full | 13681 | 941 | 10 | 422 | 12308 | 0.968 |
+| simulated | within-topology, structural | 13681 | 940 | 0 | 423 | 12318 | 0.969 |
+| simulated | cross-topology, full | 21758 | 1500 | 11 | 596 | 19651 | 0.972 |
+| simulated | cross-topology, structural | 21758 | 1500 | 0 | 596 | 19662 | 0.973 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+#### Where they disagree
+
+| condition | test set | disagreement | true profile | fingerprint said | transactions |
+| --- | --- | --- | --- | --- | --- |
+| simulated | within-topology, full | detector only | batch_withdrawal | batch_withdrawal | 353 |
+| simulated | within-topology, full | detector only | coordinator_coinjoin | unknown | 44 |
+| simulated | within-topology, full | detector only | coordinator_coinjoin | batch_withdrawal | 20 |
+| simulated | within-topology, full | detector only | batch_withdrawal | unknown | 5 |
+| simulated | within-topology, full | fingerprint only | batch_withdrawal | coordinator_coinjoin | 10 |
+| simulated | within-topology, structural | detector only | batch_withdrawal | batch_withdrawal | 355 |
+| simulated | within-topology, structural | detector only | coordinator_coinjoin | batch_withdrawal | 64 |
+| simulated | within-topology, structural | detector only | batch_withdrawal | unknown | 4 |
+| simulated | cross-topology, full | detector only | batch_withdrawal | batch_withdrawal | 489 |
+| simulated | cross-topology, full | detector only | coordinator_coinjoin | unknown | 75 |
+| simulated | cross-topology, full | detector only | coordinator_coinjoin | batch_withdrawal | 27 |
+| simulated | cross-topology, full | detector only | batch_withdrawal | unknown | 5 |
+| simulated | cross-topology, full | fingerprint only | batch_withdrawal | coordinator_coinjoin | 11 |
+| simulated | cross-topology, structural | detector only | batch_withdrawal | batch_withdrawal | 489 |
+| simulated | cross-topology, structural | detector only | coordinator_coinjoin | batch_withdrawal | 102 |
+| simulated | cross-topology, structural | detector only | batch_withdrawal | unknown | 5 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+**What the disagreements are** (cross-topology, full). 494 are batched withdrawals the detector calls a CoinJoin — its documented false positive (an equal-value batch paying no more equal amounts than it spends inputs, docs/VALIDITY.md) — which the fingerprint names correctly in 489 cases, from the single change output, the round fee rate and the payees' mixed script types. 102 are true CoinJoins the detector finds and the fingerprint does not (75 unknown, 27 called a batch): rounds where few participants took change look like a batch to the tells. 11 are transactions only the fingerprint calls a CoinJoin, 11 of them batches the detector's participant rule (no more equal outputs than inputs) correctly declines. Neither is forced to agree with the other: the validity layer's verdict governs what an origin answer may claim, and the fingerprint is shown beside it.
+
+### Transfer: the generator's own typologies
+
+The model above, on a `generator.main --wallet-profiles` dataset (seed 42, 3000 transactions): the same profiles, built on peel chains, layering fan-outs and same-actor spends the corpus never shows. Still simulated; a distribution shift inside the simulator.
+
+| condition | typology | transactions | unknown rate | accuracy if answered |
+| --- | --- | --- | --- | --- |
+| simulated | coinjoin | 88 | 0.511 | 0.767 |
+| simulated | layering | 123 | 0.081 | 0.434 |
+| simulated | normal | 2523 | 0.080 | 0.898 |
+| simulated | ransomware_collector | 176 | 0.528 | 0.795 |
+| simulated | same_actor_cluster | 90 | 0.044 | 0.442 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+| true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
+| --- | --- | --- | --- | --- | --- | --- |
+| coordinator_coinjoin | 0 | 0 | 0 | 33 | 10 | 45 |
+| core_like | 976 | 113 | 0 | 0 | 1 | 190 |
+| electrum_like | 188 | 513 | 3 | 1 | 0 | 96 |
+| legacy_naive | 1 | 3 | 748 | 55 | 0 | 24 |
+
+*`condition="simulated"`.* The profiles are this simulator's stand-ins for the families they are named after, built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about the real software rather than documented behaviour. The classifier is fitted to the same profiles it is scored on, so these numbers measure how well it recovers the simulator's own construction rules, not how well it would identify real wallets. Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the standard single-key estimate, exact here because the generator uses the same table.
+
+
+## 13. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

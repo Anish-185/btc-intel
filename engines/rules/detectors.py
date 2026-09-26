@@ -18,6 +18,7 @@ import pandas as pd
 
 import config
 from features.engineer import compute_all
+from features.fingerprint import confident_labels
 from graph.builder import Tx, from_parquet, graph_transactions
 from graph.clustering import Clustering, cluster_wallets
 
@@ -38,7 +39,7 @@ class FeatureSet:
     def from_graph(cls, graph, cfg: dict | None = None) -> FeatureSet:
         cfg = cfg or config.load()
         txs = list(graph_transactions(graph)) if isinstance(graph, nx.MultiDiGraph) else list(graph)
-        clustering = cluster_wallets(txs, cfg)
+        clustering = cluster_wallets(txs, cfg, fingerprints=confident_labels(txs, cfg))
         entities, transactions = compute_all(txs, clustering, cfg)
         return cls(entities, transactions, clustering)
 

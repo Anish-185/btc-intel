@@ -41,6 +41,7 @@ from engines.propagation.estimators import CALIBRATION_BASIS, estimate_origin
 from graph.builder import iter_transactions
 from engines.propagation.tree import build_trees, degraded_mode
 from engines.correlation import profile as correlation_profile
+from features import fingerprint
 from engines.rules.detectors import FeatureSet
 from origination.model import OriginationModel
 from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
@@ -110,7 +111,7 @@ def invalidate() -> None:
     Called when the artefacts change under us — a red-team injection, or a
     reset — so the next request rebuilds rather than serving the old case.
     """
-    for cached in (_transactions, _intel, _features, _profiles):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints):
         cached.cache_clear()
     BUNDLE.clear()
 
@@ -154,6 +155,12 @@ def _profiles() -> correlation_profile.Sources:
     return correlation_profile.build_sources(cfg, df, matrix, model, graph_features, _intel())
 
 
+@lru_cache(maxsize=1)
+def _fingerprints() -> dict[str, dict]:
+    """txid -> wallet-construction fingerprint, for every served transaction."""
+    return fingerprint.answers_for(iter_transactions(_frame()))
+
+
 # The full signal bundle: every engine's output for every entity. Built on
 # first use (about three seconds on the demo dataset) because only red team
 # needs it, and kept mutable so an incremental run can extend it in place.
@@ -192,7 +199,7 @@ def commit_bundle(updated: dict) -> None:
             "alerts": json.loads(alerts.to_json(orient="records")),
         }
         Path(cfg["fusion"]["alerts_json"]).write_text(json.dumps(payload, indent=2))
-    for cached in (_transactions, _intel, _features, _profiles):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints):
         cached.cache_clear()
     BUNDLE.clear()
     BUNDLE.update(updated)
@@ -388,10 +395,27 @@ def entity(entity_id: str) -> dict:
         "evidence": alert.get("evidence", []),
         "taint_path": alert.get("taint_path", []),
         "leads": _leads(alert.get("leads")),
+        "fingerprints": _entity_fingerprints(set(wallets), features),
         "caveat": ("scores rank leads for a human; an entity without an alert is not "
                    "cleared, only unremarkable"),
     }
 
+
+def _entity_fingerprints(wallets: set[str], features) -> dict:
+    """How the transactions spending this entity's wallets were built, and how
+    sure the clustering is that these wallets belong together — a fingerprint
+    mismatch lowers that confidence and never made the cluster."""
+    answers = _fingerprints()
+    spent = sorted({tx.txid for tx in iter_transactions(_frame())
+                    if wallets & set(tx.input_addresses)})
+    cluster = features.clustering.cluster_of(next(iter(wallets))) if wallets else None
+    conflicts = features.clustering.conflicts.get(cluster, [])
+    return {**fingerprint.distribution([answers[t] for t in spent if t in answers]),
+            "cluster_confidence": features.clustering.confidence.get(cluster, 1.0),
+            "conflicts": [{"txid": m["txid"], "heuristic": m["heuristic"],
+                           "fingerprints": m["fingerprints"]} for m in conflicts],
+            "note": ("fingerprints only lower a merge's confidence when the wallets' "
+                     "spending transactions were built differently; they never create one")}
 
 
 def subgraph(entity_id: str, hops: int) -> dict:
@@ -656,6 +680,16 @@ def propagation(txid: str) -> dict:
         "layout": {"name": "dagre", "roots": [estimate.ip] if estimate.ip else []},
         "elements": {"nodes": nodes, "edges": edges},
     }
+
+
+@app.get("/transactions/{txid}/fingerprint")
+def transaction_fingerprint(txid: str) -> dict:
+    """Which wallet software family or construction pattern likely built this
+    transaction: a ranked label set, or unknown. A family, never a party."""
+    answer = _fingerprints().get(txid)
+    if answer is None:
+        raise HTTPException(404, f"transaction {txid} has no structure in the served dataset")
+    return {"txid": txid, **answer}
 
 
 @app.get("/transactions/{txid}/origination")

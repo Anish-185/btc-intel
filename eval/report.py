@@ -627,8 +627,96 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add("\n## 11. Peer profiles: coverage\n")
     add(profile_section(cfg, origination))
 
+    # --- 12. wallet fingerprints ------------------------------------------
+    add("\n## 12. Wallet-construction fingerprints\n")
+    add(fingerprint_section(cfg, rebuild))
+
     add(CLOSING)
     return "\n".join(parts)
+
+
+FINGERPRINT_OMISSIONS = (
+    "The profiles are this simulator's stand-ins for the families they are named after, "
+    "built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about "
+    "the real software rather than documented behaviour. The classifier is fitted to the "
+    "same profiles it is scored on, so these numbers measure how well it recovers the "
+    "simulator's own construction rules, not how well it would identify real wallets. "
+    "Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the "
+    "standard single-key estimate, exact here because the generator uses the same table.")
+
+
+def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
+    """Section 12: per-class precision/recall, confusion matrices and unknown
+    rates on the fingerprint corpus's test sets, the CoinJoin agreement with
+    the validity layer, and a transfer check on the generator's own typologies."""
+    from features import fingerprint as F
+
+    fitted = F.fit(cfg, rebuild)
+    result = F.evaluate(fitted, cfg)
+    transfer = F.transfer(fitted["model"], cfg)
+    note = f"\n*`condition=\"simulated\"`.* {FINGERPRINT_OMISSIONS}\n"
+    f = cfg["features"]["fingerprint"]
+    out = [
+        (f"Corpus `{fitted['corpus']}` (`origination/manifest_fingerprint.json`): the validity "
+        "variant with every transaction built under a wallet-construction profile "
+        "(`generator/wallets.py`). Naive Bayes over the tells, fitted on the training "
+        "captures, isotonic-calibrated on the calibration captures, scored on the within- "
+        "and cross-topology test captures. **full**: every tell the corpus records. "
+        "**structural**: version, nLockTime and nSequence masked — what a relay log in the "
+        "NTRO schema shows — with its own calibration. The answer is `unknown` under "
+        f"calibrated confidence {f['unknown_below']} or with fewer than {f['min_tells']} "
+        "observable tells (config.yaml, with the rationale).\n"),
+        "\n### Unknown rate and accuracy when answered\n\n", md_table(result["unknown"]), note,
+        ("\n### Per class\n\n`recall` counts an unknown as a miss; `recall if answered` does "
+        "not.\n\n"), md_table(result["per_class"]), note,
+    ]
+    for label in ("cross-topology, full", "cross-topology, structural", "within-topology, full"):
+        out += [(f"\n### Confusion matrix — {label}\n\nRows are the generator's profile, "
+                "columns the fingerprint.\n\n"),
+                md_table(result["confusion"][label].reset_index()), note]
+
+    agree = result["agreement"]
+    dis = result["disagreements"]
+    cross = dis[dis["test set"] == "cross-topology, full"]
+
+    def n(kind, truth=None, said=None):
+        m = cross["disagreement"] == kind
+        if truth:
+            m &= cross["true profile"] == truth
+        if said:
+            m &= cross["fingerprint said"] == said
+        return int(cross.loc[m, "transactions"].sum())
+
+    out += [
+        ("\n### CoinJoin: the fingerprint against the validity layer\n\n"
+        "`coordinator_coinjoin` named by the fingerprint, beside `analysis.validity`'s "
+        "COINJOIN detector (`graph.clustering.is_coinjoin`) on the same transactions. They "
+        "are compared, not reconciled: each keeps its own answer.\n\n"), md_table(agree), note,
+        "\n#### Where they disagree\n\n", md_table(dis), note,
+        ("\n**What the disagreements are** (cross-topology, full). "
+        f"{n('detector only', 'batch_withdrawal')} are batched withdrawals the detector calls "
+        "a CoinJoin — its documented false positive (an equal-value batch paying no more equal "
+        "amounts than it spends inputs, docs/VALIDITY.md) — which the fingerprint names "
+        f"correctly in {n('detector only', 'batch_withdrawal', 'batch_withdrawal')} cases, "
+        "from the single change output, the round fee rate and the payees' mixed script types. "
+        f"{n('detector only', 'coordinator_coinjoin')} are true CoinJoins the detector finds and "
+        f"the fingerprint does not ({n('detector only', 'coordinator_coinjoin', 'unknown')} "
+        f"unknown, {n('detector only', 'coordinator_coinjoin', 'batch_withdrawal')} called a "
+        "batch): rounds where few participants took change look like a batch to the tells. "
+        f"{n('fingerprint only')} are transactions only the fingerprint calls a CoinJoin, "
+        f"{n('fingerprint only', 'batch_withdrawal')} of them batches the detector's participant "
+        "rule (no more equal outputs than inputs) correctly declines. Neither is forced to "
+        "agree with the other: the validity layer's verdict governs what an origin answer may claim, and the "
+        "fingerprint is shown beside it.\n"),
+        ("\n### Transfer: the generator's own typologies\n\n"
+        f"The model above, on a `generator.main --wallet-profiles` dataset (seed "
+        f"{transfer['seed']}, {transfer['transactions']} transactions): the same profiles, "
+        "built on peel chains, layering fan-outs and same-actor spends the corpus never "
+        "shows. Still simulated; a distribution shift inside the simulator.\n\n"),
+        md_table(transfer["by_typology"]), note,
+        "\n", md_table(transfer["confusion"].reset_index()), note,
+    ]
+    return "".join(out)
 
 
 def profile_section(cfg: dict, origination: dict) -> str:
@@ -951,7 +1039,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 12. Decisions taken in this pass
+## 13. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker

@@ -32,6 +32,11 @@ class RawTransaction(BaseModel):
     # local GeoIP databases are unavailable. geoip.py records which won.
     asn: int | None = None
     geo_country: str | None = None
+    # Construction fields (features/fingerprint.py); absent in most dumps.
+    tx_version: int | None = None
+    locktime: int | None = Field(default=None, ge=0, le=0xFFFFFFFF)
+    input_sequences: list[int] | None = None
+    input_outpoints: list[str] | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> RawTransaction:
@@ -39,6 +44,10 @@ class RawTransaction(BaseModel):
             raise ValueError("mismatched input array lengths")
         if len(self.output_addresses) != len(self.output_amounts):
             raise ValueError("mismatched output array lengths")
+        for name in ("input_sequences", "input_outpoints"):
+            value = getattr(self, name)
+            if value is not None and len(value) != len(self.input_addresses):
+                raise ValueError(f"{name} does not have one entry per input")
         if not self.input_addresses or not self.output_addresses:
             raise ValueError("transaction has no inputs or no outputs")
         if any(a < 0 for a in self.input_amounts + self.output_amounts):

@@ -118,6 +118,11 @@ export interface EntityDetail {
   evidence: string[];
   taint_path: string[];
   leads: Lead[];
+  fingerprints?: FingerprintDistribution & {
+    cluster_confidence: number;
+    conflicts: { txid: string; heuristic: string; fingerprints: Record<string, string[]> }[];
+    note: string;
+  };
   caveat: string;
 }
 
@@ -260,6 +265,11 @@ export interface PeerProfile {
   timing: Timing;
   clients: { user_agents: ClientHistory[]; services: ClientHistory[]; statement: string | null };
   linked_clusters: LinkedCluster[];
+  fingerprints?: {
+    originated: FingerprintDistribution & { without_structure: number };
+    propagation_origin: FingerprintDistribution & { without_structure: number };
+    statement: string;
+  };
   excluded_links: { txid: string; reason: string; statement: string }[];
   vantage: Vantage[];
   /** Absent on an onion identity: it has no IP to enrich. */
@@ -324,4 +334,27 @@ export interface TxOrigination {
   txid: string;
   captures: CaptureOrigination[];
   note: string | null;
+}
+
+/** features/fingerprint.py — a wallet software family or construction
+ *  pattern, never a party. */
+export interface FingerprintAnswer {
+  label: string;
+  display: string;
+  confidence: number | null;
+  unknown_reason: string | null;
+  ranked: { label: string; display: string; confidence: number; posterior: number }[];
+  tells: Record<string, string | null>;
+  observed_tells: string[];
+  condition?: "full" | "structural";
+  basis?: string;
+}
+
+export interface FingerprintDistribution {
+  transactions: number;
+  labels: { label: string; display: string; count: number; share: number }[];
+}
+
+export interface TxFingerprint extends FingerprintAnswer {
+  txid: string;
 }

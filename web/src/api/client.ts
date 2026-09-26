@@ -11,6 +11,7 @@ import type {
   PeerProfile,
   Propagation,
   Stats,
+  TxFingerprint,
   TxOrigination,
 } from "./types";
 
@@ -71,6 +72,8 @@ export const api = {
     get<EntityGraph>(`/entities/${encodeURIComponent(id)}/graph?hops=${hops}`, signal),
   propagation: (txid: string, signal?: AbortSignal) =>
     get<Propagation>(`/transactions/${encodeURIComponent(txid)}/propagation`, signal),
+  fingerprint: (txid: string, signal?: AbortSignal) =>
+    get<TxFingerprint>(`/transactions/${encodeURIComponent(txid)}/fingerprint`, signal),
   origination: (txid: string, signal?: AbortSignal) =>
     get<TxOrigination>(`/transactions/${encodeURIComponent(txid)}/origination`, signal),
   /** Every call is recorded in the custody ledger by the server. */

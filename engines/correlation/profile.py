@@ -50,6 +50,7 @@ import config
 from analysis import validity
 from analysis.validity import COINJOIN, Verdict
 from eval.origin import abstention_reasons
+from features import fingerprint
 from graph.builder import Tx, iter_transactions
 from graph.clustering import is_coinjoin
 
@@ -160,6 +161,7 @@ class Sources:
     leads: pd.DataFrame | None = None            # score_observations(observations)
     txs: dict[str, Tx] = field(default_factory=dict)
     intel: object | None = None                  # ingest.ip_intel, for ip_class
+    fingerprints: dict = field(default_factory=dict)  # txid -> features.fingerprint answer
     hop_provenance: str = "simulated"
     model_note: str | None = None                # why there are no answers, if none
     _index: dict = field(default_factory=dict, repr=False)
@@ -199,6 +201,7 @@ def build_sources(cfg: dict | None = None, transactions: pd.DataFrame | None = N
         src.observations = collect_observations(transactions, features, cfg, src.origins,
                                                 intel)
         src.leads = score_observations(src.observations, cfg)
+        src.fingerprints = fingerprint.answers_for(src.txs.values(), cfg)
 
     relay_path = Path(cfg["features"]["relay_path"])
     if matrix is None and relay_path.exists():
@@ -466,7 +469,7 @@ def peer_profile(peer: str, src: Sources, cfg: dict | None = None) -> dict | Non
                 relayed.append({"source": MATRIX_SOURCE, "txid": r.txid,
                                 "capture_id": r.capture_id, "rank": int(r.announce_rank),
                                 "candidates": int(r.candidate_count)})
-    propagation_named = 0
+    propagation_named, propagation_txids = 0, []
     if hops is not None and src.origins is not None:
         origin_of = dict(zip(src.origins["txid"], src.origins["estimated_origin_ip"]))
         for txid in hops.sort_values("timestamp")["txid"].drop_duplicates():
@@ -475,6 +478,7 @@ def peer_profile(peer: str, src: Sources, cfg: dict | None = None) -> dict | Non
                                 "rank": None, "candidates": None})
             else:
                 propagation_named += 1
+                propagation_txids.append(txid)
 
     events = [] if mine is None else [(f"capture:{r.capture_id}", float(r.announce_ts))
                                       for r in mine.itertuples()]
@@ -539,12 +543,27 @@ def peer_profile(peer: str, src: Sources, cfg: dict | None = None) -> dict | Non
         },
         "linked_clusters": clusters,
         "excluded_links": excluded,
+        "fingerprints": _fingerprints(claims, propagation_txids, src),
         "vantage": vantage,
         "caveat": CAVEAT.format(peer=peer),
     }
     if not onion:
         profile["network"] = _network(peer, mine, hops, src.intel)
     return profile
+
+
+def _fingerprints(claims: list[dict], propagation_txids: list[str], src: Sources) -> dict:
+    """How the transactions this peer originated were built: software families
+    and construction patterns, never who. Only transactions whose structure is
+    in the chain data can be fingerprinted; the rest are counted, not guessed."""
+    def split(txids):
+        known = [src.fingerprints[t] for t in txids if t in src.fingerprints]
+        return {**fingerprint.distribution(known), "without_structure": len(txids) - len(known)}
+    return {"originated": split(list(dict.fromkeys(c["txid"] for c in claims))),
+            "propagation_origin": split(propagation_txids),
+            "statement": ("wallet-construction fingerprints of the transactions this peer "
+                          "is named origin of (features/fingerprint.py): a software family "
+                          "or pattern per transaction, or unknown")}
 
 
 def _network(peer: str, mine: pd.DataFrame | None, hops: pd.DataFrame | None,

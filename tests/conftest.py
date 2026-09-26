@@ -89,6 +89,7 @@ def artifact_paths() -> list[Path]:
     for block, key in ARTIFACTS:
         value = cfg[block][key]
         paths.append(Path(value["output_path"] if isinstance(value, dict) else value))
+    paths.append(Path(cfg["features"]["fingerprint"]["model_path"]))
     return paths
 
 

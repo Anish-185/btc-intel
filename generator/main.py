@@ -16,6 +16,7 @@ from pathlib import Path
 
 import config
 
+from . import wallets
 from .net import GossipNet, Ip, build_net
 from .typologies import TYPOLOGIES, Tx, World
 from .writers import open_writers
@@ -61,6 +62,10 @@ def relay_rows(tx: Tx, origin: Ip, net: GossipNet, rng: random.Random, cfg: dict
     in_amt = [v for _, v in tx.inputs]
     out_addr = [a for a, _ in tx.outputs]
     out_amt = [v for _, v in tx.outputs]
+    built = getattr(tx, "construction", None) or {}
+    extra = ({"tx_version": built["tx_version"], "locktime": built["locktime"],
+              "input_sequences": built["sequences"], "input_outpoints": built["outpoints"]}
+             if built else {})
     for ts, src, dst in hops:
         yield {
             "timestamp": iso(ts), "src_ip": src.addr, "dst_ip": dst.addr,
@@ -68,7 +73,39 @@ def relay_rows(tx: Tx, origin: Ip, net: GossipNet, rng: random.Random, cfg: dict
             "tx_id": tx.txid, "input_addresses": in_addr, "output_addresses": out_addr,
             "input_amounts": in_amt, "output_amounts": out_amt, "fee": tx.fee,
             "script_type": tx.script_type, "geo_country": src.country, "asn": src.asn,
+            **extra,
         }
+
+
+def construct(tx: Tx, world: World, profiles: dict, fr: random.Random, t0: float,
+              cfg: dict) -> str:
+    """Rebuild `tx` under its sender's wallet profile (generator/wallets.py).
+
+    A CoinJoin is a coordinator's construction whoever joined it; every other
+    transaction takes the profile of the actor who built it, drawn once per
+    actor. Batched-withdrawal structure is not produced by these typologies, so
+    that profile comes only from the corpus's batch shape.
+    """
+    if tx.pattern == "coinjoin":
+        profile = "coordinator_coinjoin"
+    else:
+        profile = profiles.setdefault(tx.origin_actor, wallets.payment_profile(fr, cfg))
+    owned = [i for i, (a, _) in enumerate(tx.outputs)
+             if world.wallet_owner.get(a) == tx.origin_actor]
+    outputs = list(tx.outputs)
+    change = {}
+    if len(owned) == 1 and len(outputs) > 1 and profile != "coordinator_coinjoin":
+        change = {owned[0]: None}
+        p = cfg["generator"]["wallet_profiles"]["profiles"][profile]
+        if wallets.draw(fr, p["change_type"]) == "reuse_input":
+            outputs[owned[0]] = (tx.inputs[0][0], outputs[owned[0]][1])
+    built = wallets.build(tx.inputs, outputs, change, profile, fr,
+                          wallets.height_at(tx.ts, t0, cfg), cfg)
+    tx.inputs = list(zip(built["in_addrs"], built["in_vals"]))
+    tx.outputs = list(zip(built["out_addrs"], built["out_vals"]))
+    tx.fee = built["fee"]
+    tx.construction = built
+    return profile
 
 
 def spread_instance(txs, name: str, rng: random.Random, cfg: dict) -> None:
@@ -203,6 +240,7 @@ def generate(args, cfg: dict | None = None) -> dict:
 
     world = World(rng, cfg)
     world.t = datetime.fromisoformat(cfg["generator"]["start_time"].replace("Z", "+00:00")).timestamp()
+    world_start = world.t
     world.populate(args.n_actors)
 
     mix = cfg["generator"]["pattern_mix"]
@@ -211,7 +249,12 @@ def generate(args, cfg: dict | None = None) -> dict:
     produced = {k: 0 for k in mix}
     tx_meta: dict[str, dict] = {}
     out_dir = Path(args.output)
-    writers = open_writers(out_dir, args.formats, cfg)
+    profiled = bool(getattr(args, "wallet_profiles", False))
+    # Its own stream: with profiles off not one draw moves, and the files are
+    # byte-identical to a run from before profiles existed.
+    fr = random.Random(args.seed + 13) if profiled else None
+    profiles: dict[int, str] = {}
+    writers = open_writers(out_dir, args.formats, cfg, construction=profiled)
     n_rows = 0
     try:
         while sum(produced.values()) < args.n_transactions:
@@ -232,6 +275,9 @@ def generate(args, cfg: dict | None = None) -> dict:
                     "true_origin_ip": actor.home_ip.addr, "observed_origin_ip": origin.addr,
                     "broadcast": kind, "timestamp": iso(tx.ts),
                 }
+                if fr:
+                    tx_meta[tx.txid]["wallet_profile"] = construct(
+                        tx, world, profiles, fr, world_start, cfg)
                 for row in relay_rows(tx, origin, net, rng, cfg,
                                       args.relay_observation_rate, args.single_row):
                     for wr in writers:
@@ -247,6 +293,7 @@ def generate(args, cfg: dict | None = None) -> dict:
     (out_dir / WATCHLIST).write_text(
         json.dumps(watchlist(world, gt, cfg, random.Random(args.seed + 11)), indent=1))
     return {"transactions": len(tx_meta), "rows": n_rows, "per_typology": produced,
+            "wallet_profiles": profiled,
             "shifted": bool(getattr(args, "shifted", False)),
             "actors": len(world.actors), "wallets": len(world.wallet_owner),
             "output": str(out_dir)}
@@ -266,6 +313,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="fraction of gossip hops that appear in the output")
     p.add_argument("--single-row", action="store_true",
                    help="one row per txid (origin broadcast only) — no multi-hop records")
+    p.add_argument("--wallet-profiles", action="store_true",
+                   help="build every transaction under a wallet-construction profile "
+                        "(generator/wallets.py) and write the construction columns")
     p.add_argument("--shifted", action="store_true",
                    help="deform the typologies (jittered ratios, deeper chains, longer "
                         "windows, interleaved mixes) to test generalisation")

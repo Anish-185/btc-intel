@@ -21,7 +21,7 @@ import custody
 
 from .geoip import COLUMNS as GEO_COLUMNS
 from .geoip import GeoIp, enrich
-from .parsers import PARSERS, parse
+from .parsers import OPTIONAL, PARSERS, parse
 from .schema import RawTransaction, validate
 
 log = logging.getLogger(__name__)
@@ -71,14 +71,16 @@ def run(input_path, output=None, quarantine=None, fmt: str | None = None,
             bad.append({"source_file": src.name, "row": n, "reason": reason,
                         "raw": json.dumps(record, default=str)})
             continue
-        row = model.model_dump()
+        # Construction fields only when the record had them, so a dataset
+        # without them ingests to exactly the columns it always did.
+        row = model.model_dump(exclude={f for f in OPTIONAL if getattr(model, f) is None})
         row["src_ip"] = str(row["src_ip"])
         row["dst_ip"] = str(row["dst_ip"])
         good.append(row)
 
     df = pd.DataFrame(good)
     if df.empty:  # keep the column contract even for an all-bad input
-        df = pd.DataFrame(columns=list(RawTransaction.model_fields))
+        df = pd.DataFrame(columns=[f for f in RawTransaction.model_fields if f not in OPTIONAL])
     enrich(df, geo or GeoIp(cfg), cfg=cfg)
 
     for path, frame in ((output, df), (quarantine, pd.DataFrame(bad, columns=QUARANTINE_COLUMNS))):
