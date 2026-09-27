@@ -143,10 +143,12 @@ Tags feed the existing fusion stacker as one more signal, `tag_score`: the
 strongest applied tag's `tags.risk[category] × effective confidence`.
 Exchange/VASP tags weigh 0. They say where money went, not that an entity is
 suspect; P12 uses them for exit points. A fitted stacker learns the signal's
-weight. The unfitted fallback uses `tags.fallback_weight`. With an empty store,
-`tag_score` is 0 for every entity: a fitted stacker gives it no weight, but
-the unfitted fallback's normaliser now includes `tags.fallback_weight`, so
-unfitted scores are 1.10/1.35, about a fifth, lower than before tags existed, at an unchanged threshold. The served demo and the evaluation use fitted stackers.
+weight. The unfitted fallback is a weighted average over the signals present.
+`tag_score` counts as present, with weight `tags.fallback_weight`, only when
+a verified bundle is loaded. Without one, the fallback's weights, scores and
+alert counts are exactly those of 9f939f8, before the store existed
+(`tests/test_tagstore.py`). Presence is decided from the store, not the data,
+so a subset of entities scores exactly as it does inside the whole frame.
 
 The evaluation never reads the operator's store (`data/tags`).
 `eval.report` switches it off, because a demo bundle there is derived from

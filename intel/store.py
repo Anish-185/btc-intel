@@ -125,6 +125,11 @@ def load(cfg: dict | None = None, directory=None) -> TagStore:
     return store
 
 
+def loaded(cfg: dict | None = None) -> bool:
+    """Whether any verified bundle is in the store: the tag signal exists."""
+    return any(b["ok"] for b in load(cfg).bundles)
+
+
 def tag_scores(features, cfg: dict | None = None, store: TagStore | None = None) -> pd.DataFrame:
     """One `tag_score` per entity, for fusion.pipeline and fusion.incremental."""
     store = store or load(cfg)

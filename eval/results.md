@@ -2082,3 +2082,33 @@ The tag weight is fitted on 4 tagged entities in the base dataset, and a tagged 
 | ransomware_collector | 10 | 0.900 | 1.000 |
 | same_actor_cluster | 10 | 0.000 | 0.000 |
 
+## 16. Exit points: tracing to cash-out, an upper bound
+
+`condition="simulated"`. **Upper bound: the tags come from ground truth.** The generator never pays an exchange with illicit money; its cash-outs are fresh wallets. So each dataset gets an in-memory tag store (never data/tags) in which every true cash-out cluster is tagged exchange/VASP (each ransomware peel's recipient, each layering merge's sink), beside the generator's real exchanges as decoys. From each operation's origin cluster, `analysis.exit_point` traces under both taint models and ranks the tagged clusters it reaches (depth 8, haircut floor 0.1%, poison floor 0.001 BTC). Datasets: the ten of section 13's seed sweep, 327 operations.
+
+| condition | typology | model | operations | top1 | top3 | reached | median_candidates |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| shifted | layering | haircut | 86 | 0.372 | 0.372 | 0.372 | 0.000 |
+| shifted | layering | poison | 86 | 0.488 | 0.488 | 0.488 | 0.000 |
+| shifted | ransomware_collector | haircut | 74 | 1.000 | 1.000 | 1.000 | 11.000 |
+| shifted | ransomware_collector | poison | 74 | 1.000 | 1.000 | 1.000 | 11.000 |
+| standard | layering | haircut | 122 | 1.000 | 1.000 | 1.000 | 1.000 |
+| standard | layering | poison | 122 | 1.000 | 1.000 | 1.000 | 1.000 |
+| standard | ransomware_collector | haircut | 45 | 1.000 | 1.000 | 1.000 | 9.000 |
+| standard | ransomware_collector | poison | 45 | 1.000 | 1.000 | 1.000 | 9.000 |
+
+
+**Read plainly.** Generator crime reaches no decoy: the only tagged clusters a trace can reach are the operation's own cash-outs, so top-1 measures whether tracing reaches a cash-out within the limits, not whether ranking picks the right service among several. It is not evidence that ranking works on real data, where funds pass through services, mixers and unrelated users before any exchange. 0 operation(s) started in a cluster that is itself a true cash-out.
+
+**Where reach fails.** Shifted layering is deeper. On shifted seed 101 the missed sinks sat 7 to 11 entity hops from the source. Those past 8 hops are beyond `max_hops`; the others fall under the 0.1% haircut floor after repeated fan-outs, before the merge recombines them. Poison has no share floor, so it reaches more. The cut-offs were set before this evaluation and are not retuned on it.
+
+### CoinJoin termination
+
+From every input cluster of every generator CoinJoin: did tracing stop at the mix (recorded as funds entering a CoinJoin), and did any candidate path pass through the CoinJoin's transaction?
+
+| detected | seeds | coinjoins | stopped_at_mix | candidate_through_mix |
+| --- | --- | --- | --- | --- |
+| detected by clustering | 35018 | 4124 | 1.000 | 0.017 |
+
+
+1.7% of participant traces still produced a candidate through a CoinJoin's transaction. That happens where one pair of clusters is linked by a CoinJoin and by an ordinary payment: the entity-graph edge is not made only of mixes, so `fusion.taint` follows it (as `propagate` always has), and the hop's reasoning in the packet says the edge includes CoinJoins.

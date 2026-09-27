@@ -345,6 +345,10 @@ lists, a simulated demo bundle) carried across the air gap and imported with
 `python -m intel.bundle import`. Each tag shows its source and date, and
 conflicts are shown, never resolved. Tags feed fusion as `tag_score`. See
 docs/TAGSTORE.md.
+`GET /exit-points/{address|entity|actor}/{subject}` (and `/packet` for the
+PDF) — trace a seed's funds forward under haircut and poison taint, stop at
+CoinJoins, and rank clusters tagged exchange/VASP as candidate cash-out points.
+It is an investigative lead, not proof of ownership. See docs/EXIT_POINTS.md.
 
 **No authentication**, deliberately, for the demo — it binds to localhost and
 serves synthetic data. A deployment would need auth, per-case authorisation, an

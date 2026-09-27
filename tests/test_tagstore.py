@@ -8,6 +8,8 @@ import inspect
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 import config
@@ -260,3 +262,39 @@ def test_a_csv_row_that_is_not_a_valid_tag_fails_the_file_with_its_line(tmp_path
 
 def test_intel_is_a_declared_package():
     assert Path(intel.__file__).parent.name == "intel"
+
+
+# --- the unfitted fallback without tags ------------------------------------------
+def pre_p11_fallback(frame, cfg):
+    """fusion.stacker's fallback as it was at 9f939f8: four signals, config weights."""
+    w = cfg["risk_weights"]
+    weights = {"rule_score": w.get("rules", 0.35), "anomaly_score": w.get("anomaly", 0.25),
+               "gnn_score": w.get("gnn", 0.25), "taint_score": w.get("taint", 0.25)}
+    values = frame[list(weights)].astype(float).fillna(0.0).to_numpy()
+    return values @ np.array(list(weights.values())) / sum(weights.values())
+
+
+def test_without_a_tag_store_the_fallback_scores_exactly_as_before_p11(tmp_path):
+    from fusion.stacker import Stacker, default_weights
+    rng = np.random.default_rng(3)
+    frame = pd.DataFrame(rng.random((400, 4)), columns=["rule_score", "anomaly_score",
+                                                        "gnn_score", "taint_score"])
+    frame["tag_score"] = 0.0
+    cfg = cfg_for(tmp_path)                           # an empty store directory
+    for c in (cfg, {**cfg, "tags": {**cfg["tags"], "store_dir": None}}):
+        weights = default_weights(c)
+        assert "tag_score" not in weights
+        scores = Stacker(fallback_weights=weights).score(frame)
+        assert np.array_equal(scores, pre_p11_fallback(frame, c))
+        threshold = c["fusion"]["alert_threshold"]
+        assert (scores >= threshold).sum() == (pre_p11_fallback(frame, c) >= threshold).sum()
+        # a subset scores exactly as it does inside the whole frame
+        assert np.array_equal(Stacker(fallback_weights=weights).score(frame.iloc[:7]), scores[:7])
+
+
+def test_with_a_tag_store_the_fallback_includes_the_tag_signal(tmp_path):
+    from fusion.stacker import default_weights
+    cfg = cfg_for(tmp_path)
+    B.write_bundle([tag("a1")], tmp_path / "b", "team", "list")
+    B.import_bundle(tmp_path / "b", cfg)
+    assert default_weights(cfg)["tag_score"] == cfg["tags"]["fallback_weight"]

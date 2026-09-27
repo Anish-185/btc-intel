@@ -650,7 +650,58 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
 
     add(CLOSING)
     add(tag_section(shifted[default_rate], cfg))
+    add(exit_section(cfg))
     return "\n".join(parts)
+
+
+def exit_section(cfg: dict, summary: dict | None = None) -> str:
+    """Section 16: exit points against ground truth, an upper bound."""
+    from eval import actor_queue as AQ
+    from eval import exit_eval
+    if summary is None:
+        summary = exit_eval.summarise([exit_eval.evaluate(ds, cfg)
+                                       for ds in AQ.power_datasets(cfg).values()])
+    x = cfg["exit_point"]
+    mix = summary["coinjoins"]
+    through = (float((mix["candidate_through_mix"] * mix["seeds"]).sum() / mix["seeds"].sum())
+               if len(mix) else 0.0)
+    return "".join([
+        "\n## 16. Exit points: tracing to cash-out, an upper bound\n\n",
+        ("`condition=\"simulated\"`. **Upper bound: the tags come from ground truth.** The "
+        "generator never pays an exchange with illicit money; its cash-outs are fresh "
+        "wallets. So each dataset gets an in-memory tag store (never data/tags) in which "
+        "every true cash-out cluster is tagged exchange/VASP (each ransomware peel's "
+        "recipient, each layering merge's sink), beside the generator's real exchanges as "
+        "decoys. From each operation's origin cluster, `analysis.exit_point` traces under "
+        "both taint models and ranks the tagged clusters it reaches "
+        f"(depth {x['max_hops']}, haircut floor {x['min_share']:.1%}, poison floor "
+        f"{x['min_value_btc']} BTC). Datasets: the ten of section 13's seed sweep, "
+        f"{summary['operations']} operations.\n\n"),
+        md_table(summary["ranking"]), "\n",
+        ("\n**Read plainly.** Generator crime reaches no decoy: the only tagged clusters a "
+        "trace can reach are the operation's own cash-outs, so top-1 measures whether "
+        "tracing reaches a cash-out within the limits, not whether ranking picks the right "
+        "service among several. It is not evidence that ranking works on real data, where "
+        "funds pass through services, mixers and unrelated users before any exchange. "
+        f"{summary['degenerate']} operation(s) started in a cluster that is itself a true "
+        "cash-out.\n"),
+        ("\n**Where reach fails.** Shifted layering is deeper. On shifted seed 101 the "
+         "missed sinks sat 7 to 11 entity hops from the source. Those past 8 hops are beyond "
+         "`max_hops`; the others fall under the 0.1% haircut floor after repeated "
+         "fan-outs, before the merge recombines them. Poison has no share floor, so it "
+         "reaches more. The cut-offs were set before this evaluation and are not retuned "
+         "on it.\n"),
+        "\n### CoinJoin termination\n\n",
+        ("From every input cluster of every generator CoinJoin: did tracing stop at the mix "
+        "(recorded as funds entering a CoinJoin), and did any candidate path pass through "
+        "the CoinJoin's transaction?\n\n"),
+        md_table(mix) if len(mix) else "_No CoinJoins in these datasets._\n", "\n",
+        (f"\n{through:.1%} of participant traces still produced a candidate through a "
+        "CoinJoin's transaction. That happens where one pair of clusters is linked by a "
+        "CoinJoin and by an ordinary payment: the entity-graph edge is not made only of "
+        "mixes, so `fusion.taint` follows it (as `propagate` always has), and the hop's "
+        "reasoning in the packet says the edge includes CoinJoins.\n"),
+    ])
 
 
 def tag_section(dataset, cfg: dict, result: dict | None = None) -> str:

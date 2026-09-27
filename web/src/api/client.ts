@@ -14,6 +14,7 @@ import type {
   Propagation,
   Stats,
   TxFingerprint,
+  ExitPoints,
   TagsResponse,
   TxOrigination,
 } from "./types";
@@ -87,6 +88,11 @@ export const api = {
 
   tags: (kind: "entity" | "transaction" | "actor" | "peer", subject: string, signal?: AbortSignal) =>
     get<TagsResponse>(`/tags/${kind}/${encodeURIComponent(subject)}`, signal),
+
+  exitPoints: (kind: "entity" | "actor" | "address", subject: string, signal?: AbortSignal) =>
+    get<ExitPoints>(`/exit-points/${kind}/${encodeURIComponent(subject)}`, signal),
+  exitPacketUrl: (kind: string, subject: string) =>
+    `${API_BASE}/exit-points/${kind}/${encodeURIComponent(subject)}/packet`,
 
   actors: (signal?: AbortSignal) => get<ActorsPage>("/actors?limit=200", signal),
   /** Every call is recorded in the custody ledger by the server. */

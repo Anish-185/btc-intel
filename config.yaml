@@ -347,6 +347,33 @@ tags:
     mixer: 0.5
     other: 0.5
 
+exit_point:
+  # Tracing a seed's funds forward to candidate cash-out points
+  # (analysis/exit_point.py, fusion.taint.trace, docs/EXIT_POINTS.md).
+  #
+  # Depth: 8 hops. Generator layering reaches its sink in at most 5 hops
+  # (depth 2-4 plus the merge), and a ransomware peel chain runs up to 12
+  # peels, most of which clustering folds back into the collector's own
+  # entity. Published exchange-deposit studies find most illicit funds reach a
+  # service within a handful of hops. Beyond 8, every trace reaches everyone,
+  # and what is still in flight at the limit is reported, not dropped.
+  max_hops: 8
+  # Haircut: an entity whose summed tainted inflow at a hop is under 0.1% of
+  # the seed's outflow is not followed. Summed per entity, not per edge:
+  # layering fans out into branches that are each small (fan 4-10, up to four
+  # layers) and merges them again, and a per-edge 1% floor never reached the
+  # merge. Amounts are propagated per entity per hop, so a low floor costs
+  # little; paths are capped at paths_per_entity.
+  min_share: 0.001
+  # Poison has no fractions to prune on, so an edge under this value (dust and
+  # fee-sized change) is not followed.
+  min_value_btc: 0.001
+  paths_per_entity: 3
+  # An untagged entity keeping at least this share of the traced flow is shown
+  # as an "untagged sink". It is never named as a service.
+  sink_min_share: 0.05
+  candidates: 10
+
 eval:
   # The one canonical evaluation setup. Every number in eval/results.md comes
   # from these settings via `python -m eval.report` — no ad-hoc runs.

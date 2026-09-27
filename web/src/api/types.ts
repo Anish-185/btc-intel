@@ -456,3 +456,57 @@ export interface TagsResponse {
   entities: EntityTags[];
   addresses: AddressTags[];
 }
+
+/** Exit-point tracing (analysis/exit_point.py, docs/EXIT_POINTS.md). */
+export interface ExitHop {
+  from: string;
+  to: string;
+  value: number;
+  fraction: number;
+  merge_confidence: number;
+  txids: string[];
+  reason: string;
+}
+
+export interface ExitPath {
+  entities: string[];
+  hops: ExitHop[];
+  confidence: number;
+}
+
+export interface ExitModel {
+  amount: number;
+  share: number;
+  path_confidence: number;
+  score: number;
+  paths: ExitPath[];
+}
+
+export interface ExitCandidate {
+  rank: number;
+  entity_id: string;
+  tags: ShownTag[];
+  conflict: boolean;
+  receiving_addresses: string[];
+  time_window: [string | null, string | null];
+  models: Record<"haircut" | "poison", ExitModel>;
+  evidence_sha256: string;
+}
+
+export interface ExitTrace {
+  seed: string;
+  seed_amount: number;
+  candidates: ExitCandidate[];
+  sinks: { entity_id: string; label: string; share_kept: number }[];
+  mixes: Record<string, { from: string; value: number; txids: string[] }[]>;
+  at_depth_limit: Record<string, number>;
+}
+
+export interface ExitPoints {
+  kind: string;
+  subject: string;
+  statement: string;
+  note: string | null;
+  simulated_tags: boolean;
+  traces: ExitTrace[];
+}

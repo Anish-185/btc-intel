@@ -21,7 +21,7 @@ import hashlib
 import json
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -112,9 +112,20 @@ def invalidate() -> None:
     Called when the artefacts change under us — a red-team injection, or a
     reset — so the next request rebuilds rather than serving the old case.
     """
-    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags,
+                   _money):
         cached.cache_clear()
     BUNDLE.clear()
+
+
+@lru_cache(maxsize=1)
+def _money() -> tuple:
+    """The entity-level value graph and a txid index, for exit-point tracing."""
+    from graph.builder import graph_transactions
+    from graph.entity_graph import build_entity_graph
+    graph, features = _features()
+    return (build_entity_graph(graph, features.clustering, config.load()),
+            {tx.txid: tx for tx in graph_transactions(graph)})
 
 
 @lru_cache(maxsize=1)
@@ -205,7 +216,8 @@ def commit_bundle(updated: dict) -> None:
             "alerts": json.loads(alerts.to_json(orient="records")),
         }
         Path(cfg["fusion"]["alerts_json"]).write_text(json.dumps(payload, indent=2))
-    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags,
+                   _money):
         cached.cache_clear()
     BUNDLE.clear()
     BUNDLE.update(updated)
@@ -763,6 +775,52 @@ def tags(kind: str, subject: str) -> dict:
     else:
         raise HTTPException(404, "kind is one of entity, transaction, actor, peer")
     return {"kind": kind, "subject": subject, **store.header(), **body}
+
+
+# --- exit points ------------------------------------------------------------
+def _exit_points(kind: str, subject: str) -> dict:
+    from analysis.exit_point import exit_points
+    (_, features), (money, txs) = _features(), _money()
+    actor = None
+    if kind == "actor":
+        actor = _actor(subject)
+        if actor is None:
+            raise HTTPException(404, f"unknown actor {subject}")
+    elif kind == "entity" and subject not in money:
+        raise HTTPException(404, f"entity {subject} has no value flow in the served dataset")
+    elif kind == "address" and features.clustering.cluster_of(subject) is None \
+            and subject not in money:
+        raise HTTPException(404, f"address {subject} is not in the served dataset")
+    elif kind not in ("entity", "address", "actor"):
+        raise HTTPException(404, "kind is one of address, entity, actor")
+    return exit_points(kind, subject, money, features, _tags(), txs, actor, config.load())
+
+
+@app.get("/exit-points/{kind}/{subject}")
+def exit_points_view(kind: str, subject: str) -> dict:
+    """Trace a seed's funds forward to candidate cash-out points
+    (docs/EXIT_POINTS.md). An investigative lead, not proof of ownership."""
+    return _exit_points(kind, subject)
+
+
+@app.get("/exit-points/{kind}/{subject}/packet")
+def exit_point_packet(kind: str, subject: str) -> Response:
+    """The investigator packet as a PDF, through the case-report path. Its
+    hash, the evidence seal and the tag bundles go into the custody ledger."""
+    from .case_report import render_packet
+    result = _exit_points(kind, subject)
+    seal = _evidence_seal()
+    pdf = render_packet(result, datetime.now(UTC), custody=seal)
+    digest = hashlib.sha256(pdf).hexdigest()
+    entry = custody.record("export.exit_point_packet", {
+        "files": seal["files"], "kind": kind, "subject": subject,
+        "candidates": [c["entity_id"] for t in result["traces"] for c in t["candidates"]],
+        "tag_bundles": [b.get("manifest_hash") for b in result["tag_bundles"]],
+        "simulated_tags": result["simulated_tags"],
+        "packet_sha256": digest, "packet_bytes": len(pdf), "sealed_at_head": seal["head"]})
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="btc-intel-exit-{kind}-{subject[:16]}.pdf"',
+        "x-custody-entry": str(entry.get("seq") or ""), "x-custody-report-sha256": digest})
 
 
 # --- actors ---------------------------------------------------------------
