@@ -174,3 +174,14 @@ def test_explanations_name_the_peer_and_its_numbers(tiny, fitted):
         assert f"peer {row.peer_ip}" in text
     assert all("no answer" in t for t in out["explanation"].iloc[-2:])
     assert all("calibrated" in t for t in out["explanation"].iloc[:5])
+
+
+def test_without_truth_there_is_no_correctness_column(tiny, fitted, cfg):
+    """The serving path has no labels. A `correct` column there would be all
+    False and read as "wrong", not "unknown", so it must not exist at all."""
+    truth_columns = {"correct", "top3", "origin_observed"}
+    truth = tiny["truth"].set_index(["capture_id", "txid"])["origin_ip"]
+    assert truth_columns <= set(fitted.decide(tiny["matrix"], truth, cfg).columns)
+    assert not truth_columns & set(fitted.decide(tiny["matrix"], None, cfg).columns)
+    from engines.correlation.profile import origination_answers
+    assert not truth_columns & set(origination_answers(fitted, tiny["matrix"], cfg).columns)

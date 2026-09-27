@@ -110,3 +110,44 @@ def test_the_seed_sweep_pairs_queues_per_seed_and_drops_measures_a_seed_lacks():
     paired = s["paired"].set_index("measure")["actor − entity"]
     assert paired["precision@10"].startswith("0.133 [")      # (0.1 + 0.1 + 0.2) / 3
     assert s["quality"]["alerted multi-cluster actors (total)"].iloc[0] == 3
+
+
+def test_an_actor_link_scores_as_its_peer_page_does(tmp_path_factory):
+    """The actor view and the peer page show one link's confidence, so they
+    must compute it from the same evidence. write_actors once built its links
+    without the dataset's node_intel.json, so the generator's relays read as
+    residential and every lead scored about half what the peer page showed."""
+    import json
+
+    from engines.correlation import profile as P
+    from eval.datasets import build
+    from fusion.pipeline import collect_signals, write_actors
+    from fusion.stacker import default_weights
+    from ingest.ip_intel import load_intel
+
+    cfg = json.loads(json.dumps(config.load()))
+    cfg["eval"]["n_actors"], cfg["eval"]["n_transactions"] = 200, 1200
+    dataset = build(cfg["eval"]["default_rate"], False, 7, cfg,
+                    root=tmp_path_factory.mktemp("actor-leads"), name_prefix="leads")
+    cfg["ingest"]["input_dir"] = str(dataset.raw)
+    cfg["features"]["relay_path"] = str(dataset.directory / "no-relay-matrix.parquet")
+    df = dataset.frame()
+    bundle = collect_signals(df, cfg)
+    stacker = Stacker(fallback_weights=default_weights(cfg))
+    out = dataset.directory / "actors.json"
+    write_actors(df, bundle, stacker, pd.DataFrame({"entity_id": []}), cfg, out)
+
+    src = P.build_sources(cfg, df, None, None, bundle["features"],
+                          load_intel(None, dataset.raw, cfg))
+    compared = 0
+    for actor in json.loads(out.read_text())["actors"]:
+        for lk in actor["links"]:
+            mine = lk["by_basis"].get("correlation lead")
+            if not mine:
+                continue
+            page = P.peer_profile(lk["peer"], src, cfg)
+            theirs = next(c["by_basis"]["correlation lead"] for c in page["linked_clusters"]
+                          if c["cluster_id"] == lk["cluster_id"])
+            assert mine["confidence"] == theirs["confidence"], (lk["peer"], lk["cluster_id"])
+            compared += 1
+    assert compared

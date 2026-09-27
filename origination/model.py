@@ -213,7 +213,10 @@ class OriginationModel:
         and `eval.origin.cost_score` read — so the outcome machinery is theirs.
 
         `confidence` is the calibrated probability of the top candidate, and 0
-        on a transaction that abstains by construction.
+        on a transaction that abstains by construction. `correct`, `top3` and
+        `origin_observed` are scored against `truth` and exist only when truth
+        is given: on the serving path there is none, and a column of False
+        there would read as "wrong" rather than "unknown".
         """
         cfg = cfg or config.load()
         runner_ups = cfg["engines"]["propagation"]["runner_ups"]
@@ -225,18 +228,18 @@ class OriginationModel:
         rows = []
         for (capture_id, txid), group in scored.groupby(KEY, sort=False):
             best = group.iloc[0]
-            answer = truth.get((capture_id, txid)) if truth is not None else None
             by_construction = bool(best["abstain_reason"])
-            rows.append({
-                "capture_id": capture_id, "txid": txid,
-                "estimated_origin_ip": best["peer_ip"], "ip_class": best["ip_class"],
-                "confidence": 0.0 if by_construction else float(best[column]),
-                "abstain_reason": best["abstain_reason"] or None,
-                "n_candidates": len(group),
-                "correct": best["peer_ip"] == answer,
-                "top3": answer in list(group["peer_ip"][:1 + runner_ups]),
-                "origin_observed": answer in set(group["peer_ip"]),
-            })
+            row = {"capture_id": capture_id, "txid": txid,
+                   "estimated_origin_ip": best["peer_ip"], "ip_class": best["ip_class"],
+                   "confidence": 0.0 if by_construction else float(best[column]),
+                   "abstain_reason": best["abstain_reason"] or None,
+                   "n_candidates": len(group)}
+            if truth is not None:
+                answer = truth.get((capture_id, txid))
+                row |= {"correct": best["peer_ip"] == answer,
+                        "top3": answer in list(group["peer_ip"][:1 + runner_ups]),
+                        "origin_observed": answer in set(group["peer_ip"])}
+            rows.append(row)
         decided = pd.DataFrame(rows)
         if decided.empty:
             return decided

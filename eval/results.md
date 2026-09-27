@@ -1639,7 +1639,7 @@ The reverse direction (docs/CORRELATION.md): peer -> profile. Each count is the 
 | simulated | with a timing signature | 41 (7.5%) | 3587 (53.3%) |
 | simulated | with a user agent | 0 (0.0%) | 0 (0.0%) |
 | simulated | with service flags | 0 (0.0%) | 0 (0.0%) |
-| simulated | with a linked cluster | 420 (77.1%) | 0 (0.0%) |
+| simulated | with a linked cluster | 433 (79.4%) | 0 (0.0%) |
 | simulated | with an ASN | 545 (100.0%) | 4514 (67.1%) |
 | simulated | simulated/fixture only | 545 (100.0%) | 6724 (100.0%) |
 
@@ -2067,7 +2067,7 @@ again and actors stay reachable by the toggle.
 
 **Upper bound, not an estimate.** The demo tag bundle is derived from generator ground truth: it tags every illicit operation's origin cluster and every exchange, the injected operations included (`intel.importers.demo`, every tag `source="simulated"`). Real sanctions and incident lists tag a fraction of real crime, and late. The number below is what tags could add if every operation were already listed.
 
-The red-team batch (section 7's procedure, 50 seeded injections on `shifted-r0.3-s41`) is run twice. Both stackers are fitted on the base dataset the same way (actor-level label); the only difference is the tag signal, fed through the existing fusion path (`tag_score`, intel/store.py). Section 7 scores with the served model, so its tags-off figure differs from this one. Bundle: 197 tags (exchange/VASP, other, ransomware), sealed, verified and imported like any other (manifest `f68b1d0eda03e9b2…`). The two batches minted identical injections.
+The red-team batch (section 7's procedure, 50 seeded injections on `shifted-r0.3-s41`) is run twice. Both stackers are fitted on the base dataset the same way (actor-level label); the only difference is the tag signal, fed through the existing fusion path (`tag_score`, intel/store.py). Section 7 scores with the served model, so its tags-off figure differs from this one. Bundle: 197 tags (exchange/VASP, other, ransomware), sealed, verified and imported like any other (manifest `d1c4225e9bc6827e…`). The two batches minted identical injections.
 
 | stacker | crime detection rate | crimes detected | all typologies | median transactions to detect | fitted AUC | tag_score weight | entities with a tag score |
 | --- | --- | --- | --- | --- | --- | --- | --- |

@@ -120,7 +120,7 @@ def collect_signals(df: pd.DataFrame, cfg: dict, watchlist_path=None) -> dict:
     return {"signals": signals, "alerts": alerts, "links": links, "features": features,
             "graph": graph, "entity_graph": entity_graph, "origins": origins,
             "propagation": propagation_status, "watchlist": watchlist,
-            "taint": taint, "seed_entities": seed_entities}
+            "taint": taint, "seed_entities": seed_entities, "intel": intel}
 
 
 def labels_for(signals: pd.DataFrame, ground_truth: dict, features: FeatureSet,
@@ -310,7 +310,12 @@ def write_actors(df: pd.DataFrame, bundle: dict, stacker: Stacker, alerts: pd.Da
     from engines.correlation.profile import build_sources
 
     from . import actors
-    src = build_sources(cfg, transactions=df, features=bundle["features"])
+    # The dataset's own IP intelligence, as every other engine in this run used:
+    # without its node_intel.json overlay the generator's relays read as
+    # residential, origin confidence spreads over them, and every lead scores
+    # lower here than on the peer page.
+    src = build_sources(cfg, transactions=df, features=bundle["features"],
+                        intel=bundle["intel"])
     built = actors.build(bundle["signals"], stacker, actors.peer_links(src, cfg), cfg,
                          set(alerts["entity_id"]))
     path.write_text(json.dumps({"alert_threshold": cfg["fusion"]["alert_threshold"],

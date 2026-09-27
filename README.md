@@ -460,13 +460,12 @@ file hash, and checks that an incremental re-run gives the same scores as a
 full one — which is the only thing that makes "incremental" a speed-up rather
 than a different, faster, wrong detector.
 
-Timings, the stage that dominates, and the optimisation that turned out to be
-slower are in [`docs/redteam_performance.md`](docs/redteam_performance.md):
-**3.45 s median** against a 30-second target, on a CPU-only laptop — that is
-profiling on the demo dataset with the bundle already warm. The evaluation
-measures a different thing under different conditions: **2.8 s median
-time-to-detect** over the 30 criminal injections into the shifted set, with the
-dataset growing under each run (`eval/results.md` §7).
+How fast a run is depends on the machine's state, so this README quotes no
+wall-clock times. The machine-independent measure is transactions-to-detect,
+and [`docs/CLAIMS.md`](docs/CLAIMS.md) says which performance numbers may be
+quoted and how to word them. The profiling (the stage that dominates, and the
+optimisation that turned out to be slower) is in
+[`docs/redteam_performance.md`](docs/redteam_performance.md).
 
 ## Running it offline
 

@@ -190,10 +190,15 @@ def build_sources(cfg: dict | None = None, transactions: pd.DataFrame | None = N
 
     cfg = cfg or config.load()
     src = Sources(hop_provenance=cfg["ingest"].get("provenance", "simulated"))
-    if transactions is None and Path(cfg["ingest"]["output_path"]).exists():
+    configured = transactions is None
+    if configured and Path(cfg["ingest"]["output_path"]).exists():
         transactions = load(None, cfg)
     if transactions is not None and len(transactions):
-        intel = intel if intel is not None else load_intel(cfg=cfg)
+        # IP intelligence belongs to the dataset: the configured one's
+        # node_intel.json overlay when the rows were read from config, as
+        # fusion and the API load it. Rows handed in come with their own intel.
+        if intel is None:
+            intel = load_intel(None, cfg["ingest"]["input_dir"] if configured else None, cfg)
         features = features or FeatureSet.from_graph(build_graph(transactions, cfg), cfg)
         src.transactions, src.features, src.intel = transactions, features, intel
         src.txs = {tx.txid: tx for tx in iter_transactions(transactions)}
