@@ -101,8 +101,12 @@ the single integration point for real authenticity (see p2p/manifest.py).
 * **CSV** (`intel.importers.from_csv`). For operator-curated lists. Any
   invalid row fails the whole file and names its line.
 * **Demo** (`intel.importers.demo`). Built from a generated dataset's
-  `ground_truth.json`: every illicit operation's origin cluster and every
-  exchange's hot wallet, each `applies_to: cluster`. Every tag is
+  `ground_truth.json`: every illicit operation's origin cluster, every
+  exchange's hot wallet, and every operation's true cash-out wallet (tagged
+  exchange/VASP, so an exit-point trace has a service to rank: the generator's
+  cash-outs are fresh wallets, never one of its exchanges), each
+  `applies_to: cluster`. `intel.importers.cashouts` is the one definition of a
+  true cash-out, shared with `eval.exit_eval`. Every tag is
   `source: "simulated"`, and `simulated` is derived from the source rather
   than stored. It cannot be presented as real intelligence:
   * a tag whose reference points at ground truth must be simulated

@@ -32,6 +32,7 @@ from engines.rules.detectors import FeatureSet
 from fusion.taint import TRACE_MODELS
 from graph.builder import build_graph, graph_transactions
 from graph.entity_graph import build_entity_graph
+from intel.importers import cashouts
 from intel.importers import demo as demo_tags
 from intel.store import TagStore
 from intel.tags import SIMULATED, Tag
@@ -43,7 +44,6 @@ from .datasets import Dataset
 def operations(gt: dict, txs: dict) -> dict[str, dict]:
     """Operation -> typology, origin wallet and true cash-out wallets."""
     ops: dict[str, dict] = {}
-    patterns = {cid: c["pattern_type"] for cid, c in gt["clusters"].items()}
     ordered = sorted(gt["transactions"].items(), key=lambda kv: kv[1].get("timestamp") or "")
     for txid, meta in ordered:
         if meta["pattern"] not in OPERATION_TX_PATTERNS or txid not in txs:
@@ -53,11 +53,7 @@ def operations(gt: dict, txs: dict) -> dict[str, dict]:
                                                  "cashouts": set()})
         if op["origin"] is None:
             op["origin"] = tx.inputs[0][0]
-        if meta["pattern"] == "ransomware_peel":
-            op["cashouts"] |= {a for a, _ in tx.outputs
-                               if patterns.get(gt["wallets"].get(a, "")) == "cashout"}
-        elif meta["pattern"] == "layering_merge":
-            op["cashouts"] |= {a for a, _ in tx.outputs}
+        op["cashouts"] |= cashouts(meta, [a for a, _ in tx.outputs], gt)
     return {cid: op for cid, op in ops.items() if op["cashouts"]}
 
 
@@ -70,7 +66,7 @@ def tag_store(gt: dict, ops: dict, raw, cfg: dict) -> TagStore:
                 reference=f"generator ground_truth.json, seed {gt['seed']}, operation {cid}",
                 collected=collected, confidence=1.0, applies_to="cluster")
             for cid, op in ops.items() for w in sorted(op["cashouts"])]
-    tags += [t for t in demo_tags(raw) if t.category == VASP]
+    tags += [t for t in demo_tags(raw, with_cashouts=False) if t.category == VASP]
     store.add("ground-truth", tags)
     return store
 

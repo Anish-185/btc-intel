@@ -107,10 +107,26 @@ def from_csv(path, source: str | None = None) -> list[Tag]:
 
 
 # --- demo: generator ground truth ---------------------------------------------
-def demo(raw_dir) -> list[Tag]:
+def cashouts(meta: dict, outputs, gt: dict) -> set[str]:
+    """The true cash-out wallets among one transaction's outputs: a ransomware
+    peel's payment to a `cashout` wallet, or a layering merge's sink. One
+    definition, shared by the demo bundle and eval.exit_eval."""
+    if meta["pattern"] == "ransomware_peel":
+        return {a for a in outputs if gt["clusters"].get(gt["wallets"].get(a, ""), {})
+                .get("pattern_type") == "cashout"}
+    if meta["pattern"] == "layering_merge":
+        return set(outputs)
+    return set()
+
+
+def demo(raw_dir, with_cashouts: bool = True) -> list[Tag]:
     """A simulated bundle for the demo dataset: every illicit operation's origin
     cluster and every exchange, each tagged through its most-spent wallet (an
-    exchange's hot wallet) with applies_to="cluster".
+    exchange's hot wallet) with applies_to="cluster"; and every operation's
+    true cash-out wallet, tagged exchange/VASP so an exit-point trace has a
+    service to rank (the generator's cash-outs are fresh wallets, never one of
+    its exchanges). `with_cashouts=False` leaves those out, for callers that
+    tag cash-outs themselves.
 
     Every tag is source="simulated", which Tag checks against the reference.
     Tagging every operation is what makes any detection figure built on these
@@ -123,11 +139,12 @@ def demo(raw_dir) -> list[Tag]:
     collected = gt["generated_at"][:10]
     reference = f"generator ground_truth.json, seed {gt['seed']}, cluster {{cid}}"
 
-    spent, seen = Counter(), Counter()
+    spent, seen, outputs = Counter(), Counter(), {}
     with open(raw_dir / "transactions.csv", newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
             spent.update(a for a in row["input_addresses"].split(";") if a)
             seen.update(a for a in row["output_addresses"].split(";") if a)
+            outputs[row["txid"]] = [a for a in row["output_addresses"].split(";") if a]
 
     operations: dict[str, str] = {}
     for meta in gt["transactions"].values():
@@ -153,4 +170,15 @@ def demo(raw_dir) -> list[Tag]:
     for cid, cluster in sorted(gt["clusters"].items()):
         if cluster["pattern_type"] == "exchange":
             out.append(tag(cid, f"simulated exchange {cid} hot wallet", "exchange/VASP"))
+    if with_cashouts:
+        found: dict[str, set[str]] = {}
+        for txid, meta in gt["transactions"].items():
+            if meta["pattern"] in OPERATION_TX_PATTERNS and txid in outputs:
+                found.setdefault(meta["cluster_id"], set()).update(
+                    cashouts(meta, outputs[txid], gt))
+        out += [Tag(subject=w, label=f"simulated cash-out point of operation {cid}",
+                    category="exchange/VASP", source=SIMULATED,
+                    reference=f"generator ground_truth.json, seed {gt['seed']}, operation {cid}",
+                    collected=collected, confidence=1.0, applies_to="cluster")
+                for cid, wallets in sorted(found.items()) for w in sorted(wallets)]
     return [t for t in out if t is not None]

@@ -1273,7 +1273,7 @@ all is the ceiling on the first number.
 
 
 SATURATION_PREAMBLE = """A ranked, explainable alert list is a deliverable of the problem statement, and
-a ranking only exists if the scores differ. `docs/demo_script.md` has carried a
+a ranking only exists if the scores differ. `docs/DEMO_SCRIPT.md` (then `demo_script.md`) carried a
 line saying every alert scores 1.000 — if that were true the queue would be a
 set with a number printed on it, and sorting by risk would do nothing.
 

@@ -1,6 +1,6 @@
 """Does the ranked alert queue actually rank?
 
-`docs/demo_script.md` has long said every alert scores 1.000. If that is true
+`docs/DEMO_SCRIPT.md` (then `docs/demo_script.md`) long said every alert scores 1.000. If that is true
 the queue is not ranked — it is a set with a number printed on it — and "a
 ranked, explainable alert list" is a literal deliverable of the problem
 statement, not a nice-to-have. So it gets measured rather than asserted.

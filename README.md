@@ -4,6 +4,10 @@ Offline Bitcoin transaction forensics system — SIH26146.
 
 Runs fully air-gapped: no network calls at any stage (`offline: true` in `config.yaml`).
 
+Stage demo: `scripts/demo.sh --preflight`, then `scripts/demo.sh --pause`
+([`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md)). Every number that may be said
+aloud, and the ones that may not: [`docs/CLAIMS.md`](docs/CLAIMS.md).
+
 ## Architecture
 
 <!-- PASTE ARCHITECTURE SUMMARY HERE -->
@@ -27,6 +31,7 @@ Runs fully air-gapped: no network calls at any stage (`offline: true` in `config
 | `web/` | Local UI |
 | `eval/` | Metrics, benchmarks, ground-truth comparison |
 | `offline/` | Pipeline orchestration, air-gapped packaging |
+| `scripts/` | The one-command stage demo (`demo.sh`) and its pinned artifact hashes |
 | `vendor/` | Cloned reference repos — read-only, never imported (see CONTRIBUTING.md) |
 | `tests/` | Our tests |
 | `data/` | `raw/`, `processed/`, `geoip/`, `tags/` — gitignored |

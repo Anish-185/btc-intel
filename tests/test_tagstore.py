@@ -204,6 +204,32 @@ def test_the_demo_bundle_is_simulated_everywhere(demo_raw, tmp_path):
     assert all(t.as_dict()["simulated"] for t in tags)   # the flag every view reads
 
 
+def test_the_demo_bundle_tags_every_true_cash_out_as_a_simulated_service(demo_raw):
+    """Exit-point traces rank tagged services, and the generator's cash-outs are
+    fresh wallets, so the demo bundle tags them itself: the same wallets
+    eval.exit_eval scores against, and only when asked."""
+    import json
+
+    from eval.actors import OPERATION_TX_PATTERNS
+    gt = json.loads((demo_raw / "ground_truth.json").read_text())
+    truth = {w for txid, meta in gt["transactions"].items()
+             if meta["pattern"] in OPERATION_TX_PATTERNS
+             for w in importers.cashouts(meta, _outputs(demo_raw)[txid], gt)}
+    tagged = {t.subject for t in importers.demo(demo_raw)
+              if t.label.startswith("simulated cash-out point")}
+    assert truth and tagged == truth
+    assert all(t.category == "exchange/VASP" and t.simulated
+               for t in importers.demo(demo_raw) if t.subject in truth)
+    assert not {t.subject for t in importers.demo(demo_raw, with_cashouts=False)
+                if t.label.startswith("simulated cash-out point")}
+
+
+def _outputs(raw) -> dict[str, list[str]]:
+    import csv
+    with open(raw / "transactions.csv", newline="") as handle:
+        return {r["txid"]: r["output_addresses"].split(";") for r in csv.DictReader(handle)}
+
+
 def test_a_demo_tag_cannot_be_relabelled_real(demo_raw, tmp_path):
     cfg = cfg_for(tmp_path)
     tags = importers.demo(demo_raw)

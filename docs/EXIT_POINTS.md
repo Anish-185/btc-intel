@@ -96,6 +96,15 @@ the evidence seal (dataset hashes and ledger head). Every packet generated
 is recorded in the custody ledger (`export.exit_point_packet`), with its
 sha256.
 
+## On the demo dataset
+
+The served demo bundle (`intel.importers.demo`, docs/TAGSTORE.md) tags every
+operation's true cash-out wallet as a simulated exchange/VASP. A trace from a
+demo operation therefore ends in ranked candidates rather than only untagged
+sinks, and every one of them says `source: simulated`. That is a demo
+convenience with the same upper-bound caveat as the evaluation, not evidence
+that ranking works.
+
 ## Surfaces
 
 * `GET /exit-points/{address|entity|actor}/{subject}` returns the trace as JSON.
