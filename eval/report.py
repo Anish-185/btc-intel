@@ -640,6 +640,7 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add("\n## 13. Actors: the queue as triage\n")
     add(actor_section({"standard": standard[default_rate], "shifted": shifted[default_rate]},
                       {n: fusion[n]["stacker"] for n in ("standard", "shifted")}, cfg))
+    add(actor_power_section(cfg))
 
     add(CLOSING)
     return "\n".join(parts)
@@ -704,6 +705,80 @@ def actor_section(datasets: dict, stackers: dict, cfg: dict) -> str:
                f"{results['shifted']['quality']['alert count reduction']:.1%} fewer items, at "
                "the wrong-merge rates above. It is not shown to improve triage beyond that "
                "on this data.\n")
+    return "".join(out)
+
+
+def actor_power_section(cfg: dict, result: dict | None = None) -> str:
+    """Section 13, continued: the same comparison with enough operations to
+    tell the queues apart, across seeds (eval.actor_queue.power)."""
+    from eval import actor_queue as AQ
+    result = result or AQ.power(cfg)
+    summary = result["summary"]
+    sizes = ", ".join(f"{c} {n} transactions" for c, n in AQ.POWER_SIZES.items())
+    out = [("\n### Across seeds, about thirty operations each\n\n"
+            "`condition=\"simulated\"`, cross-topology. The section above has 4-5 illicit "
+            f"operations per dataset, too few to separate the queues. Here: {sizes} (actors "
+            f"one per six transactions), seeds {', '.join(map(str, AQ.POWER_SEEDS))}, each "
+            "dataset with its own stacker fitted on its own labels (as `eval.fusion_eval` "
+            "does), the same bundle and stacker for both queues, and the join rule in "
+            "fusion/actors.py unchanged from its pre-registration. Intervals are means "
+            "with a 95% t-interval across seeds; `actor − entity` is the paired difference "
+            "per seed. \"reviewed to find all\" is to the dataset's own operation count, "
+            "listed below; \"not reached\" means a queue never holds every operation, and "
+            "such seeds drop out of that measure's interval. The join rule's peer class "
+            "comes from IP lists only (relays, Tor exits and the generator's hosting "
+            "addresses in node_intel.json); it takes no ASN, so the GeoLite2 databases, "
+            "absent for this run, do not affect it.\n\n"),
+           md_table(summary["datasets"]), "\n",
+           "\n#### Both queues\n\n", md_table(summary["queues"]), "\n",
+           "\n#### Paired difference, actor queue minus entity queue\n\n",
+           md_table(summary["paired"]), "\n",
+           "\n#### Merges\n\n", md_table(summary["quality"]), "\n"]
+
+    def bounds(text):
+        if "[" not in text:
+            return None
+        lo, hi = text.split("[")[1].rstrip("]").split(", ")
+        return float(lo), float(hi)
+    seeds = len(AQ.POWER_SEEDS)
+    verdict, improves = [], False
+    for condition in summary["paired"]["condition"].unique():
+        rows = summary["paired"][summary["paired"]["condition"] == condition]
+        better, worse = [], []
+        for r in rows.to_dict("records"):
+            b, measure = bounds(r["actor − entity"]), r["measure"]
+            # A measure some seeds never reach is not paired on all of them;
+            # it is listed per seed above and not counted here.
+            if b is None or measure == "items" or r["seeds with both"] < seeds:
+                continue
+            good_if_up = measure.startswith(("precision@", "recall@"))
+            if (b[0] > 0 and good_if_up) or (b[1] < 0 and not good_if_up):
+                better.append(measure)
+            elif (b[1] < 0 and good_if_up) or (b[0] > 0 and not good_if_up):
+                worse.append(measure)
+        improves |= bool(better)
+        q = summary["quality"].set_index("condition").loc[condition]
+        recall = rows.set_index("measure").loc["recall@50", "actor − entity"]
+        verdict.append(
+            f"*{condition}*: alert count falls by {q['alert count reduction']}; "
+            f"recall@50 changes by {recall}; the wrong-merge rate on alerted "
+            f"multi-cluster actors is {q['wrong-merge rate (alerted multi-cluster actors)']}; "
+            "the actor queue is "
+            + (f"better on {', '.join(better)}" if better else "better on no measure")
+            + (f" and worse on {', '.join(worse)}" if worse else "")
+            + " (paired 95% interval excluding zero, all seeds)")
+    out.append(
+        "\n**Verdict, plainly.** " + "; ".join(verdict) + ". Precision@k is 1.000 for both "
+        "queues at every k on every seed: each dataset has more alerted clusters holding an "
+        "operation's wallet than the deepest cut-off, so precision@k is saturated from k=10 "
+        "and cannot separate the queues; recall@k and items reviewed are the informative "
+        "measures. "
+        + ("The actor queue does not improve triage. It shortens the queue by a few percent "
+           "and pays for it with wrong merges and slightly lower recall at depth. The entity queue is "
+           "therefore the console default; actors remain a view."
+           if not improves else
+           "The actor queue improves at least one triage measure; see the paired table.")
+        + "\n")
     return "".join(out)
 
 
@@ -1287,6 +1362,14 @@ seed B.
 an IP correlation says something about *who*, not about whether an entity is
 risky. It is surfaced per alert as attribution leads, each now labelled
 `anonymized entry point` when the candidate is a Tor exit or hosting address.
+
+**The entity queue is the console default; actors are a view.** The seed sweep
+in section 13 (five seeds per condition, about thirty operations each) finds the
+actor queue better on no triage measure: 4-6% fewer items, precision@k saturated
+for both, recall@50 slightly lower, and 8-10% of alerted multi-cluster actors
+wrongly merged. P9 was specified to say so plainly if the actor queue did not
+improve workload or precision@k; it did not, so the entity queue is the default
+again and actors stay reachable by the toggle.
 """
 
 

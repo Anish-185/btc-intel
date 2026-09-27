@@ -38,8 +38,14 @@ function queue(path = "/alerts") {
 }
 
 describe("actor queue", () => {
-  it("shows actors by default, with the statement and linked peers", async () => {
+  it("shows the entity queue by default", async () => {
     queue();
+    expect(await screen.findByRole("heading", { name: "Alert queue" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "actor A-17" })).toBeNull();
+  });
+
+  it("shows actors as a view, with the statement and linked peers", async () => {
+    queue("/alerts?view=actors");
     expect(await screen.findByRole("link", { name: "actor A-17" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Actor queue" })).toBeInTheDocument();
     expect(screen.getByText(/does not name or imply a person or an organisation/)).toBeInTheDocument();
@@ -48,7 +54,7 @@ describe("actor queue", () => {
   });
 
   it("toggles back to the entity queue", async () => {
-    queue();
+    queue("/alerts?view=actors");
     await screen.findByRole("link", { name: "actor A-17" });
     fireEvent.click(screen.getByRole("button", { name: /entities/ }));
     expect(await screen.findByRole("heading", { name: "Alert queue" })).toBeInTheDocument();

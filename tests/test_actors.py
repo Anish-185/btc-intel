@@ -87,3 +87,26 @@ def test_actors_are_handles_not_people():
 def test_fingerprints_contribute_nothing_to_membership():
     source = inspect.getsource(A)
     assert "import fingerprint" not in source and "fingerprint." not in source
+
+
+def test_the_seed_sweep_pairs_queues_per_seed_and_drops_measures_a_seed_lacks():
+    from eval.actor_queue import summarise_power
+    quality = {k: 0.0 for k in ("illicit operations present", "alert count reduction",
+                                "actor purity (alerted, mean)",
+                                "wrong-merge rate (alerted multi-cluster actors)",
+                                "wrong-merge rate (all multi-cluster actors)",
+                                "entity alerts", "actor alerts")}
+    per = []
+    for seed, (before, after) in enumerate([(0.5, 0.6), (0.6, 0.7), (0.7, 0.9)]):
+        cols = {"items": [10, 8], "precision@10": [before, after]}
+        if seed:
+            cols["reviewed to find 3"] = [5, 4]
+        table = pd.DataFrame(cols, index=pd.Index(["entity", "actor"], name="queue"))
+        per.append({"condition": "standard", "seed": seed, "table": table,
+                    "quality": {**quality, "alerted actors joining 2+ clusters": 1}})
+    s = summarise_power(per)
+    assert "reviewed to find 3" not in s["queues"].columns
+    assert s["queues"].set_index("queue").loc["entity", "precision@10"] == "0.600 [0.352, 0.848]"
+    paired = s["paired"].set_index("measure")["actor − entity"]
+    assert paired["precision@10"].startswith("0.133 [")      # (0.1 + 0.1 + 0.2) / 3
+    assert s["quality"]["alerted multi-cluster actors (total)"].iloc[0] == 3

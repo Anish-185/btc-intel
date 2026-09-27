@@ -36,11 +36,19 @@ KS = (10, 25, 50)
 def dataset_actors(dataset: Dataset, stacker, cfg: dict) -> dict:
     """The fusion bundle, the entity alerts and the actors of one dataset.
     Its relay matrix is built the way the served one is (p2p.demo_capture,
-    then features.relay), in a scratch directory."""
+    then features.relay), in a scratch directory. `stacker=None` fits one on
+    this dataset's own labels, as eval.fusion_eval does: entities holding an
+    illicit operation's wallet."""
     cfg = json.loads(json.dumps(cfg))
     cfg["ingest"]["input_dir"] = str(dataset.raw)       # this dataset's node intel
     df = dataset.frame()
     bundle = collect_signals(df, cfg, dataset.raw)
+    if stacker is None:
+        from fusion.stacker import train
+
+        from .actors import illicit_entities
+        bad = illicit_entities(actors_of(dataset), bundle["features"].entity_of)
+        stacker = train(bundle["signals"], bundle["signals"]["entity_id"].isin(bad).astype(int), cfg)
     alerts = build_alerts(bundle, stacker, cfg)
     with tempfile.TemporaryDirectory() as tmp:
         capture = Path(tmp) / "demo_capture"
@@ -82,9 +90,9 @@ def triage(dataset: Dataset, built: dict) -> dict:
             seen = set().union(*top) if top else set()
             out[f"precision@{k}"] = round(sum(bool(h) for h in top) / len(top), 3) if top else None
             out[f"recall@{k}"] = round(len(seen) / len(present), 3) if present else None
-        # A generator dataset holds only a handful of illicit operations, so
-        # "items reviewed before finding N" is asked for 1, 3 and all of them.
-        for n in sorted({1, min(3, len(present)), len(present)} - {0}):
+        # "Items reviewed before finding N", for N = 1, 3, 10, 20 and all of the
+        # operations present, whichever of those the dataset holds.
+        for n in sorted({k for k in (1, 3, 10, 20) if k <= len(present)} | {len(present)} - {0}):
             reviewed = None
             seen = set()
             for i, h in enumerate(hits, 1):
@@ -134,3 +142,86 @@ def evaluate(datasets: dict[str, Dataset], stackers: dict, cfg: dict) -> dict:
         built = dataset_actors(dataset, stackers[name], cfg)
         out[name] = triage(dataset, built)
     return out
+
+
+# --- power: many seeds, larger datasets ----------------------------------------------
+#: Sizes chosen so each dataset holds about thirty illicit operations (shifted
+#: instances are larger, so it needs more transactions). Actors scale with size.
+POWER_SIZES = {"standard": 9600, "shifted": 18000}
+POWER_SEEDS = (101, 102, 103, 104, 105)
+T_975 = {2: 12.706, 3: 4.303, 4: 3.182, 5: 2.776, 6: 2.571, 7: 2.447, 8: 2.365, 9: 2.306}
+
+
+def power_datasets(cfg: dict, seeds=POWER_SEEDS, sizes=None) -> dict[tuple[str, int], Dataset]:
+    from .datasets import build
+    out = {}
+    for condition, n in (sizes or POWER_SIZES).items():
+        c = json.loads(json.dumps(cfg))
+        c["eval"]["n_actors"], c["eval"]["n_transactions"] = n // 6, n
+        for seed in seeds:
+            out[(condition, seed)] = build(cfg["eval"]["default_rate"], condition == "shifted",
+                                           seed, c, name_prefix=f"power-{condition}-n{n}")
+    return out
+
+
+def _interval(values: list[float]) -> str:
+    """Mean and a 95% t-interval across seeds."""
+    import statistics
+    v = [float(x) for x in values if x is not None and not isinstance(x, str)]
+    if not v:
+        return "—"
+    if len(v) == 1:
+        return f"{v[0]:.3f} (one seed)"
+    half = T_975.get(len(v), 2.0) * statistics.stdev(v) / len(v) ** 0.5
+    return f"{statistics.mean(v):.3f} [{statistics.mean(v) - half:.3f}, {statistics.mean(v) + half:.3f}]"
+
+
+def power(cfg: dict, seeds=POWER_SEEDS, sizes=None) -> dict:
+    """The P9 comparison on every (condition, seed) dataset, each with its own
+    fitted stacker, and the spread across seeds. The join rule is fusion/actors.py's,
+    unchanged."""
+    per = []
+    for (condition, seed), dataset in power_datasets(cfg, seeds, sizes).items():
+        result = triage(dataset, dataset_actors(dataset, None, cfg))
+        table = result["table"].set_index("queue")
+        per.append({"condition": condition, "seed": seed, "table": table,
+                    "quality": result["quality"]})
+    return {"per_seed": per, "summary": summarise_power(per)}
+
+
+def summarise_power(per: list[dict]) -> dict:
+    rows, diffs, merges, sizes = [], [], [], []
+    for condition in sorted({p["condition"] for p in per}):
+        runs = [p for p in per if p["condition"] == condition]
+        metrics = [c for c in runs[0]["table"].columns if c != "items"]
+        common = [m for m in metrics if all(m in r["table"].columns for r in runs)]
+        for queue in runs[0]["table"].index:
+            rows.append({"condition": condition, "queue": queue, "seeds": len(runs),
+                         "items": _interval([r["table"].loc[queue, "items"] for r in runs]),
+                         **{m: _interval([r["table"].loc[queue, m] for r in runs]) for m in common}})
+        before, after = runs[0]["table"].index
+        for m in ["items", *common]:
+            pairs = [(r["table"].loc[before, m], r["table"].loc[after, m]) for r in runs]
+            pairs = [(a, b) for a, b in pairs if not isinstance(a, str) and not isinstance(b, str)]
+            diffs.append({"condition": condition, "measure": m,
+                          "seeds with both": len(pairs),
+                          "actor − entity": _interval([b - a for a, b in pairs])})
+        q = [r["quality"] for r in runs]
+        merges.append({"condition": condition,
+                       **{k: _interval([x[k] for x in q]) for k in (
+                           "illicit operations present", "alert count reduction",
+                           "actor purity (alerted, mean)",
+                           "wrong-merge rate (alerted multi-cluster actors)",
+                           "wrong-merge rate (all multi-cluster actors)")},
+                       "alerted multi-cluster actors (total)":
+                           sum(x["alerted actors joining 2+ clusters"] for x in q)})
+        sizes += [{"condition": condition, "seed": r["seed"],
+                   "operations": r["quality"]["illicit operations present"],
+                   "entity alerts": r["quality"]["entity alerts"],
+                   "actor alerts": r["quality"]["actor alerts"],
+                   **{f"reviewed to find all ({q.split()[0]})": r["table"].loc[q].get(
+                       "reviewed to find all", "—") for q in r["table"].index}}
+                  for r in runs]
+    return {"queues": pd.DataFrame(rows), "paired": pd.DataFrame(diffs),
+            "quality": pd.DataFrame(merges), "datasets": pd.DataFrame(sizes)}
+

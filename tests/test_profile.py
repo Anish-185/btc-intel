@@ -427,3 +427,14 @@ def test_every_actor_link_traces_to_raw_evidence_and_skips_the_coinjoin(world):
     assert not joined_via_mix
     assert any(lk["peer_kind"] == "onion identity" and lk["ip_class"] is None for lk in links) \
         or not any(P.is_onion(lk["peer"]) for lk in links)
+
+
+def test_network_names_its_source_and_never_passes_generated_values_for_geoip():
+    matrix = pd.DataFrame({"asn": [None], "geo_country": [None], "asn_source": ["none"]})
+    hops = pd.DataFrame({"asn": [3320], "geo_country": ["DE"], "asn_source": ["dataset"]})
+    assert P._network("1.2.3.4", matrix, hops)["basis"].startswith("synthetic")
+    assert P._network("1.2.3.4", matrix, hops, provenance="real")["basis"].startswith(
+        "the capture's own")
+    assert "GeoLite2 lookup" in P._network("1.2.3.4", matrix,
+                                           hops.assign(asn_source="geoip"))["basis"]
+    assert "not installed" in P._network("1.2.3.4", matrix, None)["basis"]

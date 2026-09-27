@@ -3,7 +3,8 @@
 An **actor** is one or more address clusters (`graph/`) joined to zero or more
 peer identities (the P7 peer profiles, `engines/correlation/profile.py`) by the
 links the evidence supports. It is what `fusion/actors.py` builds. The console
-shows the actor queue by default.
+shows the entity queue by default and actors as a view: the actor queue did
+not improve triage in evaluation (see Evaluation, below).
 
 **An actor is a handle, not a party.** Actors are named `actor A-17`. The name
 groups addresses and network identities that the evidence links. It never
@@ -95,8 +96,8 @@ uncalibrated (the correlation leads).
     `actor_feedback.parquet`. That file is kept apart from the entity feedback
     the stacker trains on, and every verdict is recorded in the ledger
     (`actor.verdict`).
-* Console: the queue page shows actors by default and has a toggle to the
-  entity queue (`?view=entities`). `/actors/:id` is the actor page.
+* Console: the queue page shows entities by default and has a toggle to the
+  actor view (`?view=actors`). `/actors/:id` is the actor page.
 
 ## Evaluation
 
@@ -113,12 +114,44 @@ not among the origination corpus's. The same section also scores the
 origination model on the served demo capture, and attributes the fingerprint
 novelty flags on the demo to the generator differences that cause them.
 
+The section continues with a **seed sweep** (`eval.actor_queue.power`):
+larger generator datasets (standard 9,600 and shifted 18,000 transactions,
+about thirty illicit operations each), five seeds per condition, each dataset
+with its own fitted stacker. Every measure is reported as a mean with a 95%
+t-interval across seeds, together with the paired actor − entity difference
+per seed. The join rule is the one above, unchanged.
+
+**Result.** The actor queue is better on no triage measure in either
+condition:
+
+| | standard | shifted |
+| --- | --- | --- |
+| alert count reduction | 3.8% [3.4, 4.3] | 5.7% [4.8, 6.5] |
+| precision@10/25/50, both queues | 1.000 | 1.000 |
+| recall@50, actor − entity | −0.080 [−0.155, −0.004] | −0.063 [−0.162, 0.036] |
+| wrong-merge rate, alerted multi-cluster actors | 10.1% [5.1, 15.1] | 8.4% [1.6, 15.2] |
+
+Means and 95% t-intervals over five seeds. Precision@k is saturated from k=10:
+every dataset has more alerted clusters holding an operation's wallet than the
+deepest cut-off, so it cannot separate the queues. The actor queue is a few
+percent shorter, and it pays for that with wrong merges and slightly lower
+recall at depth. The P9 specification required this to be said plainly if the
+actor queue did not improve workload or precision@k. On that result the entity
+queue is the console default again, and actors remain a view.
+
 ## Limits
 
-* Generator datasets hold a handful of illicit operations (4–5), so
-  precision@k saturates for both queues and the triage comparison has little
-  power.
+* The report's canonical datasets hold a handful of illicit operations (4–5).
+  The seed sweep exists because comparisons on them have little power.
 * Joins rest on origination claims. On data where the model abstains, actors
   are mostly single clusters.
 * Correlation-lead confidences are not calibrated, so membership confidence is
   an ordering, not a probability.
+* The peer class used for joining (`actors.peer_links`) is read from IP lists
+  only: public relays, Tor exits and listed hosting addresses. It takes no
+  ASN, so a hosting or VPN address that is on no list counts as
+  residential/unknown and may join, even when GeoLite2 is installed. The
+  generator lists every hosting address it creates, so the evaluation is
+  unaffected (0 of about 29,000 peers change class when their ASN is
+  supplied). On real captures this is a gap. Closing it would change the
+  pre-registered join rule, so it is left as it is and stated here.

@@ -388,23 +388,29 @@ def _linked_clusters(peer: str, claims: list, src: Sources, cfg: dict,
                                       "inputs": sorted(set(addrs))})
 
     # Correlation leads: the forward engine's (cluster, IP) associations.
-    if src.leads is not None and len(src.leads):
-        hops = src.transactions
-        for lead in src.leads[src.leads["ip"] == peer].itertuples():
+    # Indexed once per Sources, so linking every peer stays linear in the data.
+    leads = src.rows("leads", "ip", peer)
+    if leads is not None:
+        hops = src.rows("transactions", "src_ip", peer)            # this peer's hop rows
+        if "_observations" not in src._index:
+            by = defaultdict(list)
+            for obs in src.observations:
+                by[(obs.ip, obs.entity_id)].append(obs)
+            src._index["_observations"] = by
+        observations = src._index["_observations"]
+        for lead in leads.itertuples():
             entry = link(lead.entity_id)
             entry["lead"] = {"final_score": round(float(lead.final_score), 4),
                              "reason": lead.reason, "validity": lead.validity,
                              "validity_evidence": lead.validity_evidence}
-            for obs in src.observations:
-                if obs.ip != peer or obs.entity_id != lead.entity_id:
-                    continue
-                sent = hops[(hops["txid"] == obs.txid) & (hops["src_ip"] == peer)]
+            for obs in observations.get((peer, lead.entity_id), ()):
+                sent = hops[hops["txid"] == obs.txid] if hops is not None else None
                 tx = src.txs.get(obs.txid)
                 entry["evidence"].append({
                     "basis": "correlation lead", "txid": obs.txid,
                     "probability": round(obs.origin_confidence, 4),
-                    "rows": [_raw_hop_row(i, r) for i, r in zip(sent.index,
-                                                                 sent.itertuples())],
+                    "rows": [] if sent is None else [
+                        _raw_hop_row(i, r) for i, r in zip(sent.index, sent.itertuples())],
                     "inputs": sorted({a for a, _ in (tx.inputs if tx else [])
                                       if src.features.entity_of(a) == lead.entity_id})})
 
@@ -550,7 +556,7 @@ def peer_profile(peer: str, src: Sources, cfg: dict | None = None) -> dict | Non
         "caveat": CAVEAT.format(peer=peer),
     }
     if not onion:
-        profile["network"] = _network(peer, mine, hops, src.intel)
+        profile["network"] = _network(peer, mine, hops, src.intel, src.hop_provenance)
     return profile
 
 
@@ -570,9 +576,11 @@ def _fingerprints(claims: list[dict], propagation_txids: list[str], src: Sources
 
 
 def _network(peer: str, mine: pd.DataFrame | None, hops: pd.DataFrame | None,
-             intel=None) -> dict:
+             intel=None, provenance: str = "simulated") -> dict:
     """ASN and country from ingest/ enrichment: `ingest.geoip` for the matrix,
-    the dataset's own fields (or GeoIP) for hop rows. First non-null wins."""
+    the dataset's own fields (or GeoIP) for hop rows. First non-null wins.
+    `basis` names which source answered, so generated values never pass for
+    a GeoIP lookup."""
     def first(frame, column):
         if frame is None or column not in frame:
             return None
@@ -588,7 +596,24 @@ def _network(peer: str, mine: pd.DataFrame | None, hops: pd.DataFrame | None,
             "asn_org": first(mine, "asn_org") or first(hops, "asn_org"),
             "country": first(mine, "geo_country") or first(hops, "geo_country"),
             "ip_class": ip_class,
-            "basis": "ingest/ enrichment (ingest.geoip, or the dataset's own fields)"}
+            "basis": NETWORK_BASIS[_network_source(
+                {first(mine, "asn_source"), first(hops, "asn_source")}, asn, provenance)]}
+
+
+NETWORK_BASIS = {
+    "geoip": "GeoLite2 lookup (ingest.geoip)",
+    "synthetic": "synthetic: the demo generator's own ASN and country, not a GeoIP lookup",
+    "dataset": "the capture's own ASN and country fields; no GeoIP database installed",
+    "none": "no ASN or country: GeoLite2 not installed (offline/GEOIP_SETUP.md)",
+}
+
+
+def _network_source(asn_sources: set, asn, provenance: str) -> str:
+    if "geoip" in asn_sources:
+        return "geoip"
+    if asn is None:
+        return "none"
+    return "synthetic" if provenance == "simulated" else "dataset"
 
 
 # --- an ASN --------------------------------------------------------------------

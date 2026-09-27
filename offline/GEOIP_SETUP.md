@@ -83,14 +83,47 @@ With the databases in place this prints a country and an ASN. Without them it
 prints nulls and logs the warning above — which is the same thing the pipeline
 will do, so this is a faithful check.
 
+## The demo without them
+
+The demo dataset is generated, and the generator writes its own `asn` and
+`geo_country` on every relay row. `ingest.geoip.enrich` falls back to those
+fields when no database answers, so demo peer profiles are never blank. Their
+Network block is labelled with its source (`profile._network`):
+
+| basis shown | meaning |
+| --- | --- |
+| GeoLite2 lookup (ingest.geoip) | a local `.mmdb` answered |
+| synthetic: the demo generator's own ASN and country, not a GeoIP lookup | simulated data, no database |
+| the capture's own ASN and country fields; no GeoIP database installed | real data carrying its own fields |
+| no ASN or country: GeoLite2 not installed | nothing answered |
+
+The synthetic values are the generator's inventions. The ASN organisation name
+stays empty without GeoLite2, since the generator does not make one up.
+
 ## Licence
 
-GeoLite2 is distributed by MaxMind under the Creative Commons
-Attribution-ShareAlike 4.0 licence, with their EULA on top. If you redistribute
-a bundle containing the `.mmdb` files, that attribution travels with them:
+Checked against MaxMind's GeoLite2 End User License Agreement
+(<https://www.maxmind.com/en/geolite2/eula>) on 2026-09-27. The data is under
+Creative Commons Attribution-ShareAlike 4.0, and the EULA adds terms on top.
+In summary (read the EULA itself before relying on this):
 
-> This product includes GeoLite2 data created by MaxMind, available from
-> <https://www.maxmind.com>.
+* **Attribution.** Products using the data carry MaxMind's attribution, in
+  the form the EULA gives:
+
+  > This product includes GeoLite Data created by MaxMind, available from
+  > <https://www.maxmind.com>.
+
+* **Keep it current.** When MaxMind releases an update you are to use it, and
+  destroy old versions within thirty days of the release. An air-gapped copy
+  therefore needs refreshing about monthly, by the same five-minute route.
+* **No redistribution without consent.** Beyond what the CC licence permits,
+  disclosing the databases to third parties needs MaxMind's prior written
+  consent. That is one more reason, besides the licence key, that they are
+  never bundled or committed.
+* **No locating individuals.** The EULA forbids using the data to identify or
+  locate a specific household, individual or street address. This system
+  uses country and ASN only, as context and to discount shared
+  infrastructure. Keep it that way.
 
 The databases are **not** committed to this repository: `data/geoip/*` is in
 `.gitignore`, and `*.mmdb` again after it.

@@ -1947,6 +1947,75 @@ What the fingerprint novelty check trips on in the demo, by the tell that was le
 **Verdict, plainly.** standard: precision/recall@k does not improve, workload does not drop; shifted: precision/recall@k improves somewhere, workload drops somewhere. These datasets hold only 5 and 4 illicit operations, and nearly every alert already holds an illicit wallet, so precision@k saturates for both queues and small differences are within one operation. What the actor queue changes is mostly the count: 4.1% and 4.0% fewer items, at the wrong-merge rates above. It is not shown to improve triage beyond that on this data.
 
 
+### Across seeds, about thirty operations each
+
+`condition="simulated"`, cross-topology. The section above has 4-5 illicit operations per dataset, too few to separate the queues. Here: standard 9600 transactions, shifted 18000 transactions (actors one per six transactions), seeds 101, 102, 103, 104, 105, each dataset with its own stacker fitted on its own labels (as `eval.fusion_eval` does), the same bundle and stacker for both queues, and the join rule in fusion/actors.py unchanged from its pre-registration. Intervals are means with a 95% t-interval across seeds; `actor − entity` is the paired difference per seed. "reviewed to find all" is to the dataset's own operation count, listed below; "not reached" means a queue never holds every operation, and such seeds drop out of that measure's interval. The join rule's peer class comes from IP lists only (relays, Tor exits and the generator's hosting addresses in node_intel.json); it takes no ASN, so the GeoLite2 databases, absent for this run, do not affect it.
+
+| condition | seed | operations | entity alerts | actor alerts | reviewed to find all (entity) | reviewed to find all (actor) |
+| --- | --- | --- | --- | --- | --- | --- |
+| shifted | 101 | 29 | 1601 | 1512 | 1342.0 | 1264.0 |
+| shifted | 102 | 33 | 2519 | 2396 | not reached | not reached |
+| shifted | 103 | 35 | 2791 | 2642 | 2346.0 | 2211.0 |
+| shifted | 104 | 33 | 2054 | 1932 | not reached | not reached |
+| shifted | 105 | 30 | 2509 | 2342 | 1671.0 | 1568.0 |
+| standard | 101 | 29 | 695 | 667 | 572.0 | 555.0 |
+| standard | 102 | 35 | 1053 | 1009 | 820.0 | 792.0 |
+| standard | 103 | 36 | 838 | 810 | 161.0 | 239.0 |
+| standard | 104 | 35 | 878 | 844 | 749.0 | 720.0 |
+| standard | 105 | 32 | 1260 | 1212 | 944.0 | 904.0 |
+
+
+#### Both queues
+
+| condition | queue | seeds | items | precision@10 | recall@10 | precision@25 | recall@25 | precision@50 | recall@50 | reviewed to find 1 | reviewed to find 3 | reviewed to find 10 | reviewed to find 20 | reviewed to find all |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| shifted | entity queue (before) | 5 | 2294.800 [1711.938, 2877.662] | 1.000 [1.000, 1.000] | 0.289 [0.242, 0.336] | 1.000 [1.000, 1.000] | 0.603 [0.545, 0.661] | 1.000 [1.000, 1.000] | 0.759 [0.690, 0.828] | 1.000 [1.000, 1.000] | 3.000 [3.000, 3.000] | 11.000 [9.759, 12.241] | 26.200 [23.979, 28.421] | 1786.333 [514.749, 3057.917] |
+| shifted | actor queue | 5 | 2164.800 [1612.063, 2717.537] | 1.000 [1.000, 1.000] | 0.297 [0.238, 0.355] | 1.000 [1.000, 1.000] | 0.588 [0.441, 0.735] | 1.000 [1.000, 1.000] | 0.696 [0.583, 0.808] | 1.000 [1.000, 1.000] | 3.200 [2.645, 3.755] | 10.800 [9.181, 12.419] | 29.000 [14.206, 43.794] | 1681.000 [479.805, 2882.195] |
+| standard | entity queue (before) | 5 | 944.800 [674.709, 1214.891] | 1.000 [1.000, 1.000] | 0.276 [0.246, 0.306] | 1.000 [1.000, 1.000] | 0.547 [0.495, 0.600] | 1.000 [1.000, 1.000] | 0.758 [0.677, 0.840] | 1.000 [1.000, 1.000] | 3.200 [2.645, 3.755] | 10.800 [9.761, 11.839] | 28.200 [24.869, 31.531] | 649.200 [271.450, 1026.950] |
+| standard | actor queue | 5 | 908.400 [649.177, 1167.623] | 1.000 [1.000, 1.000] | 0.283 [0.237, 0.330] | 1.000 [1.000, 1.000] | 0.534 [0.455, 0.612] | 1.000 [1.000, 1.000] | 0.679 [0.585, 0.772] | 1.000 [1.000, 1.000] | 3.200 [2.645, 3.755] | 10.800 [9.181, 12.419] | 32.600 [24.478, 40.722] | 642.000 [321.131, 962.869] |
+
+
+#### Paired difference, actor queue minus entity queue
+
+| condition | measure | seeds with both | actor − entity |
+| --- | --- | --- | --- |
+| shifted | items | 5 | -130.000 [-166.849, -93.151] |
+| shifted | precision@10 | 5 | 0.000 [0.000, 0.000] |
+| shifted | recall@10 | 5 | 0.008 [-0.025, 0.040] |
+| shifted | precision@25 | 5 | 0.000 [0.000, 0.000] |
+| shifted | recall@25 | 5 | -0.015 [-0.115, 0.085] |
+| shifted | precision@50 | 5 | 0.000 [0.000, 0.000] |
+| shifted | recall@50 | 5 | -0.063 [-0.162, 0.036] |
+| shifted | reviewed to find 1 | 5 | 0.000 [0.000, 0.000] |
+| shifted | reviewed to find 3 | 5 | 0.200 [-0.355, 0.755] |
+| shifted | reviewed to find 10 | 5 | -0.200 [-2.041, 1.641] |
+| shifted | reviewed to find 20 | 5 | 2.800 [-10.952, 16.552] |
+| shifted | reviewed to find all | 3 | -105.333 [-176.315, -34.352] |
+| standard | items | 5 | -36.400 [-47.832, -24.968] |
+| standard | precision@10 | 5 | 0.000 [0.000, 0.000] |
+| standard | recall@10 | 5 | 0.007 [-0.012, 0.026] |
+| standard | precision@25 | 5 | 0.000 [0.000, 0.000] |
+| standard | recall@25 | 5 | -0.014 [-0.082, 0.055] |
+| standard | precision@50 | 5 | 0.000 [0.000, 0.000] |
+| standard | recall@50 | 5 | -0.080 [-0.155, -0.004] |
+| standard | reviewed to find 1 | 5 | 0.000 [0.000, 0.000] |
+| standard | reviewed to find 3 | 5 | 0.000 [0.000, 0.000] |
+| standard | reviewed to find 10 | 5 | 0.000 [-0.878, 0.878] |
+| standard | reviewed to find 20 | 5 | 4.400 [-2.656, 11.456] |
+| standard | reviewed to find all | 5 | -7.200 [-67.186, 52.786] |
+
+
+#### Merges
+
+| condition | illicit operations present | alert count reduction | actor purity (alerted, mean) | wrong-merge rate (alerted multi-cluster actors) | wrong-merge rate (all multi-cluster actors) | alerted multi-cluster actors (total) |
+| --- | --- | --- | --- | --- | --- | --- |
+| shifted | 32.000 [28.959, 35.041] | 0.057 [0.048, 0.065] | 0.999 [0.998, 0.999] | 0.084 [0.016, 0.152] | 0.062 [0.057, 0.066] | 169 |
+| standard | 33.400 [29.823, 36.977] | 0.038 [0.034, 0.043] | 0.998 [0.998, 0.999] | 0.101 [0.051, 0.151] | 0.089 [0.080, 0.099] | 137 |
+
+
+**Verdict, plainly.** *shifted*: alert count falls by 0.057 [0.048, 0.065]; recall@50 changes by -0.063 [-0.162, 0.036]; the wrong-merge rate on alerted multi-cluster actors is 0.084 [0.016, 0.152]; the actor queue is better on no measure (paired 95% interval excluding zero, all seeds); *standard*: alert count falls by 0.038 [0.034, 0.043]; recall@50 changes by -0.080 [-0.155, -0.004]; the wrong-merge rate on alerted multi-cluster actors is 0.101 [0.051, 0.151]; the actor queue is better on no measure and worse on recall@50 (paired 95% interval excluding zero, all seeds). Precision@k is 1.000 for both queues at every k on every seed: each dataset has more alerted clusters holding an operation's wallet than the deepest cut-off, so precision@k is saturated from k=10 and cannot separate the queues; recall@k and items reviewed are the informative measures. The actor queue does not improve triage. It shortens the queue by a few percent and pays for it with wrong merges and slightly lower recall at depth. The entity queue is therefore the console default; actors remain a view.
+
+
 ## 14. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
@@ -1980,3 +2049,11 @@ seed B.
 an IP correlation says something about *who*, not about whether an entity is
 risky. It is surfaced per alert as attribution leads, each now labelled
 `anonymized entry point` when the candidate is a Tor exit or hosting address.
+
+**The entity queue is the console default; actors are a view.** The seed sweep
+in section 13 (five seeds per condition, about thirty operations each) finds the
+actor queue better on no triage measure: 4-6% fewer items, precision@k saturated
+for both, recall@50 slightly lower, and 8-10% of alerted multi-cluster actors
+wrongly merged. P9 was specified to say so plainly if the actor queue did not
+improve workload or precision@k; it did not, so the entity queue is the default
+again and actors stay reachable by the toggle.

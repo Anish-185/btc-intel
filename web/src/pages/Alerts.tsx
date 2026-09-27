@@ -37,8 +37,9 @@ export function Alerts() {
   const patternType = params.get("pattern_type") ?? "";
   const sortKey = (params.get("sort") as SortKey) ?? "risk_score";
   const sortDir = (params.get("dir") as "asc" | "desc") ?? "desc";
-  // Actors by default; ?view=entities is the queue as it was before actors.
-  const view = params.get("view") === "entities" ? "entities" : "actors";
+  // Entities by default; ?view=actors is the actor view. The actor queue did not
+  // improve triage in the seed sweep (eval/results.md section 13).
+  const view = params.get("view") === "actors" ? "actors" : "entities";
   const actors = useApi((signal) => api.actors(signal), []);
 
   const { data, error, loading } = useApi(
@@ -119,19 +120,19 @@ export function Alerts() {
         <div className="filters" role="group" aria-label="Queue view">
           <button
             type="button"
-            className={`btn${view === "actors" ? "" : " btn-quiet"}`}
-            aria-pressed={view === "actors"}
+            className={`btn${view === "entities" ? "" : " btn-quiet"}`}
+            aria-pressed={view === "entities"}
             onClick={() => update("view", "")}
           >
-            actors
+            entities
           </button>
           <button
             type="button"
-            className={`btn${view === "entities" ? "" : " btn-quiet"}`}
-            aria-pressed={view === "entities"}
-            onClick={() => update("view", "entities")}
+            className={`btn${view === "actors" ? "" : " btn-quiet"}`}
+            aria-pressed={view === "actors"}
+            onClick={() => update("view", "actors")}
           >
-            entities (previous view)
+            actors (view)
           </button>
         </div>
 
