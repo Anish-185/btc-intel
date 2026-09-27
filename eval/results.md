@@ -2057,3 +2057,28 @@ for both, recall@50 slightly lower, and 8-10% of alerted multi-cluster actors
 wrongly merged. P9 was specified to say so plainly if the actor queue did not
 improve workload or precision@k; it did not, so the entity queue is the default
 again and actors stay reachable by the toggle.
+
+## 15. Attribution tags: red-team detection, an upper bound
+
+**Upper bound, not an estimate.** The demo tag bundle is derived from generator ground truth: it tags every illicit operation's origin cluster and every exchange, the injected operations included (`intel.importers.demo`, every tag `source="simulated"`). Real sanctions and incident lists tag a fraction of real crime, and late. The number below is what tags could add if every operation were already listed.
+
+The red-team batch (section 7's procedure, 50 seeded injections on `shifted-r0.3-s41`) is run twice. Both stackers are fitted on the base dataset the same way (actor-level label); the only difference is the tag signal, fed through the existing fusion path (`tag_score`, intel/store.py). Section 7 scores with the served model, so its tags-off figure differs from this one. Bundle: 51 tags (exchange/VASP, other, ransomware), sealed, verified and imported like any other (manifest `b79ad4777d787f23…`). The two batches minted identical injections.
+
+| stacker | crime detection rate | crimes detected | all typologies | median transactions to detect | fitted AUC | tag_score weight | entities with a tag score |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| without tags | 0.667 | 20 of 30 | 0.400 | 11.500 | 0.678 | 0.000 | 0 |
+| with demo tags | 1.000 | 30 of 30 | 0.600 | 1.500 | 0.680 | 0.902 | 4 |
+
+
+The tag weight is fitted on 4 tagged entities in the base dataset, and a tagged injection is visible from its first transaction, which is why transactions-to-detect collapses. Coinjoin and same-actor injections are not operations, carry no tags, and stay undetected.
+
+### Per typology
+
+| typology | runs | detection rate without tags | detection rate with tags |
+| --- | --- | --- | --- |
+| coinjoin | 10 | 0.000 | 0.000 |
+| layering | 10 | 0.400 | 1.000 |
+| peel_chain | 10 | 0.700 | 1.000 |
+| ransomware_collector | 10 | 0.900 | 1.000 |
+| same_actor_cluster | 10 | 0.000 | 0.000 |
+

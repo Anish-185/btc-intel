@@ -7,6 +7,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { ACTOR_STATEMENT } from "../components/ActorQueue";
 import { Shell } from "../components/Shell";
+import { TagsSection } from "../components/Tags";
 import { useToast } from "../components/Toasts";
 import { ErrorNote, Label, RiskChip, SkeletonRows } from "../components/ui";
 import { formatId } from "../lib/format";
@@ -107,6 +108,7 @@ export function Actor() {
           </>
         )}
       </section>
+      <TagsSection kind="actor" subject={id} />
     </Shell>
   );
 }

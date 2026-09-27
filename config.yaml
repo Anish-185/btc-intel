@@ -328,6 +328,25 @@ risk_weights:
   gnn: 0.25
   correlation: 0.15
 
+tags:
+  # The attribution store (intel/, docs/TAGSTORE.md): sealed bundles imported
+  # with `python -m intel.bundle import`. Read from disk only.
+  store_dir: data/tags
+  # tag_score's weight in the unfitted fallback (risk_weights stay a distribution
+  # over the original engines; this is added beside them).
+  fallback_weight: 0.25
+  # How much a tag of each category counts as risk (tag_score = weight x
+  # effective confidence). Exchange/VASP tags say where money went, not that an
+  # entity is suspect, so they are shown and never scored.
+  risk:
+    exchange/VASP: 0.0
+    sanctioned: 1.0
+    ransomware: 1.0
+    darknet market: 1.0
+    scam: 1.0
+    mixer: 0.5
+    other: 0.5
+
 eval:
   # The one canonical evaluation setup. Every number in eval/results.md comes
   # from these settings via `python -m eval.report` — no ad-hoc runs.
@@ -432,7 +451,7 @@ fusion:
     # correlation_score is deliberately absent: an IP correlation is an
     # attribution lead about *who*, not evidence that an entity is risky.
     # It is surfaced per alert under "leads" instead.
-    signals: [rule_score, anomaly_score, gnn_score, taint_score]
+    signals: [rule_score, anomaly_score, gnn_score, taint_score, tag_score]
     non_negative: true          # every signal may only ever raise risk
     seed: 42
     test_fraction: 0.3        # chronological hold-out, never random

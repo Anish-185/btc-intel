@@ -15,6 +15,7 @@ import { LeadsPanel } from "../components/LeadsPanel";
 import { FingerprintHidden, FingerprintSplit } from "../components/Fingerprint";
 import { Chip, CopyValue, ErrorNote, Label, SkeletonRows } from "../components/ui";
 import { Shell } from "../components/Shell";
+import { TagsSection } from "../components/Tags";
 import { useToast } from "../components/Toasts";
 
 // The graph engine is the heaviest thing the console loads, and only this page
@@ -250,6 +251,7 @@ export function Entity() {
           )}
         </section>
       )}
+      <TagsSection kind="entity" subject={id} />
     </Shell>
   );
 }

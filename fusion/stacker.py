@@ -52,7 +52,8 @@ import config
 # about *who*, not about whether an entity is risky; folding it into a risk
 # score conflates attribution with suspicion. It is surfaced per alert as a
 # separate "leads" section instead.
-SIGNALS = ["rule_score", "anomaly_score", "gnn_score", "taint_score"]
+# tag_score: the attribution store's risk-weighted tags (intel/store.py).
+SIGNALS = ["rule_score", "anomaly_score", "gnn_score", "taint_score", "tag_score"]
 
 
 class NonNegativeLogistic:
@@ -152,7 +153,8 @@ def default_weights(cfg: dict | None = None) -> dict[str, float]:
     return {"rule_score": weights.get("rules", 0.35),
             "anomaly_score": weights.get("anomaly", 0.25),
             "gnn_score": weights.get("gnn", 0.25),
-            "taint_score": weights.get("taint", 0.25)}
+            "taint_score": weights.get("taint", 0.25),
+            "tag_score": cfg["tags"]["fallback_weight"]}
 
 
 def chronological_split(signals: pd.DataFrame, cfg: dict | None = None):

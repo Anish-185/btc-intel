@@ -9,6 +9,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { AsnProfile, LinkedCluster, OriginClaim, PeerProfile } from "../api/types";
 import { Shell } from "../components/Shell";
+import { TagsSection } from "../components/Tags";
 import { Chip, ErrorNote, Label, Notice, SkeletonRows, ValidityChip } from "../components/ui";
 import { FingerprintHidden, FingerprintSplit } from "../components/Fingerprint";
 import { ipClass } from "../lib/format";
@@ -101,6 +102,7 @@ export function Peer() {
           <ProfileBody profile={data} />
         )}
       </section>
+      <TagsSection kind="peer" subject={peer} />
     </Shell>
   );
 }

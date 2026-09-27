@@ -33,6 +33,7 @@ from engines.rules.schema import alerts_to_frame
 from graph.builder import build_graph, load
 from graph.entity_graph import build_entity_graph
 from ingest.ip_intel import load_intel
+from intel.store import tag_scores
 
 from .explain import explain_entity
 from .ordering import lead_confidence, sort as sort_alerts, sort_key, taint_hops
@@ -110,6 +111,7 @@ def collect_signals(df: pd.DataFrame, cfg: dict, watchlist_path=None) -> dict:
     signals = signals.merge(gnn_scores(df, cfg), on="entity_id", how="left")
     signals = signals.merge(taint[["entity_id", "taint_score", "taint_path"]],
                             on="entity_id", how="left")
+    signals = signals.merge(tag_scores(features, cfg), on="entity_id", how="left")
     for column in SIGNALS:
         if column not in signals:
             signals[column] = 0.0

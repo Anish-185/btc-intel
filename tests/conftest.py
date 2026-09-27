@@ -72,6 +72,17 @@ def isolate_stacker_model(tmp_path_factory):
         yield sink
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolate_tag_store():
+    """No test reads the operator's tag store (data/tags): what is imported
+    there would change fusion scores from machine to machine. Tests that need
+    tags build their own store and pass it in."""
+    tags = config.load()["tags"]        # lru_cached: every caller shares this dict
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setitem(tags, "store_dir", None)
+        yield
+
+
 #: Every production artifact the suite could reach. Hashed when the session
 #: starts; tests/test_zz_artifacts.py checks them again at the end.
 ARTIFACTS = [

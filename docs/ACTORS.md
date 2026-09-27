@@ -42,7 +42,8 @@ A **QUALIFIED** origination joins only with its restricted meaning:
   origination evidence is COINJOIN-qualified;
 * a **TOR_ONION**-qualified claim links an *onion identity*, never an IP.
 
-Fingerprints contribute nothing to membership.
+Fingerprints contribute nothing to membership. Attribution tags (docs/TAGSTORE.md) never cross an actor join:
+the actor page lists each member cluster's tags under that member.
 
 ## Joining (fixed before any evaluation)
 

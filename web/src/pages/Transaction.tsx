@@ -11,6 +11,7 @@ import { token } from "../lib/tokens";
 import { Chip, ErrorNote, Label, SkeletonRows, ValidityChip, validityLabel } from "../components/ui";
 import type { Answer, Propagation } from "../api/types";
 import { Shell } from "../components/Shell";
+import { TagsSection } from "../components/Tags";
 import { FingerprintHidden, FingerprintPanel } from "../components/Fingerprint";
 
 const FieldGraph = lazy(() =>
@@ -134,6 +135,7 @@ export function Transaction() {
         <TxFingerprintBlock txid={txid} />
         <CaptureOrigins txid={txid} />
       </section>
+      <TagsSection kind="transaction" subject={txid} />
     </Shell>
   );
 }

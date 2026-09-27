@@ -46,6 +46,7 @@ from engines.rules.detectors import FeatureSet
 from origination.model import OriginationModel
 from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
 from ingest.ip_intel import load_intel
+from intel import store as tag_store
 
 from fusion import incremental
 from fusion.ordering import NO_TAINT, TIEBREAKERS
@@ -111,9 +112,14 @@ def invalidate() -> None:
     Called when the artefacts change under us — a red-team injection, or a
     reset — so the next request rebuilds rather than serving the old case.
     """
-    for cached in (_transactions, _intel, _features, _profiles, _fingerprints):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags):
         cached.cache_clear()
     BUNDLE.clear()
+
+
+@lru_cache(maxsize=1)
+def _tags() -> tag_store.TagStore:
+    return tag_store.load(config.load())
 
 
 @lru_cache(maxsize=1)
@@ -199,7 +205,7 @@ def commit_bundle(updated: dict) -> None:
             "alerts": json.loads(alerts.to_json(orient="records")),
         }
         Path(cfg["fusion"]["alerts_json"]).write_text(json.dumps(payload, indent=2))
-    for cached in (_transactions, _intel, _features, _profiles, _fingerprints):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags):
         cached.cache_clear()
     BUNDLE.clear()
     BUNDLE.update(updated)
@@ -722,6 +728,41 @@ def peer_profile(peer: str) -> dict:
     if profile is None:
         raise HTTPException(404, f"peer {peer} is not in any capture or the relay-hop dataset")
     return {**profile, "custody": {"seq": entry.get("seq")}}
+
+
+# --- tags -----------------------------------------------------------------
+@app.get("/tags/{kind}/{subject}")
+def tags(kind: str, subject: str) -> dict:
+    """The attribution store's tags on one page's subject, with source and date
+    (docs/TAGSTORE.md). An actor and a peer list their clusters' tags, each
+    under its own cluster: a tag never crosses an actor join."""
+    store, (_, features) = _tags(), _features()
+    clustering = features.clustering
+    body: dict = {"entities": [], "addresses": []}
+    if kind == "entity":
+        body["entities"] = [store.entity(subject, clustering)]
+    elif kind == "transaction":
+        rows = _transactions()[_transactions()["txid"] == subject]
+        if rows.empty:
+            raise HTTPException(404, f"transaction {subject} is not in the served dataset")
+        addresses = dict.fromkeys(a for r in rows.itertuples()
+                                  for a in [*r.input_addresses, *r.output_addresses])
+        body["addresses"] = [t for t in (store.address(a, clustering) for a in addresses)
+                             if t["tags"]]
+    elif kind == "actor":
+        actor = _actor(subject)
+        if actor is None:
+            raise HTTPException(404, f"unknown actor {subject}")
+        body["entities"] = [store.entity(m, clustering) for m in actor["members"]]
+    elif kind == "peer":
+        profile = correlation_profile.peer_profile(subject.strip(), _profiles())
+        if profile is None:
+            raise HTTPException(404, f"peer {subject} is not in any capture")
+        body["entities"] = [store.entity(c["cluster_id"], clustering)
+                            for c in profile["linked_clusters"]]
+    else:
+        raise HTTPException(404, "kind is one of entity, transaction, actor, peer")
+    return {"kind": kind, "subject": subject, **store.header(), **body}
 
 
 # --- actors ---------------------------------------------------------------

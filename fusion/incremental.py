@@ -66,6 +66,7 @@ from graph.builder import build_graph, graph_transactions
 from graph.clustering import cluster_wallets
 from graph.entity_graph import build_entity_graph
 from ingest.ip_intel import load_intel
+from intel.store import tag_scores
 
 from .pipeline import build_alerts, gnn_scores
 from .stacker import SIGNALS, Stacker, default_weights
@@ -125,8 +126,9 @@ def load_stacker(cfg: dict) -> Stacker:
 
 
 def signals_frame(entities: pd.DataFrame, rule_scores: pd.Series, anomaly: pd.DataFrame,
-                  gnn: pd.DataFrame, taint: pd.DataFrame) -> pd.DataFrame:
-    """One row per entity, the four signals filled in. Same shape as the full
+                  gnn: pd.DataFrame, taint: pd.DataFrame,
+                  tags: pd.DataFrame | None = None) -> pd.DataFrame:
+    """One row per entity, every signal filled in. Same shape as the full
     pipeline's, because the same alert builder reads it."""
     signals = entities.rename(columns={"cluster_id": "entity_id"}).copy()
     signals = signals.merge(rule_scores, on="entity_id", how="left")
@@ -138,6 +140,8 @@ def signals_frame(entities: pd.DataFrame, rule_scores: pd.Series, anomaly: pd.Da
     else:
         signals["taint_score"] = 0.0
         signals["taint_path"] = None
+    if tags is not None and len(tags):
+        signals = signals.merge(tags, on="entity_id", how="left")
     for column in SIGNALS:
         if column not in signals:
             signals[column] = 0.0
@@ -213,7 +217,8 @@ def update(state: dict, new_rows: pd.DataFrame, cfg: dict | None = None,
         taint = compute_taint(entity_graph, watchlist, features.entity_of, cfg=cfg)
 
     with timing.stage("fuse: score with the saved model"):
-        signals = signals_frame(features.entities, rule_score, anomaly, gnn, taint)
+        signals = signals_frame(features.entities, rule_score, anomaly, gnn, taint,
+                                tag_scores(features, cfg))
         stacker = state.get("stacker") or load_stacker(cfg)
         bundle = {
             "df": df, "graph": graph, "features": features, "signals": signals,

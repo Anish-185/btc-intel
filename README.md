@@ -21,6 +21,7 @@ Runs fully air-gapped: no network calls at any stage (`offline: true` in `config
 | `engines/gnn/` | Graph neural network scoring |
 | `engines/correlation/` | Cross-case / entity correlation |
 | `fusion/` | Combines engine scores into one risk score; `incremental.py` re-runs it over new transactions only |
+| `intel/` | Offline attribution tag store: sealed bundles, OFAC/CSV/demo importers, propagation (docs/TAGSTORE.md) |
 | `api/` | Local HTTP API: alerts, graph, live monitoring, red-team injection |
 | `custody.py` | Hash-chained chain-of-custody ledger |
 | `web/` | Local UI |
@@ -28,7 +29,7 @@ Runs fully air-gapped: no network calls at any stage (`offline: true` in `config
 | `offline/` | Pipeline orchestration, air-gapped packaging |
 | `vendor/` | Cloned reference repos — read-only, never imported (see CONTRIBUTING.md) |
 | `tests/` | Our tests |
-| `data/` | `raw/`, `processed/`, `geoip/` — gitignored |
+| `data/` | `raw/`, `processed/`, `geoip/`, `tags/` — gitignored |
 | `docs/` | Design notes |
 
 ## Generating data
@@ -338,6 +339,12 @@ capture the txid was seen in.
 direction: what a peer (IP or onion identity) or every peer of an ASN did on
 the network. Each lookup is written to the custody ledger. See
 docs/CORRELATION.md.
+`GET /tags/{entity|transaction|actor|peer}/{subject}` — attribution tags from
+the offline tag store (`intel/`): sealed bundles (OFAC SDN, operator CSV
+lists, a simulated demo bundle) carried across the air gap and imported with
+`python -m intel.bundle import`. Each tag shows its source and date, and
+conflicts are shown, never resolved. Tags feed fusion as `tag_score`. See
+docs/TAGSTORE.md.
 
 **No authentication**, deliberately, for the demo — it binds to localhost and
 serves synthetic data. A deployment would need auth, per-case authorisation, an

@@ -17,6 +17,7 @@ data/raw/*
 data/processed/*
 data/inbox/*
 data/geoip/*
+data/tags/*
 !data/**/.gitkeep
 *.mmdb
 *.csv

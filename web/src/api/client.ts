@@ -14,6 +14,7 @@ import type {
   Propagation,
   Stats,
   TxFingerprint,
+  TagsResponse,
   TxOrigination,
 } from "./types";
 
@@ -83,6 +84,9 @@ export const api = {
     get<PeerProfile>(`/peers/${encodeURIComponent(peer)}/profile`, signal),
   asnProfile: (asn: string, signal?: AbortSignal) =>
     get<AsnProfile>(`/asns/${encodeURIComponent(asn)}/profile`, signal),
+
+  tags: (kind: "entity" | "transaction" | "actor" | "peer", subject: string, signal?: AbortSignal) =>
+    get<TagsResponse>(`/tags/${kind}/${encodeURIComponent(subject)}`, signal),
 
   actors: (signal?: AbortSignal) => get<ActorsPage>("/actors?limit=200", signal),
   /** Every call is recorded in the custody ledger by the server. */

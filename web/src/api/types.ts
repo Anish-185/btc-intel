@@ -411,3 +411,48 @@ export interface ActorDetail extends Actor {
   drill_down: { entities: Record<string, string>; peers: Record<string, string>; transactions: string[] };
   custody: { seq: number | null };
 }
+
+/** The attribution store (intel/, docs/TAGSTORE.md). */
+export interface ShownTag {
+  subject: string;
+  label: string;
+  category: string;
+  source: string;
+  reference: string;
+  collected: string;
+  confidence: number;
+  applies_to: "address" | "cluster";
+  simulated: boolean;
+  bundle: string;
+  basis: string;
+  via: string;
+  effective_confidence: number;
+}
+
+export interface EntityTags {
+  entity_id: string;
+  merge_confidence: number;
+  tags: ShownTag[];
+  member_tags: ShownTag[];
+  conflict: boolean;
+  categories: string[];
+}
+
+export interface AddressTags {
+  address: string;
+  entity_id: string;
+  tags: ShownTag[];
+  conflict: boolean;
+  categories: string[];
+}
+
+export interface TagsResponse {
+  kind: string;
+  subject: string;
+  bundles: { name: string; ok: boolean; simulated?: boolean; reason?: string }[];
+  tags: number;
+  simulated: boolean;
+  statement: string;
+  entities: EntityTags[];
+  addresses: AddressTags[];
+}

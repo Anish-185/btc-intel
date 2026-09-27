@@ -13,6 +13,7 @@ docs/detection_unit_protocol.md before any of these numbers existed.
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -206,6 +207,11 @@ def summary_table(fusion: dict, origin_rows: dict, cfg: dict, extra: dict) -> pd
 
 
 def build_report(cfg: dict, rebuild: bool = False) -> str:
+    # The operator's tag store (data/tags) is never read by the evaluation: a
+    # demo bundle there is derived from ground truth and would leak into every
+    # dataset whose addresses it shares. Section 15 builds its own store.
+    cfg = json.loads(json.dumps(cfg))
+    cfg["tags"]["store_dir"] = None
     e = cfg["eval"]
     rates = e["observation_rates"]
     seed_a, seed_b = e["seed"], e["seed_b"]
@@ -643,7 +649,54 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add(actor_power_section(cfg))
 
     add(CLOSING)
+    add(tag_section(shifted[default_rate], cfg))
     return "\n".join(parts)
+
+
+def tag_section(dataset, cfg: dict, result: dict | None = None) -> str:
+    """Section 15: red-team detection with the attribution store, an upper bound."""
+    from eval import tag_eval
+    r = result or tag_eval.evaluate(dataset, cfg)
+    rows = []
+    for name, batch, fit in (("without tags", r["without"], r["fit_without"]),
+                             ("with demo tags", r["with"], r["fit_with"])):
+        rows.append({"stacker": name,
+                     "crime detection rate": f"{batch['detection_rate']:.3f}",
+                     "crimes detected": f"{batch['crime_detected']} of {batch['crime_runs']}",
+                     "all typologies": f"{batch['all_runs_rate']:.3f}",
+                     "median transactions to detect": batch["median_transactions_to_detect"],
+                     "fitted AUC": fit["auc"],
+                     "tag_score weight": fit["coefficients"].get("tag_score"),
+                     "entities with a tag score": fit["entities with a tag score"]})
+    per = r["without"]["per_typology"][["typology", "runs", "detection rate"]].merge(
+        r["with"]["per_typology"][["typology", "detection rate"]], on="typology",
+        suffixes=(" without tags", " with tags"))
+    out = [
+        "\n## 15. Attribution tags: red-team detection, an upper bound\n\n",
+        ("**Upper bound, not an estimate.** The demo tag bundle is derived from generator "
+        "ground truth: it tags every illicit operation's origin cluster and every exchange, "
+        "the injected operations included (`intel.importers.demo`, every tag "
+        "`source=\"simulated\"`). Real sanctions and incident lists tag a fraction of real "
+        "crime, and late. The number below is what tags could add if every operation were "
+        "already listed.\n\n"),
+        (f"The red-team batch (section 7's procedure, {r['without']['runs']} seeded injections "
+        f"on `{dataset.name}`) is run twice. Both stackers are fitted on the base dataset the "
+        "same way (actor-level label); the only difference is the tag signal, fed through "
+        "the existing fusion path (`tag_score`, intel/store.py). Section 7 scores with the "
+        "served model, so its tags-off figure differs from this one. Bundle: "
+        f"{r['tags']} tags ({', '.join(r['categories'])}), sealed, verified and imported "
+        f"like any other (manifest `{r['bundle']['manifest_hash'][:16]}…`). The two batches "
+        + ("minted identical injections" if r["same_injections"] else
+           "**did not mint identical injections, so this comparison is not paired**")
+        + ".\n\n"),
+        md_table(pd.DataFrame(rows)), "\n",
+        (f"\nThe tag weight is fitted on {r['fit_with']['entities with a tag score']} tagged "
+        "entities in the base dataset, and a tagged injection is visible from its first "
+        "transaction, which is why transactions-to-detect collapses. Coinjoin and "
+        "same-actor injections are not operations, carry no tags, and stay undetected.\n"),
+        "\n### Per typology\n\n", md_table(per), "\n",
+    ]
+    return "".join(out)
 
 
 #: Wall-clock time-to-detect, measured once, by hand, not regenerated: seconds
