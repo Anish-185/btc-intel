@@ -1,0 +1,823 @@
+/* =====================================================================
+   btc-intel — the showcase layer: the home page, the top bar and the
+   stage banner on each console page.
+
+   The cyanotype: one ink (cobalt) on one paper (pale blue), pictures drawn
+   as dots by DotArt, and a single orange square that always marks the lead.
+   ===================================================================== */
+
+:root {
+  --frame: 76rem;
+  --gutter: 2rem;
+  --pad-x: max(var(--gutter), calc((100% - var(--frame)) / 2));
+  --fs-hero: clamp(2.75rem, 1.2rem + 5.4vw, 6.25rem);
+  --fs-display-2: clamp(1.875rem, 1.1rem + 2.4vw, 3.25rem);
+  --fs-chapter: clamp(1.625rem, 1.1rem + 1.5vw, 2.375rem);
+}
+
+@media (max-width: 720px) {
+  :root {
+    --gutter: 1rem;
+  }
+}
+
+/* -- shell, top variant ---------------------------------------------- */
+.shell.shell-top {
+  display: block;
+  max-width: none;
+  padding: 0;
+}
+
+.shell-top > .content {
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: 0.75rem var(--pad-x);
+  background: color-mix(in srgb, var(--paper) 86%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: var(--bw-hair) solid var(--rule);
+}
+
+.topbar .rail-nav {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-4);
+  margin: 0;
+  font-size: var(--fs-small);
+}
+
+.topbar .rail-link::before {
+  display: none;
+}
+
+.topbar .rail-link[aria-current="page"] {
+  color: var(--evidence);
+}
+
+.topbar .rail-foot {
+  flex-direction: row;
+  align-items: center;
+  margin: 0 0 0 auto;
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+@media (max-width: 1000px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-4);
+  }
+  .topbar .rail-nav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 0.25rem;
+  }
+  .topbar .rail-link {
+    white-space: nowrap;
+  }
+}
+
+/* -- buttons in the showcase: a mark box, then the words -------------- */
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0 1.125rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out);
+}
+
+.cta-solid {
+  padding-left: 0.25rem;
+  background: var(--on-cobalt);
+  color: var(--cobalt);
+}
+.cta-solid:hover {
+  background: #fff;
+  color: var(--cobalt-deep);
+}
+
+.cta-mark {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  background: var(--cobalt);
+}
+.cta-mark .wordmark-mark {
+  background: var(--on-cobalt);
+}
+
+.cta-line {
+  --bk: var(--on-cobalt-faint);
+  color: var(--on-cobalt);
+  background-color: color-mix(in srgb, var(--on-cobalt) 8%, transparent);
+}
+.cta-line:hover {
+  --bk: var(--on-cobalt);
+  color: #fff;
+  background-color: color-mix(in srgb, var(--on-cobalt) 16%, transparent);
+}
+
+/* -- hero ------------------------------------------------------------- */
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: var(--sp-9) 0 0;
+  background: var(--cobalt);
+  color: var(--on-cobalt);
+}
+
+/* The column rails: two hairlines down the frame, as on a drawing sheet. */
+.hero::before,
+.hero::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--on-cobalt) 18%, transparent);
+  pointer-events: none;
+}
+.hero::before {
+  left: calc(var(--pad-x) - 1rem);
+}
+.hero::after {
+  right: calc(var(--pad-x) - 1rem);
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  max-width: 58rem;
+  margin-left: var(--pad-x);
+  margin-right: var(--gutter);
+}
+
+.hero-kicker {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--on-cobalt-soft);
+}
+
+.hero-title {
+  margin-top: var(--sp-4);
+  font-family: var(--font-display);
+  font-size: var(--fs-hero);
+  font-weight: 500;
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+  color: #fff;
+}
+
+.hero-lede {
+  max-width: 40rem;
+  margin-top: var(--sp-5);
+  font-size: 1.125rem;
+  line-height: 1.55;
+  color: var(--on-cobalt-soft);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-6);
+}
+
+.hero-art {
+  position: relative;
+  margin-top: var(--sp-7);
+  color: var(--on-cobalt);
+}
+
+.hero-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 368 / 165;
+}
+
+/* The moment of attribution: the gap between the two hands. */
+.hero-spark {
+  position: absolute;
+  display: block;
+  left: 50%;
+  top: 48.5%;
+  translate: -50% -50%;
+  width: clamp(10px, 1.3vw, 18px);
+  aspect-ratio: 1;
+  background: var(--flag);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--flag) 25%, transparent);
+  animation: spark 1.6s var(--ease-out) 1.2s both;
+}
+
+@keyframes spark {
+  0% {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.6);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hero-ticker {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  padding: 0 var(--pad-x);
+  border-top: 1px solid color-mix(in srgb, var(--on-cobalt) 22%, transparent);
+  background: var(--cobalt-deep);
+}
+
+.hero-ticker > div {
+  padding: var(--sp-4) var(--sp-4) var(--sp-4) 0;
+}
+.hero-ticker > div + div {
+  padding-left: var(--sp-4);
+  border-left: 1px solid color-mix(in srgb, var(--on-cobalt) 16%, transparent);
+}
+
+.hero-ticker dt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+  color: var(--on-cobalt-faint);
+}
+
+.hero-ticker dd {
+  margin: 0.25rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 1.375rem;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .hero {
+    padding-top: var(--sp-7);
+  }
+  .hero-ticker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hero-ticker > div,
+  .hero-ticker > div + div {
+    padding: var(--sp-3) 0;
+    border-left: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--on-cobalt) 16%, transparent);
+  }
+  .hero-ticker > div:last-child {
+    border-bottom: 0;
+  }
+}
+
+/* -- why it holds up --------------------------------------------------- */
+.proof-strip {
+  padding: var(--sp-8) var(--pad-x);
+  border-bottom: var(--bw-hair) solid var(--rule);
+}
+
+.proof-strip-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-display-2);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+
+.proof-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: var(--sp-6);
+  border-top: var(--bw-hair) solid var(--ink);
+}
+
+.big-proof {
+  padding: var(--sp-5) var(--sp-5) var(--sp-5) 0;
+}
+.big-proof + .big-proof {
+  padding-left: var(--sp-5);
+  border-left: var(--bw-hair) solid var(--rule);
+}
+
+.big-proof-value {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 1.3rem + 2.8vw, 4.25rem);
+  white-space: nowrap;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: var(--evidence);
+  font-variant-numeric: tabular-nums;
+}
+
+.big-proof-what {
+  max-width: 16rem;
+  margin-top: var(--sp-3);
+  color: var(--ink-soft);
+}
+
+.proof-strip-note {
+  max-width: 44rem;
+  margin-top: var(--sp-5);
+  font-size: var(--fs-small);
+  color: var(--ink-muted);
+}
+
+@media (max-width: 900px) {
+  .proof-strip-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .big-proof:nth-child(3) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .big-proof:nth-child(n + 3) {
+    border-top: var(--bw-hair) solid var(--rule);
+  }
+}
+
+/* -- the pipeline ------------------------------------------------------ */
+.pipeline {
+  padding: var(--sp-9) var(--pad-x) var(--sp-8);
+}
+
+.pipeline-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: end;
+}
+
+.pipeline-head h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-display-2);
+  font-weight: 500;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+}
+
+.pipeline-body {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: var(--sp-7);
+  margin-top: var(--sp-8);
+}
+
+/* The index is the pipeline drawn as a line with a station per stage. */
+.stage-index {
+  position: sticky;
+  top: 5.5rem;
+  align-self: start;
+}
+
+.stage-index ol {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage-index ol::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.6rem;
+  bottom: 0.6rem;
+  width: 1px;
+  background: var(--rule);
+}
+
+.stage-index a {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 0.3125rem 0 0.3125rem 1.25rem;
+  color: var(--ink-muted);
+  font-size: var(--fs-small);
+  text-decoration: none;
+  transition: color var(--dur-2) var(--ease-out);
+}
+
+.stage-index a::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  background: var(--paper);
+  border: 1px solid var(--ink-faint);
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-out);
+}
+
+.stage-index a:hover {
+  color: var(--ink);
+}
+
+.stage-index a[aria-current="step"] {
+  color: var(--ink);
+}
+.stage-index a[aria-current="step"]::before {
+  background: var(--flag);
+  border-color: var(--flag);
+}
+
+.stage-num {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+/* -- chapters ---------------------------------------------------------- */
+.chapters {
+  display: flex;
+  flex-direction: column;
+}
+
+.chapter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-7);
+  align-items: center;
+  padding: var(--sp-7) 0;
+  border-top: var(--bw-hair) solid var(--rule);
+  scroll-margin-top: 5rem;
+}
+.chapter:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.chapter[data-flip] .chapter-art {
+  order: 2;
+}
+
+.chapter-art {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--cobalt);
+  color: var(--on-cobalt);
+  padding: var(--sp-5);
+}
+
+.chapter-art canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Drawing-sheet annotations in the art's corners. */
+.art-note {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+  color: var(--on-cobalt-soft);
+}
+.art-note-tl {
+  top: 0.625rem;
+  left: 0.75rem;
+}
+.art-note-br {
+  right: 0.75rem;
+  bottom: 0.625rem;
+}
+
+/* One orange square per picture: the lead. Three positions, rotated by
+   chapter, so it never sits in the same place twice in a row. */
+.art-flag {
+  position: absolute;
+  display: block;
+  width: 5%;
+  aspect-ratio: 1;
+  background: var(--flag);
+  top: 22%;
+  left: 64%;
+}
+.art-flag[data-at="1"] {
+  top: 58%;
+  left: 26%;
+}
+.art-flag[data-at="2"] {
+  top: 36%;
+  left: 78%;
+}
+
+.chapter-stage {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  color: var(--evidence);
+  font-size: var(--fs-small);
+  font-weight: 500;
+}
+
+.chapter-title {
+  margin-top: var(--sp-3);
+  font-family: var(--font-display);
+  font-size: var(--fs-chapter);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.chapter-body {
+  max-width: 34rem;
+  margin-top: var(--sp-4);
+  color: var(--ink-soft);
+  font-size: 1rem;
+}
+
+.chapter-sample {
+  max-width: 34rem;
+  margin-top: var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--evidence);
+  background: var(--evidence-w7);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.proofs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: var(--sp-2);
+  margin: var(--sp-5) 0 0;
+}
+
+.proof {
+  --bk: var(--evidence);
+  padding: var(--sp-3);
+  background-color: var(--surface);
+}
+
+.proof-value {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.proof-what {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-small);
+  line-height: 1.4;
+  color: var(--ink-muted);
+}
+
+.chapter-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-top: var(--sp-5);
+}
+
+.condition {
+  padding: 0.0625rem 0.375rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  color: var(--caution);
+  background: var(--caution-bg);
+}
+
+.chapter-link {
+  font-weight: 500;
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+
+@media (max-width: 1000px) {
+  .pipeline-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stage-index {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .pipeline-head,
+  .chapter {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-5);
+  }
+  .chapter[data-flip] .chapter-art {
+    order: 0;
+  }
+  .chapter-art {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+/* -- what it refuses to claim ------------------------------------------ */
+.honesty {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--sp-8);
+  padding: var(--sp-9) var(--pad-x);
+  background: var(--navy);
+  color: var(--on-cobalt);
+}
+
+.honesty-art {
+  position: relative;
+  min-height: 30rem;
+  color: var(--on-cobalt-faint);
+}
+.honesty-art canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.honesty-art .art-note {
+  color: var(--on-cobalt-faint);
+}
+
+.honesty-copy h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-display-2);
+  font-weight: 500;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  color: #fff;
+}
+
+.honesty-lede {
+  max-width: 36rem;
+  margin-top: var(--sp-4);
+  font-size: 1.0625rem;
+  color: var(--on-cobalt-soft);
+}
+
+.findings {
+  margin-top: var(--sp-6);
+  border-top: 1px solid color-mix(in srgb, var(--on-cobalt) 22%, transparent);
+}
+
+.finding {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+  gap: var(--sp-5);
+  padding: var(--sp-5) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--on-cobalt) 22%, transparent);
+}
+
+.finding h3 {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.finding p {
+  color: var(--on-cobalt-soft);
+  font-size: var(--fs-body);
+}
+
+@media (max-width: 900px) {
+  .honesty {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-6);
+  }
+  .honesty-art {
+    min-height: 18rem;
+  }
+  .finding {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-2);
+  }
+}
+
+/* -- outro --------------------------------------------------------------- */
+.outro {
+  position: relative;
+  overflow: hidden;
+  padding: var(--sp-9) var(--pad-x);
+  background: var(--cobalt);
+  color: var(--on-cobalt);
+}
+
+.outro-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: color-mix(in srgb, var(--on-cobalt) 30%, transparent);
+}
+
+.outro-copy {
+  position: relative;
+  max-width: 40rem;
+}
+
+.outro-copy h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-display-2);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  color: #fff;
+}
+
+.outro-copy p {
+  margin-top: var(--sp-3);
+  font-size: 1.0625rem;
+  color: var(--on-cobalt-soft);
+}
+
+/* -- stage banner on console pages -------------------------------------- */
+.stage-banner {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  margin-bottom: var(--sp-6);
+  background: var(--cobalt);
+  color: var(--on-cobalt);
+  text-decoration: none;
+  overflow: hidden;
+}
+.stage-banner:hover {
+  color: var(--on-cobalt);
+  background: var(--cobalt-deep);
+}
+
+.stage-banner-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 5.5rem;
+  background: var(--cobalt-deep);
+  color: var(--on-cobalt-soft);
+}
+
+.stage-banner-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-content: center;
+  gap: 0.25rem var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+}
+
+.stage-banner .stage-num {
+  width: 100%;
+  color: var(--on-cobalt-faint);
+}
+
+.stage-banner-name {
+  font-family: var(--font-display);
+  font-size: 1.375rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.stage-banner-title {
+  color: var(--on-cobalt-soft);
+}
+
+/* -- headings across the console get the display face ------------------- */
+h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}

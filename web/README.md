@@ -37,21 +37,23 @@ Tokens: `--dur-1 150ms`, `--dur-2 200ms`, `--dur-3 280ms`, `--dur-4 400ms`,
 | 14 | **Graph layout** — cose/dagre animate to their final positions | mount, hop-count change, switching to the propagation tree | 300ms, Cytoscape's own easing | `animate: false`; the layout is applied in one step |
 | 15 | **Graph hover dim** — everything that is not a neighbour drops to 12% opacity | hovering a node | 200ms, opacity only | Cytoscape's transition is still declared but the dim is instant enough to be unnoticeable; the state itself is kept, because it is information, not decoration |
 | 16 | **Marching ants** — the taint path's dashes flow along the edge | a graph containing a taint path | `line-dash-offset` stepped every 90ms | loop never starts; the taint path stays dashed and still |
-| 17 | **Ambient field** — the home header's dither grid drifts | overview page visible and tab focused | redrawn at 8fps, paused off-screen (IntersectionObserver) and when `document.hidden` | never starts; one static frame is drawn |
+| 17 | **Ambient field** — the case page header's dither grid drifts | overview page visible and tab focused | redrawn at 8fps, paused off-screen (IntersectionObserver) and when `document.hidden` | never starts; one static frame is drawn |
 | 18 | **Command palette** — the dialog fades in over a dimmed page | ⌘/Ctrl-K | native `<dialog>` + backdrop, CSS-transitioned | instant |
 | 19 | **Sub-nav marker** — the active anchor's rule extends from 8px to 20px | the reader scrolls into a section | 200ms `ease-out` on `width` | instant |
 | 20 | **Button press/hover** — background and colour shift | pointer | 200ms `ease-out`, colour only | instant |
+| 21 | **Dot-art reveal** — the home hero's hex-glyph hands sweep in from both edges toward the middle | hero first scrolls into view | 1.4s cubic ease-out, rAF, once | final frame drawn at once |
+| 22 | **Spark** — the orange square between the hands scales in once | home page load, after the reveal | 1.6s `ease-out`, 1.2s delay | the global reduce rule zeroes the duration; the square appears at rest |
 
 ## The investigation graph
 
 | # | Animation | Trigger | Duration / easing | Reduced motion |
 | --- | --- | --- | --- | --- |
-| 21 | **Layout transition** — nodes glide to their new places when the layout changes | the layout toggle, a trace, simplify connectors | 300ms, Cytoscape's own easing, then a fit | `animate: false`; positions are applied in one step |
-| 22 | **Incremental expansion** — only the new nodes are laid out; everything already placed is locked and does not move | double-click, or **expand** | 260ms | applied instantly, still without moving existing nodes |
-| 23 | **Search centring** — the view pans and zooms to the match | typing in **find** | 250ms | jumps straight there |
-| 24 | **Hover dim** — everything that is not a neighbour drops to 10% | hovering a node | 200ms, opacity only | instant |
-| 25 | **Taint dashes** — the marching ants on the taint path | a taint path is present | `line-dash-offset` stepped every 90ms | the loop never starts; the path stays dashed and still |
-| 26 | **Tooltip** — appears above the node under the pointer | hover | tippy.js default, ~100ms | tippy's own transition is trivial; the content is what matters and it is instant |
+| 23 | **Layout transition** — nodes glide to their new places when the layout changes | the layout toggle, a trace, simplify connectors | 300ms, Cytoscape's own easing, then a fit | `animate: false`; positions are applied in one step |
+| 24 | **Incremental expansion** — only the new nodes are laid out; everything already placed is locked and does not move | double-click, or **expand** | 260ms | applied instantly, still without moving existing nodes |
+| 25 | **Search centring** — the view pans and zooms to the match | typing in **find** | 250ms | jumps straight there |
+| 26 | **Hover dim** — everything that is not a neighbour drops to 10% | hovering a node | 200ms, opacity only | instant |
+| 27 | **Taint dashes** — the marching ants on the taint path | a taint path is present | `line-dash-offset` stepped every 90ms | the loop never starts; the path stays dashed and still |
+| 28 | **Tooltip** — appears above the node under the pointer | hover | tippy.js default, ~100ms | tippy's own transition is trivial; the content is what matters and it is instant |
 
 Nothing in the graph waits on an animation: expansion adds nodes to the model
 first and animates second, and the canvas accepts pointer input throughout.
