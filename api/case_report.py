@@ -241,3 +241,122 @@ def render_pdf(detail: dict, graph: dict, now: datetime, custody: dict | None = 
     c.showPage()
     c.save()
     return buffer.getvalue()
+
+
+# --- exit-point investigator packet (analysis/exit_point.py) -------------------
+SEALED_NOT_SIGNED = ("The tag bundles behind these candidates are sealed (tamper-evident): "
+                     "their files are unchanged since sealing. They are not signed, so the "
+                     "seal does not prove who built them.")
+
+
+def packet_disclaimers(result: dict) -> list[str]:
+    """What the first page states before anything else. Kept here so the PDF
+    and its tests read the same sentences."""
+    lines = [result["statement"]]
+    lines.append("Simulated tags are simulated: at least one tag bundle behind this packet is "
+                 "derived from generator ground truth and is not intelligence."
+                 if result.get("simulated_tags") else
+                 "No simulated tag bundle is loaded; every tag names its real source.")
+    lines.append(SEALED_NOT_SIGNED)
+    return lines
+
+
+def render_packet(result: dict, now: datetime, custody: dict | None = None) -> bytes:
+    """The investigator packet for one exit-point trace: a disclaimer page,
+    then every candidate with its tag, receiving addresses, time window,
+    traced amounts and hop-by-hop paths, then the untagged sinks and the seal."""
+    buffer = BytesIO()
+    c = pdf_canvas.Canvas(buffer, pagesize=A4)
+    c.setTitle(f"btc-intel exit-point packet — {result['subject']}")
+    width = WIDTH - 2 * MARGIN
+    state = {"y": HEIGHT - MARGIN}
+
+    def room(needed: float) -> None:
+        if state["y"] - needed < MARGIN:
+            c.showPage()
+            state["y"] = HEIGHT - MARGIN
+
+    def line(text: str, size: float = 8.5, colour=INK, font: str = "Helvetica") -> None:
+        room(12)
+        state["y"] = _wrap(c, text, MARGIN, state["y"], width, size=size,
+                           leading=size + 2.5, colour=colour, font=font)
+
+    def heading(text: str) -> None:
+        room(40)
+        state["y"] = _heading(c, text, state["y"])
+
+    c.setFont("Helvetica-Bold", 16)
+    c.setFillColor(INK)
+    c.drawString(MARGIN, state["y"], "btc-intel exit-point packet")
+    c.setFont("Helvetica", 9)
+    c.setFillColor(MUTED)
+    c.drawRightString(WIDTH - MARGIN, state["y"], now.strftime("%Y-%m-%d %H:%M:%S UTC"))
+    state["y"] -= 22
+    line(f"Seed: {result['kind']} {result['subject']}", size=10, font="Helvetica-Bold")
+    if result.get("note"):
+        line(result["note"], colour=MUTED)
+    state["y"] -= 6
+    heading("read this first")
+    for text in packet_disclaimers(result):
+        line(f"• {text}", size=9.5, font="Helvetica-Bold")
+    cfg = result.get("config", {})
+    line(f"Taint models: haircut (proportional) and poison (any contact). Depth limit "
+         f"{cfg.get('max_hops')} hops; an entity receiving under {cfg.get('min_share', 0):.1%} of "
+         f"the seed's outflow (haircut) or {cfg.get('min_value_btc')} BTC (poison) is not "
+         "followed further.",
+         colour=MUTED)
+
+    for trace in result["traces"]:
+        c.showPage()
+        state["y"] = HEIGHT - MARGIN
+        heading(f"trace from cluster {trace['seed']}")
+        line(f"Seed outflow {trace['seed_amount']:.8f} BTC. Still in flight at the depth "
+             f"limit: haircut {trace['at_depth_limit']['haircut']:.8f}, "
+             f"poison {trace['at_depth_limit']['poison']:.8f} BTC.")
+        for model, mixes in trace["mixes"].items():
+            for mix in mixes:
+                line(f"{model}: funds entered a CoinJoin from {mix['from']} "
+                     f"({mix['value']:.8f} BTC, tx {mix['txids'][0]}). Not traced past the mix.",
+                     colour=MUTED)
+        if not trace["candidates"]:
+            line("No cluster tagged exchange/VASP was reached.", colour=MUTED)
+        for cand in trace["candidates"]:
+            heading(f"candidate {cand['rank']}: cluster {cand['entity_id']}")
+            for tag in cand["tags"]:
+                line(f"Tag: {tag['label']} ({tag['category']}), source {tag['source']}, "
+                     f"collected {tag['collected']}, bundle {tag['bundle']}"
+                     + (" — SIMULATED, not intelligence" if tag["simulated"] else ""),
+                     font="Helvetica-Bold")
+            if cand["conflict"]:
+                line("Conflicting tags on this cluster; all are listed, none preferred.")
+            line("Receiving addresses: " + (", ".join(cand["receiving_addresses"]) or "—"))
+            line(f"Time window: {cand['time_window'][0]} to {cand['time_window'][1]}")
+            for model, m in cand["models"].items():
+                line(f"{model}: {m['amount']:.8f} BTC traced ({m['share']:.2%} of the seed's "
+                     f"outflow), best path confidence {m['path_confidence']:.4f}")
+            for model, m in cand["models"].items():
+                for i, path in enumerate(m["paths"], 1):
+                    line(f"{model} path {i} (confidence {path['confidence']:.4f}):",
+                         font="Helvetica-Bold")
+                    for n, hop in enumerate(path["hops"], 1):
+                        line(f"  hop {n}: {hop['reason']}. tx {', '.join(hop['txids'][:3])}"
+                             + (" …" if len(hop["txids"]) > 3 else ""), size=7.5)
+            line(f"Evidence sha256 (this candidate's record): {cand['evidence_sha256']}",
+                 size=7, font="Courier")
+        if trace["sinks"]:
+            heading("untagged sinks (clusters that kept traced value; not services)")
+            for sink in trace["sinks"]:
+                line(f"• cluster {sink['entity_id']}: {sink['label']}, kept "
+                     f"{sink['share_kept']:.2%} under haircut")
+
+    heading("evidence seal")
+    for bundle in result.get("tag_bundles", []):
+        line(f"tag bundle {bundle['name']}: manifest {bundle.get('manifest_hash')}"
+             + (" (simulated)" if bundle.get("simulated") else ""), size=7, font="Courier")
+    for text in _seal_lines(custody or {}):
+        line(text, size=7, font="Courier")
+    state["y"] -= 6
+    line(CAVEAT, size=7.5, colour=MUTED, font="Helvetica-Oblique")
+    c.showPage()
+    c.save()
+    return buffer.getvalue()

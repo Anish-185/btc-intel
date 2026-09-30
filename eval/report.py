@@ -13,6 +13,7 @@ docs/detection_unit_protocol.md before any of these numbers existed.
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import config
 
 from . import (clustering_eval, correlation_eval, fusion_eval, origin,
                redteam_batch, saturation, saturation_diagnosis, zero_attack)
+from .ground_truth import score as ground_truth
 from .datasets import build
 
 
@@ -189,9 +191,10 @@ def summary_table(fusion: dict, origin_rows: dict, cfg: dict, extra: dict) -> pd
          fmt(extra["redteam"]["all_runs_rate"]),
          "includes the two patterns that are not crimes — see section 7",
          f"{extra['redteam']['completed']} injections"),
-        ("red-team median time-to-detect", "—",
-         f"{extra['redteam']['median_time_to_detect']}s",
-         "inject to alert, incremental re-run, crimes only",
+        ("red-team median transactions to detect", "—",
+         f"{extra['redteam']['median_transactions_to_detect']}",
+         ("the pattern's own transactions, in time order, before the first alert on it; "
+         "crimes only; deterministic (wall-clock: section 7 footnote)"),
          f"{extra['redteam']['crime_detected']} detected"),
         ("attribution leads naming the true IP",
          fmt(extra["leads"]["standard"]), fmt(extra["leads"]["shifted"]),
@@ -204,6 +207,11 @@ def summary_table(fusion: dict, origin_rows: dict, cfg: dict, extra: dict) -> pd
 
 
 def build_report(cfg: dict, rebuild: bool = False) -> str:
+    # The operator's tag store (data/tags) is never read by the evaluation: a
+    # demo bundle there is derived from ground truth and would leak into every
+    # dataset whose addresses it shares. Section 15 builds its own store.
+    cfg = json.loads(json.dumps(cfg))
+    cfg["tags"]["store_dir"] = None
     e = cfg["eval"]
     rates = e["observation_rates"]
     seed_a, seed_b = e["seed"], e["seed_b"]
@@ -552,8 +560,11 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add(REDTEAM_PREAMBLE)
     add(f"\n**{redteam['crime_detected']} of {redteam['crime_runs']} criminal "
         f"injections were detected — {redteam['detection_rate']:.3f}** at threshold "
-        f"{redteam['threshold']}, median time-to-detect "
-        f"{redteam['median_time_to_detect']}s."
+        f"{redteam['threshold']}. **Median transactions to detect: "
+        f"{redteam['median_transactions_to_detect']}** of the pattern's own transactions "
+        f"(median share of the injection: {redteam['median_fraction_to_detect']}), fed "
+        "in timestamp order to the same incremental update the endpoint runs. A count, "
+        "so it does not depend on the machine; wall-clock is a footnote below."
         + (f" {redteam['failed']} run(s) failed outright.\n" if redteam["failed"]
            else "\n"))
     add(f"\nOver **all {redteam['completed']}** injections including the two "
@@ -565,6 +576,7 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add(md_table(redteam["per_typology"]))
     add("\n**By broadcast route** — what the network side could recover:\n\n")
     add(md_table(redteam["by_broadcast"]))
+    add(REDTEAM_WALLCLOCK)
 
     add("\n### The two patterns that are not crimes\n")
     add("Scored as what they are. There is nothing to catch, so \"detection rate\" is "
@@ -598,8 +610,550 @@ def build_report(cfg: dict, rebuild: bool = False) -> str:
     add("\n## 8. The anomaly engine contributes nothing\n")
     add(anomaly_section(fusion, redteam))
 
+    # --- 9. ground truth on real relay data ------------------------------
+    add("\n## 9. Origin accuracy against known truth\n")
+    # Imported here: origination imports eval, not the other way round.
+    from origination import evaluate as origination_eval
+    from origination import report as origination_report
+
+    origination = origination_eval.run(cfg, rebuild)
+    ground_truth_section(add, ground_truth.evaluate(cfg, rebuild), cfg,
+                         origination_report.section(origination, md_table))
+    origination_report.write_doc(origination, md_table, cfg["origination"]["results_doc"])
+
+    # --- 10. the validity layer ------------------------------------------
+    add("\n## 10. The validity layer: when attribution is invalid\n")
+    from analysis import evaluate as validity_eval
+
+    validity = validity_eval.run(cfg, rebuild, base=origination)
+    # The pre-registration and P6's frozen numbers first, verbatim, one level down.
+    add("\n" + validity_eval.preserved(cfg["validity"]["results_doc"])
+        .replace("\n### ", "\n#### ").replace("\n## ", "\n### ")
+        .replace("## Metric revision", "### Metric revision", 1))
+    add("\n### Results — metric revision\n\n")
+    add(validity_eval.section(validity, md_table).replace("\n### ", "\n#### "))
+    validity_eval.write_doc(validity, md_table, cfg["validity"]["results_doc"])
+
+    # --- 11. the reverse direction ---------------------------------------
+    add("\n## 11. Peer profiles: coverage\n")
+    add(profile_section(cfg, origination))
+
+    # --- 12. wallet fingerprints ------------------------------------------
+    add("\n## 12. Wallet-construction fingerprints\n")
+    add(fingerprint_section(cfg, rebuild))
+
+    # --- 13. actors ------------------------------------------------------------
+    add("\n## 13. Actors: the queue as triage\n")
+    add(actor_section({"standard": standard[default_rate], "shifted": shifted[default_rate]},
+                      {n: fusion[n]["stacker"] for n in ("standard", "shifted")}, cfg))
+    add(actor_power_section(cfg))
+
     add(CLOSING)
+    add(tag_section(shifted[default_rate], cfg))
+    add(exit_section(cfg))
     return "\n".join(parts)
+
+
+def exit_section(cfg: dict, summary: dict | None = None) -> str:
+    """Section 16: exit points against ground truth, an upper bound."""
+    from eval import actor_queue as AQ
+    from eval import exit_eval
+    if summary is None:
+        summary = exit_eval.summarise([exit_eval.evaluate(ds, cfg)
+                                       for ds in AQ.power_datasets(cfg).values()])
+    x = cfg["exit_point"]
+    mix = summary["coinjoins"]
+    through = (float((mix["candidate_through_mix"] * mix["seeds"]).sum() / mix["seeds"].sum())
+               if len(mix) else 0.0)
+    return "".join([
+        "\n## 16. Exit points: tracing to cash-out, an upper bound\n\n",
+        ("`condition=\"simulated\"`. **Upper bound: the tags come from ground truth.** The "
+        "generator never pays an exchange with illicit money; its cash-outs are fresh "
+        "wallets. So each dataset gets an in-memory tag store (never data/tags) in which "
+        "every true cash-out cluster is tagged exchange/VASP (each ransomware peel's "
+        "recipient, each layering merge's sink), beside the generator's real exchanges as "
+        "decoys. From each operation's origin cluster, `analysis.exit_point` traces under "
+        "both taint models and ranks the tagged clusters it reaches "
+        f"(depth {x['max_hops']}, haircut floor {x['min_share']:.1%}, poison floor "
+        f"{x['min_value_btc']} BTC). Datasets: the ten of section 13's seed sweep, "
+        f"{summary['operations']} operations.\n\n"),
+        md_table(summary["ranking"]), "\n",
+        ("\n**Read plainly.** Generator crime reaches no decoy: the only tagged clusters a "
+        "trace can reach are the operation's own cash-outs, so top-1 measures whether "
+        "tracing reaches a cash-out within the limits, not whether ranking picks the right "
+        "service among several. It is not evidence that ranking works on real data, where "
+        "funds pass through services, mixers and unrelated users before any exchange. "
+        f"{summary['degenerate']} operation(s) started in a cluster that is itself a true "
+        "cash-out.\n"),
+        ("\n**Where reach fails.** Shifted layering is deeper. On shifted seed 101 the "
+         "missed sinks sat 7 to 11 entity hops from the source. Those past 8 hops are beyond "
+         "`max_hops`; the others fall under the 0.1% haircut floor after repeated "
+         "fan-outs, before the merge recombines them. Poison has no share floor, so it "
+         "reaches more. The cut-offs were set before this evaluation and are not retuned "
+         "on it.\n"),
+        "\n### CoinJoin termination\n\n",
+        ("From every input cluster of every generator CoinJoin: did tracing stop at the mix "
+        "(recorded as funds entering a CoinJoin), and did any candidate path pass through "
+        "the CoinJoin's transaction?\n\n"),
+        md_table(mix) if len(mix) else "_No CoinJoins in these datasets._\n", "\n",
+        (f"\n{through:.1%} of participant traces still produced a candidate through a "
+        "CoinJoin's transaction. That happens where one pair of clusters is linked by a "
+        "CoinJoin and by an ordinary payment: the entity-graph edge is not made only of "
+        "mixes, so `fusion.taint` follows it (as `propagate` always has), and the hop's "
+        "reasoning in the packet says the edge includes CoinJoins.\n"),
+    ])
+
+
+def tag_section(dataset, cfg: dict, result: dict | None = None) -> str:
+    """Section 15: red-team detection with the attribution store, an upper bound."""
+    from eval import tag_eval
+    r = result or tag_eval.evaluate(dataset, cfg)
+    rows = []
+    for name, batch, fit in (("without tags", r["without"], r["fit_without"]),
+                             ("with demo tags", r["with"], r["fit_with"])):
+        rows.append({"stacker": name,
+                     "crime detection rate": f"{batch['detection_rate']:.3f}",
+                     "crimes detected": f"{batch['crime_detected']} of {batch['crime_runs']}",
+                     "all typologies": f"{batch['all_runs_rate']:.3f}",
+                     "median transactions to detect": batch["median_transactions_to_detect"],
+                     "fitted AUC": fit["auc"],
+                     "tag_score weight": fit["coefficients"].get("tag_score"),
+                     "entities with a tag score": fit["entities with a tag score"]})
+    per = r["without"]["per_typology"][["typology", "runs", "detection rate"]].merge(
+        r["with"]["per_typology"][["typology", "detection rate"]], on="typology",
+        suffixes=(" without tags", " with tags"))
+    out = [
+        "\n## 15. Attribution tags: red-team detection, an upper bound\n\n",
+        ("**Upper bound, not an estimate.** The demo tag bundle is derived from generator "
+        "ground truth: it tags every illicit operation's origin cluster and every exchange, "
+        "the injected operations included (`intel.importers.demo`, every tag "
+        "`source=\"simulated\"`). Real sanctions and incident lists tag a fraction of real "
+        "crime, and late. The number below is what tags could add if every operation were "
+        "already listed.\n\n"),
+        (f"The red-team batch (section 7's procedure, {r['without']['runs']} seeded injections "
+        f"on `{dataset.name}`) is run twice. Both stackers are fitted on the base dataset the "
+        "same way (actor-level label); the only difference is the tag signal, fed through "
+        "the existing fusion path (`tag_score`, intel/store.py). Section 7 scores with the "
+        "served model, so its tags-off figure differs from this one. Bundle: "
+        f"{r['tags']} tags ({', '.join(r['categories'])}), sealed, verified and imported "
+        f"like any other (manifest `{r['bundle']['manifest_hash'][:16]}…`). The two batches "
+        + ("minted identical injections" if r["same_injections"] else
+           "**did not mint identical injections, so this comparison is not paired**")
+        + ".\n\n"),
+        md_table(pd.DataFrame(rows)), "\n",
+        (f"\nThe tag weight is fitted on {r['fit_with']['entities with a tag score']} tagged "
+        "entities in the base dataset, and a tagged injection is visible from its first "
+        "transaction, which is why transactions-to-detect collapses. Coinjoin and "
+        "same-actor injections are not operations, carry no tags, and stay undetected.\n"),
+        "\n### Per typology\n\n", md_table(per), "\n",
+    ]
+    return "".join(out)
+
+
+#: Wall-clock time-to-detect, measured once, by hand, not regenerated: seconds
+#: depend on the machine's power state and load (docs/VALIDITY.md, red-team
+#: timing), so the headline above is a transaction count instead.
+REDTEAM_WALLCLOCK = """
+*Footnote — wall-clock.* Measured once on 2026-09-26 on the development laptop,
+`eval.redteam_batch.run_batch` on the shifted dataset, a discarded warm-up batch
+first: median inject-to-alert **2.41 s** in the warm-up (on AC power throughout)
+and **2.52 s** in the measured batch, over the 20 detected criminal injections. The
+AC adapter read offline when the measured batch finished, so it is not a clean
+on-AC figure; treat both as indicative. The transaction count above was identical
+in both batches (median 11.5), which is why it is the headline. Copied through, not
+regenerated.
+"""
+
+def actor_section(datasets: dict, stackers: dict, cfg: dict) -> str:
+    """Section 13: the served demo's distribution shift, then the actor queue
+    against the entity queue on each dataset (eval/actor_queue.py)."""
+    from eval import actor_queue
+    out = [demo_shift_section(cfg)]
+    results = actor_queue.evaluate(datasets, stackers, cfg)
+    out.append(
+        "\n### Actor queue vs entity queue\n\n"
+        "`condition=\"simulated\"`, cross-topology: the generator's gossip network "
+        "(relay_hub, 500 nodes, relay share 0.08) is not among the origination corpus's "
+        "training configurations. Both queues come from one fusion bundle and one fitted "
+        "stacker per dataset; the only difference is the unit (docs/ACTORS.md). An item "
+        "*finds* an illicit operation (`eval.actors.actors_of`) when it holds any of its "
+        "wallets. The join rule was fixed before this evaluation was run.\n")
+    for name, r in results.items():
+        q = r["quality"]
+        out += [f"\n#### {name}\n\n", md_table(r["table"]), "\n",
+                md_table(pd.DataFrame([{"measure": k, "value": str(v)} for k, v in q.items()])),
+                "\n"]
+    std, shf = results["standard"]["table"], results["shifted"]["table"]
+
+    def better(t):
+        before, after = t.iloc[0], t.iloc[1]
+        cols = [c for c in t.columns if c.startswith(("precision@", "recall@"))]
+        gain = any((after[c] or 0) > (before[c] or 0) for c in cols)
+        work = [c for c in t.columns if c.startswith("reviewed to find")]
+        counted = lambda v: not isinstance(v, str) and pd.notna(v)
+        less = any(counted(after[c]) and counted(before[c]) and after[c] < before[c]
+                   for c in work)
+        return gain, less
+    verdicts = {n: better(t) for n, t in (("standard", std), ("shifted", shf))}
+    lines = []
+    for n, (gain, less) in verdicts.items():
+        lines.append(f"{n}: precision/recall@k {'improves somewhere' if gain else 'does not improve'}, "
+                     f"workload {'drops somewhere' if less else 'does not drop'}")
+    out.append("\n**Verdict, plainly.** " + "; ".join(lines) + ". These datasets hold only "
+               f"{results['standard']['quality']['illicit operations present']} and "
+               f"{results['shifted']['quality']['illicit operations present']} illicit "
+               "operations, and nearly every alert already holds an illicit wallet, so "
+               "precision@k saturates for both queues and small differences are within one "
+               "operation. What the actor queue changes is mostly the count: "
+               f"{results['standard']['quality']['alert count reduction']:.1%} and "
+               f"{results['shifted']['quality']['alert count reduction']:.1%} fewer items, at "
+               "the wrong-merge rates above. It is not shown to improve triage beyond that "
+               "on this data.\n")
+    return "".join(out)
+
+
+def actor_power_section(cfg: dict, result: dict | None = None) -> str:
+    """Section 13, continued: the same comparison with enough operations to
+    tell the queues apart, across seeds (eval.actor_queue.power)."""
+    from eval import actor_queue as AQ
+    result = result or AQ.power(cfg)
+    summary = result["summary"]
+    sizes = ", ".join(f"{c} {n} transactions" for c, n in AQ.POWER_SIZES.items())
+    out = [("\n### Across seeds, about thirty operations each\n\n"
+            "`condition=\"simulated\"`, cross-topology. The section above has 4-5 illicit "
+            f"operations per dataset, too few to separate the queues. Here: {sizes} (actors "
+            f"one per six transactions), seeds {', '.join(map(str, AQ.POWER_SEEDS))}, each "
+            "dataset with its own stacker fitted on its own labels (as `eval.fusion_eval` "
+            "does), the same bundle and stacker for both queues, and the join rule in "
+            "fusion/actors.py unchanged from its pre-registration. Intervals are means "
+            "with a 95% t-interval across seeds; `actor − entity` is the paired difference "
+            "per seed. \"reviewed to find all\" is to the dataset's own operation count, "
+            "listed below; \"not reached\" means a queue never holds every operation, and "
+            "such seeds drop out of that measure's interval. The join rule's peer class "
+            "comes from IP lists only (relays, Tor exits and the generator's hosting "
+            "addresses in node_intel.json); it takes no ASN, so the GeoLite2 databases, "
+            "absent for this run, do not affect it.\n\n"),
+           md_table(summary["datasets"]), "\n",
+           "\n#### Both queues\n\n", md_table(summary["queues"]), "\n",
+           "\n#### Paired difference, actor queue minus entity queue\n\n",
+           md_table(summary["paired"]), "\n",
+           "\n#### Merges\n\n", md_table(summary["quality"]), "\n"]
+
+    def bounds(text):
+        if "[" not in text:
+            return None
+        lo, hi = text.split("[")[1].rstrip("]").split(", ")
+        return float(lo), float(hi)
+    seeds = len(AQ.POWER_SEEDS)
+    verdict, improves = [], False
+    for condition in summary["paired"]["condition"].unique():
+        rows = summary["paired"][summary["paired"]["condition"] == condition]
+        better, worse = [], []
+        for r in rows.to_dict("records"):
+            b, measure = bounds(r["actor − entity"]), r["measure"]
+            # A measure some seeds never reach is not paired on all of them;
+            # it is listed per seed above and not counted here.
+            if b is None or measure == "items" or r["seeds with both"] < seeds:
+                continue
+            good_if_up = measure.startswith(("precision@", "recall@"))
+            if (b[0] > 0 and good_if_up) or (b[1] < 0 and not good_if_up):
+                better.append(measure)
+            elif (b[1] < 0 and good_if_up) or (b[0] > 0 and not good_if_up):
+                worse.append(measure)
+        improves |= bool(better)
+        q = summary["quality"].set_index("condition").loc[condition]
+        recall = rows.set_index("measure").loc["recall@50", "actor − entity"]
+        verdict.append(
+            f"*{condition}*: alert count falls by {q['alert count reduction']}; "
+            f"recall@50 changes by {recall}; the wrong-merge rate on alerted "
+            f"multi-cluster actors is {q['wrong-merge rate (alerted multi-cluster actors)']}; "
+            "the actor queue is "
+            + (f"better on {', '.join(better)}" if better else "better on no measure")
+            + (f" and worse on {', '.join(worse)}" if worse else "")
+            + " (paired 95% interval excluding zero, all seeds)")
+    out.append(
+        "\n**Verdict, plainly.** " + "; ".join(verdict) + ". Precision@k is 1.000 for both "
+        "queues at every k on every seed: each dataset has more alerted clusters holding an "
+        "operation's wallet than the deepest cut-off, so precision@k is saturated from k=10 "
+        "and cannot separate the queues; recall@k and items reviewed are the informative "
+        "measures. "
+        + ("The actor queue does not improve triage. It shortens the queue by a few percent "
+           "and pays for it with wrong merges and slightly lower recall at depth. The entity queue is "
+           "therefore the console default; actors remain a view."
+           if not improves else
+           "The actor queue improves at least one triage measure; see the paired table.")
+        + "\n")
+    return "".join(out)
+
+
+def demo_shift_section(cfg: dict) -> str:
+    """The served demo dataset against the corpus it is compared with."""
+    import json as _json
+    import math
+    from collections import Counter
+
+    from features import fingerprint as F
+    from graph.builder import iter_transactions, load
+    from origination import evaluate as OE
+    from origination.model import KEY, OriginationModel
+
+    out = ["\n### The served demo dataset is shifted from the corpora\n\n"]
+    gt = _json.loads((Path(cfg["ingest"]["input_dir"]) / "ground_truth.json").read_text())["transactions"]
+    matrix = pd.read_parquet(cfg["features"]["relay_path"])
+    model = OriginationModel.load(cfg["origination"]["model_path"])
+    keys = matrix[KEY].drop_duplicates().itertuples(index=False)
+    truth = pd.Series({(c, t): gt[t]["observed_origin_ip"] for c, t in keys if t in gt})
+    decided = OE.label_coinjoins(model.decide(matrix, truth, cfg),
+                                 {(c, t) for c, t in truth.index if gt[t]["pattern"] == "coinjoin"})
+    row = OE._row(OE.MODEL, decided, cfg, model.cutoff, "served demo capture")
+    cols = ["n", "top1", "abstention rate", "acc if answered", "ceiling (origin observed)",
+            "cost_weighted_score"]
+    out += [("The origination model on the served demo capture (a pooled collector over "
+            "the relay-hop log), scored as the corpus rows in section 9 are. Its "
+            "cross-topology corpus row: top1 0.274, abstention 0.808, accuracy if "
+            "answered 0.906, cost 0.120, ceiling 0.279. The demo's ceiling is far higher "
+            "because a pooled collector sees the origin far more often, so the absolute "
+            "numbers are not comparable; relative to its ceiling, top1 is "
+            f"{row['top1'] / row['ceiling (origin observed)']:.2f} here and "
+            f"{0.274 / 0.279:.2f} on the corpus. Origination does not degrade on the demo, "
+            "so the generators were not aligned for it.\n\n"),
+            md_table(pd.DataFrame([{k: row.get(k) for k in cols}])), "\n"]
+
+    fp = F.load_model(cfg)
+    worst = Counter()
+    for tx in iter_transactions(load(None, cfg)):
+        t = F.tells(F.View.of_tx(tx))
+        a = fp.classify(t, cfg)
+        if not a.get("novelty", {}).get("novel"):
+            continue
+        top = a["ranked"][0]["label"]
+
+        def surprise(tell, t=t, top=top):
+            v = t[tell]
+            k = len(fp.vocab[tell]) + (v not in fp.vocab[tell])
+            c = fp.counts.get(top, {}).get(tell, {}).get(v, 0)
+            return -math.log((c + fp.meta["alpha"]) / (fp.totals[top].get(tell, 0) + fp.meta["alpha"] * k))
+        tell = max((x for x in t if t[x] is not None and x in fp.vocab), key=surprise)
+        kind = "ordinary payment" if gt[tx.txid]["pattern"] == "normal" else "typology"
+        worst[(kind, tell)] += 1
+    out += [("\nWhat the fingerprint novelty check trips on in the demo, by the tell that "
+            "was least supported under the named pattern:\n\n"),
+            md_table(pd.DataFrame([{"transaction": k, "worst tell": t, "flagged": n}
+                                   for (k, t), n in worst.most_common()])),
+            ("\n`script_mix`: `generator.main` gives each actor a script type from "
+            "`generator.script_types`, independent of its wallet profile, while the corpus "
+            "draws input types from the profile's `input_types`. `io_shape`: the typologies "
+            "build 1-in-1-out and wide fan-out transactions the corpus's three shapes "
+            "(payment, batch, CoinJoin) never contain. Both are generator differences, not "
+            "model faults, and only the fingerprint depends on them.\n")]
+    return "".join(out)
+
+
+FINGERPRINT_OMISSIONS = (
+    "The profiles are this simulator's stand-ins for the families they are named after, "
+    "built from the tells in docs/FINGERPRINTS.md, several of which are assumptions about "
+    "the real software rather than documented behaviour. The classifier is fitted to the "
+    "same profiles it is scored on, so these numbers measure how well it recovers the "
+    "simulator's own construction rules, not how well it would identify real wallets. "
+    "Transaction shapes are the corpus's three (payment, batch, CoinJoin); vsize is the "
+    "standard single-key estimate, exact here because the generator uses the same table.")
+
+
+#: Above this pooled harmful-mislabel rate (all tells, open-set), fingerprints
+#: stay out of the console by default. Pre-registered in docs/FINGERPRINTS.md.
+FINGERPRINT_HARM_LIMIT = 0.10
+
+#: §12's transfer figures from the generator before P8.1 (commit 74c404e). That
+#: generator no longer exists, so they are copied through, not regenerated.
+TRANSFER_PRE_8_1 = """
+#### Typologies rebuilt in full under profiles (pre-P8.1 generator, 74c404e)
+
+Copied from commit 74c404e's report, not regenerated: that generator is gone. It
+rebuilt every typology transaction with the full profile, including fee rounding,
+dust-dropping and paying change back to an input. That gave typology transactions
+every tell but broke peel chains (their amounts and change addresses no longer
+linked hop to hop), which is why P8.1 replaced it. Same seed, same model.
+
+| condition | typology | transactions | unknown rate | accuracy if answered |
+| --- | --- | --- | --- | --- |
+| simulated | coinjoin | 88 | 0.511 | 0.767 |
+| simulated | layering | 123 | 0.081 | 0.434 |
+| simulated | normal | 2523 | 0.080 | 0.898 |
+| simulated | ransomware_collector | 176 | 0.528 | 0.795 |
+| simulated | same_actor_cluster | 90 | 0.044 | 0.442 |
+
+| true profile | core_like | electrum_like | legacy_naive | coordinator_coinjoin | batch_withdrawal | unknown |
+| --- | --- | --- | --- | --- | --- | --- |
+| coordinator_coinjoin | 0 | 0 | 0 | 33 | 10 | 45 |
+| core_like | 976 | 113 | 0 | 0 | 1 | 190 |
+| electrum_like | 188 | 513 | 3 | 1 | 0 | 96 |
+| legacy_naive | 1 | 3 | 748 | 55 | 0 | 24 |
+"""
+
+def fingerprint_section(cfg: dict, rebuild: bool = False) -> str:
+    """Section 12: per-class precision/recall, confusion matrices and unknown
+    rates on the fingerprint corpus's test sets, the CoinJoin agreement with
+    the validity layer, and a transfer check on the generator's own typologies."""
+    from features import fingerprint as F
+
+    fitted = F.fit(cfg, rebuild)
+    result = F.evaluate(fitted, cfg)
+    transfer = F.transfer(fitted["model"], cfg)
+    lopo = F.leave_one_profile_out(fitted["truth"], cfg)
+    cost = F.in_distribution_cost(fitted, cfg)
+    pooled = lopo[lopo["held-out profile"] == "all (pooled)"].set_index(["condition", "model"])
+    harm = {(c, m): pooled.loc[(c, m), "harmful mislabel rate"]
+            for c in (F.FULL, F.STRUCTURAL) for m in (F.OPEN_SET, F.CLOSED_SET)}
+    high = harm[(F.FULL, F.OPEN_SET)] > FINGERPRINT_HARM_LIMIT
+    shown = cfg["features"]["fingerprint"].get("console_display", True)
+    note = f"\n*`condition=\"simulated\"`.* {FINGERPRINT_OMISSIONS}\n"
+    f = cfg["features"]["fingerprint"]
+    out = [
+        (f"Corpus `{fitted['corpus']}` (`origination/manifest_fingerprint.json`): the validity "
+        "variant with every transaction built under a wallet-construction profile "
+        "(`generator/wallets.py`). Naive Bayes over the tells, fitted on the training "
+        "captures, isotonic-calibrated on the calibration captures, scored on the within- "
+        "and cross-topology test captures. **full**: every tell the corpus records. "
+        "**structural**: version, nLockTime and nSequence masked — what a relay log in the "
+        "NTRO schema shows — with its own calibration. The answer is `unknown` under "
+        f"calibrated confidence {f['unknown_below']} or with fewer than {f['min_tells']} "
+        "observable tells (config.yaml, with the rationale).\n"),
+        ("\n### Generalization: leave one profile out\n\n"
+        "**This is the generalization result.** Every other table here scores the model on "
+        "profiles it was fitted to. Here each profile is held out in turn. The model is "
+        "fitted and calibrated (isotonic maps and novelty thresholds) on the other four "
+        "and asked about the held-out one's cross-topology test transactions. Scoring is "
+        "pre-registered (docs/FINGERPRINTS.md, \"Open-set revision\"). `unknown` is right. "
+        "A **shared pattern** names a known pattern whose defining tells (at least 80% of "
+        "its training rows) the transaction shows. A **harmful mislabel** names one it "
+        "contradicts. `P8.1 (no novelty check)` is the same fitted model without the "
+        "check: P8.1's decision rule, scored the same way.\n\n"
+        f"**Harmful-mislabel rate on never-seen profiles: "
+        f"{harm[(F.FULL, F.OPEN_SET)]:.3f} with all tells, "
+        f"{harm[(F.STRUCTURAL, F.OPEN_SET)]:.3f} structure only** (pooled over the "
+        f"five hold-outs; lower is better). P8.1: {harm[(F.FULL, F.CLOSED_SET)]:.3f} and "
+        f"{harm[(F.STRUCTURAL, F.CLOSED_SET)]:.3f}. "
+        + ((f"That is above the pre-registered {FINGERPRINT_HARM_LIMIT}: the fingerprint "
+            "still gives many never-seen constructions a known label they contradict. "
+            "Under the pre-registered rule the console hides fingerprints unless "
+            "`features.fingerprint.console_display` is turned on"
+            + (" (it is off)." if not shown else
+               " — **but config.yaml has it on, contrary to the rule.**") + " ")
+           if high else
+           (f"That is within the pre-registered {FINGERPRINT_HARM_LIMIT}, so the console "
+            "shows fingerprints by default. "))
+        + "Still simulated: the held-out construction is another of this simulator's "
+        "profiles, so real unseen software may sit closer to or further from the known "
+        "ones.\n\n"),
+        md_table(lopo), note,
+        ("\n### What the novelty check costs on known profiles\n\n"
+        "The five-profile model on the known-profile test sets, with and without the "
+        "novelty check. Its threshold is the 99th percentile of the novelty score on the "
+        "calibration rows, per condition, fixed before any evaluation.\n\n"),
+        md_table(cost), note,
+        "\n### Unknown rate and accuracy when answered\n\n", md_table(result["unknown"]), note,
+        ("\n### Per class\n\n`recall` counts an unknown as a miss; `recall if answered` does "
+        "not.\n\n"), md_table(result["per_class"]), note,
+    ]
+    for label in ("cross-topology, full", "cross-topology, structural", "within-topology, full"):
+        out += [(f"\n### Confusion matrix — {label}\n\nRows are the generator's profile, "
+                "columns the fingerprint.\n\n"),
+                md_table(result["confusion"][label].reset_index()), note]
+
+    agree = result["agreement"]
+    dis = result["disagreements"]
+    cross = dis[dis["test set"] == "cross-topology, full"]
+
+    def n(kind, truth=None, said=None):
+        m = cross["disagreement"] == kind
+        if truth:
+            m &= cross["true profile"] == truth
+        if said:
+            m &= cross["fingerprint said"] == said
+        return int(cross.loc[m, "transactions"].sum())
+
+    out += [
+        ("\n### CoinJoin: the fingerprint against the validity layer\n\n"
+        "`coordinator_coinjoin` named by the fingerprint, beside `analysis.validity`'s "
+        "COINJOIN detector (`graph.clustering.is_coinjoin`) on the same transactions. They "
+        "are compared, not reconciled: each keeps its own answer.\n\n"), md_table(agree), note,
+        "\n#### Where they disagree\n\n", md_table(dis), note,
+        ("\n**What the disagreements are** (cross-topology, full). "
+        f"{n('detector only', 'batch_withdrawal')} are batched withdrawals the detector calls "
+        "a CoinJoin — its documented false positive (an equal-value batch paying no more equal "
+        "amounts than it spends inputs, docs/VALIDITY.md) — which the fingerprint names "
+        f"correctly in {n('detector only', 'batch_withdrawal', 'batch_withdrawal')} cases, "
+        "from the single change output, the round fee rate and the payees' mixed script types. "
+        f"{n('detector only', 'coordinator_coinjoin')} are true CoinJoins the detector finds and "
+        f"the fingerprint does not ({n('detector only', 'coordinator_coinjoin', 'unknown')} "
+        f"unknown, {n('detector only', 'coordinator_coinjoin', 'batch_withdrawal')} called a "
+        "batch): rounds where few participants took change look like a batch to the tells. "
+        f"{n('fingerprint only')} are transactions only the fingerprint calls a CoinJoin, "
+        f"{n('fingerprint only', 'batch_withdrawal')} of them batches the detector's participant "
+        "rule (no more equal outputs than inputs) correctly declines. Neither is forced to "
+        "agree with the other: the validity layer's verdict governs what an origin answer may claim, and the "
+        "fingerprint is shown beside it.\n"),
+        ("\n### Transfer: the generator's own typologies\n\n"
+        f"The model above, on a `generator.main --wallet-profiles` dataset (seed "
+        f"{transfer['seed']}, {transfer['transactions']} transactions): the same profiles, "
+        "on peel chains, layering fan-outs and same-actor spends the corpus never shows. "
+        "Two generator versions, two different shifts. Neither is a generalization claim "
+        "(that is the leave-one-profile-out table above): both are the simulator's own "
+        "profiles, scored by a model fitted to them.\n\n"
+        "#### Typologies with chain-neutral tells only (current generator, P8.1)\n\n"
+        "Ordinary payments get every tell. Typology transactions get version, nLockTime, "
+        "nSequence and ordering, plus an input script type only where no other "
+        "transaction sees the inputs. Their fees and change are the typology's own. So "
+        "they carry fewer profile tells than the corpus does, and the figure reflects "
+        "how the dataset is generated now.\n\n"),
+        md_table(transfer["by_typology"]), note,
+        "\n", md_table(transfer["confusion"].reset_index()), note,
+        TRANSFER_PRE_8_1,
+    ]
+    return "".join(out)
+
+
+def profile_section(cfg: dict, origination: dict) -> str:
+    """What share of peers get each part of a profile (engines/correlation/
+    profile.py), over what the API serves and over the base corpus's
+    cross-topology test captures."""
+    from engines.correlation import profile
+
+    served = profile.build_sources(cfg)
+    matrix = origination["parts"]["cross_test"]
+    corpus = profile.Sources(matrix=matrix, answers=profile.origination_answers(
+        origination["model"], matrix, cfg, shapes=origination["shapes"]))
+    columns = {"served (relay-hop dataset + relay matrix)": profile.coverage(served, cfg),
+               f"base corpus `{origination['corpus']}`, cross-topology test captures":
+               profile.coverage(corpus, cfg)}
+    rows = []
+    for measure in next(iter(columns.values())):
+        row = {"condition": "simulated", "measure": measure}
+        for name, counts in columns.items():
+            peers = counts.get("peers") or 0
+            n = counts.get(measure, 0)
+            row[name] = n if measure == "peers" else (
+                f"{n} ({n / peers:.1%})" if peers else "0")
+        rows.append(row)
+    need = cfg["engines"]["correlation"]["profile"]["min_timing_observations"]
+    in_chain = (served.matrix["txid"].isin(served.txs).sum()
+                if served.matrix is not None else 0)
+    relay_rows = 0 if served.matrix is None else len(served.matrix)
+    return (
+        "The reverse direction (docs/CORRELATION.md): peer -> profile. Each count is "
+        "the peers whose profile has that part. `originated claim` means the "
+        "origination model named the peer and `eval.origin.flagged_at` did not "
+        "withhold it; QUALIFIED and ANNOTATE claims are counted apart, never folded "
+        f"into it. A timing signature needs {need} announcements "
+        "(`engines.correlation.profile.min_timing_observations`). A cluster link "
+        "needs the originated transaction's inputs: the corpus has no chain data, and "
+        f"{in_chain} of the served relay matrix's {relay_rows} rows have a txid in the "
+        "relay-hop dataset; the rest of the served links come from correlation leads. "
+        + ("No capture here carries a version handshake, hence no user agents or "
+           "service flags. " if not any(c.get("with a user agent") or c.get(
+               "with service flags") for c in columns.values()) else "")
+        + "Every profile counted is built from simulated or fixture data and "
+        "says so in its header.\n\n" + md_table(pd.DataFrame(rows)) + "\n")
 
 
 def anomaly_section(fusion: dict, redteam: dict) -> str:
@@ -719,7 +1273,7 @@ all is the ceiling on the first number.
 
 
 SATURATION_PREAMBLE = """A ranked, explainable alert list is a deliverable of the problem statement, and
-a ranking only exists if the scores differ. `docs/demo_script.md` has carried a
+a ranking only exists if the scores differ. `docs/DEMO_SCRIPT.md` (then `demo_script.md`) carried a
 line saying every alert scores 1.000 — if that were true the queue would be a
 set with a number printed on it, and sorting by risk would do nothing.
 
@@ -879,7 +1433,7 @@ WORSE = """**What got worse, and why.**
 
 
 CLOSING = """
-## 9. Decisions taken in this pass
+## 14. Decisions taken in this pass
 
 **The unit of detection is the actor.** Pre-registered in
 `docs/detection_unit_protocol.md` before the label was built or the stacker
@@ -912,7 +1466,118 @@ seed B.
 an IP correlation says something about *who*, not about whether an entity is
 risky. It is surfaced per alert as attribution leads, each now labelled
 `anonymized entry point` when the candidate is a Tor exit or hosting address.
+
+**The entity queue is the console default; actors are a view.** The seed sweep
+in section 13 (five seeds per condition, about thirty operations each) finds the
+actor queue better on no triage measure: 4-6% fewer items, precision@k saturated
+for both, recall@50 slightly lower, and 8-10% of alerted multi-cluster actors
+wrongly merged. P9 was specified to say so plainly if the actor queue did not
+improve workload or precision@k; it did not, so the entity queue is the default
+again and actors stay reachable by the toggle.
 """
+
+
+def ground_truth_section(add, result: dict, cfg: dict, origination: str = "") -> None:
+    """Section 9. Every other section's origin numbers describe our simulator;
+    this one is the harness for measuring the same thing on real relay data.
+
+    The first line states the data source, because a simulated run and a signet
+    run produce the same table shape and must never be confused for one another.
+    """
+    signet = result["signet"]
+    add(f"\n**Data source: {result['data_source']}.** "
+        + ("A signet capture is present and scored below.\n" if signet else
+           "**No signet capture is present in this run**, so every signet row below is "
+           "marked PENDING and the only measured rows come from the gossip simulation. "
+           "A simulated row is never a statement about Bitcoin.\n"))
+    add("\nProtocol pre-registered in `docs/GROUND_TRUTH.md`, committed with the harness "
+        "and\nbefore any signet number existed. Capture setup, and how each topology "
+        "condition is\nforced and verified, are in the same document.\n")
+    add("\nThe two topology conditions are **separate measurements and are never "
+        "pooled**:\n\n"
+        "* **adjacent** — the broadcaster is directly peered with the observer. The "
+        "trivial\n  upper bound: the first announcement we see really is the source's "
+        "own.\n"
+        "* **non_adjacent** — at least one hop between them. The real result, and the "
+        "only\n  one that says anything about a deployment.\n")
+
+    if result["pending"]:
+        add(f"\n**PENDING: {', '.join(result['pending'])}.** "
+            "No sealed signet bundle for "
+            + ("either condition" if len(result["pending"]) > 1 else "this condition")
+            + " is present. The rows are left in place rather than filled from the "
+            "simulation.\n")
+    if result.get("skipped_bundles"):
+        add("\nBundles present but not scored as signet (their label file does not say "
+            "`source: signet`): "
+            + ", ".join(f"`{b['bundle']}` ({b['source']})" for b in result["skipped_bundles"])
+            + ". Test fixtures live in the same directory and are excluded by that rule.\n")
+
+    for condition in ("adjacent", "non_adjacent"):
+        entry = signet.get(condition)
+        add(f"\n### {condition} — signet\n")
+        if entry is None:
+            add("PENDING — no sealed capture for this condition.\n")
+            continue
+        if entry.get("status") != "scored":
+            add(f"**{entry['status']}**\n")
+            for failure in entry.get("failures", []):
+                add(f"\n* {failure}\n")
+            continue
+        add(f"Bundle `{entry['bundle']}`, manifest verified, "
+            f"{entry['transactions_scored']} transactions scored.\n\n")
+        add(md_table(entry["table"]))
+        add("\n" + md_table(pd.DataFrame([entry["noise_floor"]])))
+        add("\n" + md_table(pd.DataFrame([entry["wtxid_resolution"]])))
+
+    simulated = result["simulated"]
+    add("\n### simulated — `generator/`'s 500-node gossip network\n")
+    add(f"`condition=\"simulated\"`. {simulated['describes']}. Deterministic, always "
+        "available, and **not a stand-in for a signet run**: the simulation is observed "
+        "at many relays, so its trees carry the positional structure a single-observer "
+        "capture does not have.\n\n")
+    add(md_table(simulated["table"]))
+    add("\nRow 1 is the floor — earliest sighting wins, no class weighting, no "
+        "abstention. It is\nwhat naive analysis does, and under the pre-registered cost "
+        "weights it scores\n**negative**: naming the wrong uninvolved address is priced "
+        "at -3, and the floor does it\noften. Rows 2-4 are the three estimators from "
+        "`engines/propagation/` unchanged. Row 5\nis the supervised origination model, "
+        "which cannot be scored here: it reads one observer's\nrelay matrix, and hop "
+        "records sampled at many relays do not make one. It is measured on\nthe capture "
+        "corpus at the end of this section, beside these four baselines on one split.\n")
+    add("\n**Relay-delay noise floor.** How far apart announcements of the same "
+        "transaction\nactually arrive, and what that implies for any timing-based "
+        "estimator:\n\n")
+    add(md_table(pd.DataFrame([simulated["noise_floor"]]), floats=6))
+    add("\n`timing ceiling` is the share of multi-peer transactions where the true "
+        "origin\nannounced *first and by more than the clock resolution*. No estimator "
+        "that reads only\ntiming can exceed it, however it weights what it reads.\n")
+    matrix = result.get("relay_features")
+    if matrix is not None and len(matrix):
+        add("\n### The relay feature matrix\n")
+        add("`features/relay.py`, grain `(txid, peer_ip, capture_id)` — the input the "
+            "supervised\norigination model reads. Every column, its null semantics "
+            "and its causality\nargument are in `docs/FEATURE_SCHEMA_RELAY.md`. The "
+            "`source` column is carried here\nbecause a fixture-derived row must never "
+            "be read as a signet one.\n\n")
+        add(md_table(matrix, floats=4))
+        add("\n`degenerate` is the share of rows whose transaction had 0 or 1 candidate "
+            "— nothing to\nrank. `scope_out` is the share where no candidate could "
+            "plausibly be the sender, which\nis the zero-ceiling case in feature form. "
+            "Both are rows a model must abstain on rather\nthan learn from, which is "
+            "why they are counted here and why the model below never scores them.\n`quarantined` counts "
+            "announcements still identified by a wtxid, kept in a separate file and "
+            "never\nmerged into the matrix.\n")
+
+    add("\n**One observer sees a star, not a tree.** A single-observer capture yields "
+        "one edge\nper announcement — peer to observer — so rumor centrality, which "
+        "maximises over tree\nposition, has nothing to rank on once the observer is "
+        "excluded as a candidate for its\nown observations. That is not a defect in "
+        "Shah & Zaman; it is what their estimator\ndoes when the observed topology "
+        "carries no positional information. On the signet\nconditions only timing "
+        "carries signal, which is why the noise floor above is the\nnumber that bounds "
+        "them. A multi-observer capture would restore the topology.\n")
+    add(origination)
 
 
 def main(argv=None) -> None:

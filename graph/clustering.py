@@ -236,6 +236,11 @@ class Clustering:
     flags: dict[str, str] = field(default_factory=dict)      # cluster_id -> reason
     coinjoins: set[str] = field(default_factory=set)         # txids skipped
     change_outputs: dict[str, str] = field(default_factory=dict)  # txid -> address
+    # Fingerprint corroboration (`corroborate`): every union, and the clusters
+    # whose merges a fingerprint mismatch made less certain. Never a union.
+    merges: list[dict] = field(default_factory=list)
+    confidence: dict[str, float] = field(default_factory=dict)   # cluster_id -> min merge
+    conflicts: dict[str, list[dict]] = field(default_factory=dict)
 
     def cluster_of(self, wallet: str) -> str | None:
         return self.wallet_to_cluster.get(wallet)
@@ -256,7 +261,10 @@ class Clustering:
                 "change_links": len(self.change_outputs), "flagged": len(self.flags)}
 
 
-def cluster_wallets(txs: Iterable[Tx], cfg: dict | None = None) -> Clustering:
+def cluster_wallets(txs: Iterable[Tx], cfg: dict | None = None,
+                    fingerprints: dict[str, str] | None = None) -> Clustering:
+    """`fingerprints` (txid -> a confident fingerprint label) corroborates the
+    merges; it never makes one. See `corroborate`."""
     cfg = cfg or config.load()
     g = cfg["graph"]
     txs = list(txs)
@@ -274,18 +282,61 @@ def cluster_wallets(txs: Iterable[Tx], cfg: dict | None = None) -> Clustering:
             inputs = sorted(common_input_ownership(tx, cfg))
             for addr in inputs[1:]:
                 dsu.union(inputs[0], addr)
+            if len(inputs) > 1:
+                result.merges.append({"txid": tx.txid, "heuristic": "common_input_ownership",
+                                      "wallets": inputs})
         if g["change_detection"]:
             change = change_address_heuristic(tx, idx, cfg)
             if change is not None and tx.input_addresses:
                 result.change_outputs[tx.txid] = change
                 dsu.union(tx.input_addresses[0], change)
+                result.merges.append({"txid": tx.txid, "heuristic": "change_address",
+                                      "wallets": [tx.input_addresses[0], change]})
 
     groups = dsu.groups()
     # A cluster is named after its smallest member, so ids are stable across runs
     result.clusters = {min(members): members for members in groups.values()}
     result.wallet_to_cluster = {w: cid for cid, members in result.clusters.items() for w in members}
     result.flags = cluster_collapse_guard(result.clusters, cfg)
+    if fingerprints:
+        corroborate(result, txs, fingerprints, cfg)
     return result
+
+
+def corroborate(result: Clustering, txs: list[Tx], fingerprints: dict[str, str],
+                cfg: dict | None = None) -> None:
+    """Lower the confidence of a merge whose wallets were built by different software.
+
+    Wallet software is usually consistent: the transactions spending one
+    wallet's coins are built the same way. So for each union, the confident
+    fingerprints of the transactions that spend the merged wallets are
+    compared; two different families among them multiply that merge's
+    confidence by `graph.fingerprint.mismatch_factor`. A cluster's confidence
+    is its least confident merge.
+
+    CORROBORATION ONLY. This reads `result.merges`, which the heuristics wrote,
+    and changes no union: a mismatch can make a merge less certain, and a
+    match can neither create a merge nor raise one above 1.0. `unknown`
+    fingerprints are not in `fingerprints` and say nothing.
+    """
+    factor = (cfg or config.load())["graph"]["fingerprint"]["mismatch_factor"]
+    spends: dict[str, set[str]] = {}
+    for tx in txs:
+        for addr in tx.input_addresses:
+            spends.setdefault(addr, set()).add(tx.txid)
+    for merge in result.merges:
+        labels = {}
+        for wallet in merge["wallets"]:
+            for txid in spends.get(wallet, ()):
+                if txid in fingerprints:
+                    labels.setdefault(fingerprints[txid], []).append(txid)
+        merge["fingerprints"] = {k: sorted(v) for k, v in sorted(labels.items())}
+        merge["confidence"] = factor if len(labels) > 1 else 1.0
+        cluster = result.wallet_to_cluster[merge["wallets"][0]]
+        result.confidence[cluster] = min(result.confidence.get(cluster, 1.0),
+                                         merge["confidence"])
+        if len(labels) > 1:
+            result.conflicts.setdefault(cluster, []).append(merge)
 
 
 def cluster_collapse_guard(clusters: dict[str, set[str]], cfg: dict | None = None) -> dict[str, str]:

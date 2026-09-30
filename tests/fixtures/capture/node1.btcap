@@ -1,0 +1,6 @@
+# btcap v1 — one JSON object per line; unknown keys ignored, bad lines skipped
+{"txid": "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b", "peer_ip": "203.0.113.9", "peer_port": 8333, "peer_id": 1, "user_agent": "/Satoshi:25.0.0/", "wall_clock_ts": "2026-09-24T10:00:01.250000Z", "monotonic_or_derived_ts": 12.5, "message_type": "inv", "direction": "inbound", "capture_source": "collector:node1"}
+{"hash": "0000000000000000000000000000000000000000000000000000000000000ABC", "ip": "198.51.100.77", "port": 8333, "peer_id": 2, "subver": "/bitcoinj:0.16.2/", "ts": 1790244001.31, "command": "inv_wtx", "direction": "inbound"}
+{ this line is not json
+{"txid": "no message type", "peer_ip": "203.0.113.9"}
+{"txid": "4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b", "peer_ip": "203.0.113.9", "peer_port": 8333, "peer_id": 1, "wall_clock_ts": 1790244002.0, "message_type": "tx", "direction": "inbound"}

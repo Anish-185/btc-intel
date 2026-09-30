@@ -7,6 +7,25 @@ export type IpClass =
   | "hosting_vpn"
   | "known_bitcoin_relay";
 
+/** analysis/validity.py's verdict. ABSTAIN withholds the answer, QUALIFIED
+ *  restricts what it may claim, ANNOTATE only flags it. */
+export interface Validity {
+  tier: "PASS" | "ABSTAIN" | "QUALIFIED" | "ANNOTATE" | "NOT_ASSESSED";
+  reason: string | null;
+  reasons: string[];
+  confidence: number | null;
+  evidence: string[];
+}
+
+/** What an origin answer may claim. Only `ip_attribution` is an IP attribution. */
+export interface Answer {
+  kind: "ip_attribution" | "onion_identity" | "broadcasting_peer";
+  ip?: string;
+  onion?: string;
+  actionable?: string;
+  input_ownership?: string;
+}
+
 export interface Lead {
   ip: string;
   ip_class: IpClass;
@@ -15,6 +34,8 @@ export interface Lead {
   anonymized_entry_point?: boolean;
   label?: string;
   evidence: string;
+  calibration_basis?: string;
+  validity: Validity;
 }
 
 export interface Alert {
@@ -97,6 +118,12 @@ export interface EntityDetail {
   evidence: string[];
   taint_path: string[];
   leads: Lead[];
+  fingerprints?: FingerprintDistribution & {
+    cluster_confidence: number;
+    conflicts: { txid: string; heuristic: string; fingerprints: Record<string, string[]> }[];
+    note: string;
+    console_display?: boolean;
+  };
   caveat: string;
 }
 
@@ -126,9 +153,360 @@ export interface Propagation {
   degraded: boolean;
   low_confidence_origin: boolean;
   anonymized_entry_point: boolean;
+  probability: number;
+  calibration_basis: string;
+  validity: Validity;
+  answer: Answer | null;
   n_observations: number;
   runner_ups: { ip: string; score: number }[];
   caveat: string;
   layout: { name: string; roots: string[] };
   elements: GraphElements;
+}
+
+/** engines/correlation/profile.py — the reverse direction. A profile describes
+ *  a peer's observed network behaviour; it never names who operates it. */
+export interface OriginClaim {
+  txid: string;
+  capture_id: string;
+  observer: string;
+  probability: number;
+  calibration_basis: string;
+  tier: Validity["tier"];
+  validity: Validity;
+  answer: Answer;
+  statement: string;
+}
+
+export interface EvidenceRow {
+  source: string;
+  txid: string;
+  row?: number;
+  timestamp?: string;
+  src?: string;
+  dst?: string;
+  capture_id?: string;
+  peer?: string;
+  announce_ts?: string;
+  capture_source?: string;
+}
+
+export interface LinkedCluster {
+  cluster: string;
+  cluster_id: string;
+  basis: "origination" | "correlation lead" | "both";
+  confidence: number;
+  confidence_rule: string;
+  statement: string;
+  evidence_chain: string;
+  evidence: {
+    basis: string;
+    txid: string;
+    probability: number;
+    tier?: string;
+    rows: EvidenceRow[];
+    inputs: string[];
+  }[];
+  evidence_total: number;
+}
+
+export interface Vantage {
+  source: string;
+  capture_id: string | null;
+  capture_source: string | null;
+  provenance: string | null;
+  observer: string[];
+  direction: string[];
+  vantage: string;
+  announcements: number;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export interface Timing {
+  sufficient: boolean;
+  announcements: number;
+  threshold: number;
+  statement: string;
+  announce_rate_per_min?: number | null;
+  active_hours_utc?: number[];
+  inter_announcement_s?: Record<"mean" | "median" | "stdev" | "min" | "max", number | null>;
+}
+
+export interface ClientHistory {
+  value: string | number;
+  hex?: string;
+  first_seen: string | null;
+  last_seen: string | null;
+  captures: string[];
+}
+
+export interface PeerProfile {
+  subject: string;
+  peer: string;
+  kind: "ip" | "onion_identity";
+  header: { simulated_only: boolean; provenance: string[]; statement: string };
+  originated: {
+    claimed: number;
+    by_tier: Record<"PASS" | "QUALIFIED" | "ANNOTATE", number>;
+    claims: OriginClaim[];
+    basis: string;
+  };
+  propagation_origin: { count: number; statement: string };
+  withheld: {
+    count: number;
+    by_reason: Record<string, number>;
+    items: { txid: string; capture_id: string; tier: string; reason: string; statement: string }[];
+  };
+  relayed: {
+    count: number;
+    by_source: Record<string, number>;
+    sample: { source: string; txid: string; capture_id: string | null; rank: number | null; candidates: number | null }[];
+  };
+  timing: Timing;
+  clients: { user_agents: ClientHistory[]; services: ClientHistory[]; statement: string | null };
+  linked_clusters: LinkedCluster[];
+  fingerprints?: {
+    originated: FingerprintDistribution & { without_structure: number };
+    propagation_origin: FingerprintDistribution & { without_structure: number };
+    statement: string;
+    console_display?: boolean;
+  };
+  excluded_links: { txid: string; reason: string; statement: string }[];
+  vantage: Vantage[];
+  /** Absent on an onion identity: it has no IP to enrich. */
+  network?: {
+    ip: string;
+    asn: number | null;
+    asn_org: string | null;
+    country: string | null;
+    ip_class: IpClass | null;
+    basis: string;
+  };
+  caveat: string;
+}
+
+export interface AsnMember {
+  peer: string;
+  subject: string;
+  originated: number;
+  by_tier: Record<"PASS" | "QUALIFIED" | "ANNOTATE", number>;
+  withheld: number;
+  relayed: number;
+  linked_clusters: string[];
+  timing_sufficient: boolean;
+  captures: string[];
+  asn_org: string | null;
+  country: string | null;
+}
+
+export interface AsnProfile {
+  subject: string;
+  asn: number;
+  peers: number;
+  header: { simulated_only: boolean; statement: string };
+  totals: {
+    originated: number;
+    by_tier: Record<"PASS" | "QUALIFIED" | "ANNOTATE", number>;
+    withheld: number;
+    relayed: number;
+    linked_clusters: number;
+  };
+  members: AsnMember[];
+  caveat: string;
+}
+
+/** The origination model's answer for one txid, per capture. */
+export interface CaptureOrigination {
+  capture_id: string;
+  observer: string;
+  capture_source: string;
+  provenance: string;
+  named_peer: string;
+  probability: number;
+  calibration_basis: string;
+  validity: Validity;
+  answered: boolean;
+  abstention_reason: string | null;
+  answer: Answer | null;
+  n_candidates: number;
+}
+
+export interface TxOrigination {
+  txid: string;
+  captures: CaptureOrigination[];
+  note: string | null;
+}
+
+/** features/fingerprint.py — a construction pattern (how, not which software)
+ *  pattern, never a party. */
+export interface FingerprintAnswer {
+  label: string;
+  display: string;
+  confidence: number | null;
+  unknown_reason: string | null;
+  ranked: { label: string; display: string; confidence: number; posterior: number }[];
+  tells: Record<string, string | null>;
+  observed_tells: string[];
+  condition?: "full" | "structural";
+  basis?: string;
+  /** "The label describes how the transaction was built, not which software built it." */
+  statement?: string;
+  novelty?: { score: number; threshold: number | null; novel: boolean };
+}
+
+export interface FingerprintDistribution {
+  transactions: number;
+  statement?: string;
+  labels: { label: string; display: string; count: number; share: number }[];
+}
+
+export interface TxFingerprint extends FingerprintAnswer {
+  txid: string;
+  /** config features.fingerprint.console_display: show by default or not. */
+  console_display?: boolean;
+}
+
+/** fusion/actors.py — clusters joined to peer identities by evidence. A name
+ *  like "actor A-17" is a handle; it never implies a person or organisation. */
+export interface ActorLink {
+  peer: string;
+  peer_kind: "IP" | "onion identity";
+  ip_class: string | null;
+  cluster_id: string;
+  basis: "origination" | "correlation lead" | "both";
+  confidence: number;
+  origin_tiers: string[];
+  evidence_total: number;
+  evidence_chain: string;
+  evidence: { basis: string; txid: string; probability: number; tier?: string }[];
+  /** Whether this link may merge clusters into one actor (docs/ACTORS.md). */
+  joins: boolean;
+}
+
+export interface Actor {
+  actor_id: string;
+  name: string;
+  risk_score: number;
+  membership_confidence: number;
+  confidence_basis: string;
+  members: string[];
+  peers: string[];
+  anchor: string;
+  member_detail: { entity_id: string; entity_risk: number; weight: number; alerted: boolean }[];
+  links: ActorLink[];
+  origin_tiers: string[];
+  alerted: boolean;
+  statement: string;
+}
+
+export interface ActorsPage {
+  alert_threshold: number | null;
+  statement: string | null;
+  total: number;
+  actors: Actor[];
+}
+
+export interface ActorDetail extends Actor {
+  drill_down: { entities: Record<string, string>; peers: Record<string, string>; transactions: string[] };
+  custody: { seq: number | null };
+}
+
+/** The attribution store (intel/, docs/TAGSTORE.md). */
+export interface ShownTag {
+  subject: string;
+  label: string;
+  category: string;
+  source: string;
+  reference: string;
+  collected: string;
+  confidence: number;
+  applies_to: "address" | "cluster";
+  simulated: boolean;
+  bundle: string;
+  basis: string;
+  via: string;
+  effective_confidence: number;
+}
+
+export interface EntityTags {
+  entity_id: string;
+  merge_confidence: number;
+  tags: ShownTag[];
+  member_tags: ShownTag[];
+  conflict: boolean;
+  categories: string[];
+}
+
+export interface AddressTags {
+  address: string;
+  entity_id: string;
+  tags: ShownTag[];
+  conflict: boolean;
+  categories: string[];
+}
+
+export interface TagsResponse {
+  kind: string;
+  subject: string;
+  bundles: { name: string; ok: boolean; simulated?: boolean; reason?: string }[];
+  tags: number;
+  simulated: boolean;
+  statement: string;
+  entities: EntityTags[];
+  addresses: AddressTags[];
+}
+
+/** Exit-point tracing (analysis/exit_point.py, docs/EXIT_POINTS.md). */
+export interface ExitHop {
+  from: string;
+  to: string;
+  value: number;
+  fraction: number;
+  merge_confidence: number;
+  txids: string[];
+  reason: string;
+}
+
+export interface ExitPath {
+  entities: string[];
+  hops: ExitHop[];
+  confidence: number;
+}
+
+export interface ExitModel {
+  amount: number;
+  share: number;
+  path_confidence: number;
+  score: number;
+  paths: ExitPath[];
+}
+
+export interface ExitCandidate {
+  rank: number;
+  entity_id: string;
+  tags: ShownTag[];
+  conflict: boolean;
+  receiving_addresses: string[];
+  time_window: [string | null, string | null];
+  models: Record<"haircut" | "poison", ExitModel>;
+  evidence_sha256: string;
+}
+
+export interface ExitTrace {
+  seed: string;
+  seed_amount: number;
+  candidates: ExitCandidate[];
+  sinks: { entity_id: string; label: string; share_kept: number }[];
+  mixes: Record<string, { from: string; value: number; txids: string[] }[]>;
+  at_depth_limit: Record<string, number>;
+}
+
+export interface ExitPoints {
+  kind: string;
+  subject: string;
+  statement: string;
+  note: string | null;
+  simulated_tags: boolean;
+  traces: ExitTrace[];
 }

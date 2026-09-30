@@ -1,14 +1,168 @@
+<div align="center">
+
+<img src="docs/media/home.jpg" alt="btc-intel console: Follow the coin back to the hand that sent it." width="100%">
+
 # btc-intel
 
-Offline Bitcoin transaction forensics system — SIH26146.
+**Follow the coin back to the hand that sent it.**
 
-Runs fully air-gapped: no network calls at any stage (`offline: true` in `config.yaml`).
+Offline Bitcoin forensics for investigators. It clusters wallets into owners, flags laundering,
+traces money to where it's cashed out, and estimates which IP address first broadcast a transaction.
+When the evidence can't support an answer, it says so.
 
-## Architecture
+[![SIH 2026](https://img.shields.io/badge/Smart_India_Hackathon-SIH26146-1646f5?style=flat-square)](#)
+[![Air-gapped](https://img.shields.io/badge/runs-fully_offline-07124a?style=flat-square)](#-runs-on-an-air-gapped-laptop)
+[![Python](https://img.shields.io/badge/python-3.11-1646f5?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
+[![React](https://img.shields.io/badge/console-React_+_TypeScript-1646f5?style=flat-square&logo=react&logoColor=white)](web/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-07124a?style=flat-square)](LICENSE)
 
-<!-- PASTE ARCHITECTURE SUMMARY HERE -->
+[**Watch the 40-second demo**](docs/media/btc-intel-40s.mp4) ·
+[How it works](#-how-it-works) ·
+[Screenshots](#-the-console) ·
+[Quick start](#-quick-start) ·
+[Docs](#-deep-dive)
 
-## Layout
+</div>
+
+---
+
+## ▶ 40 seconds of btc-intel
+
+<a href="docs/media/btc-intel-40s.mp4">
+  <img src="docs/media/video-poster.jpg" alt="Play the 40-second btc-intel demo video" width="100%">
+</a>
+
+<sub>Click to play (<code>docs/media/btc-intel-40s.mp4</code>, 1080p, 40 s). Offline ingest → verdicts → cash-out trace → live red-team attack → chain of custody.</sub>
+
+---
+
+## ◼ What it is
+
+Every Bitcoin payment is broadcast from a real IP address, and every laundering
+operation leaves a shape in the transaction graph. **btc-intel** joins those two
+layers, the network and the chain, into one investigator console that runs
+entirely on an air-gapped machine.
+
+Give it NTRO's raw transaction dumps (CSV, JSON or XML) and you get back:
+
+| | |
+| --- | --- |
+| **◼ A ranked alert queue** | Entities scored by four detectors and a graph network, fused into one explained risk score |
+| **◼ Owners, not addresses** | Wallets clustered into entities with BlockSci's heuristics, with CoinJoin traps and a collapse guard |
+| **◼ The likely sender** | Origin IP estimates from P2P relay timing, discounting Tor, VPN and public relays instead of blaming them |
+| **◼ The cash-out** | Funds traced forward under haircut and poison taint to the exchange clusters where they leave |
+| **◼ Evidence that holds up** | A hash-chained chain-of-custody ledger (ISO/IEC 27037 style) and one-page PDF case reports |
+| **◼ An attack button** | A live red-team mode: inject a laundering pattern and watch whether the stack catches it, with nothing retrained |
+
+> [!IMPORTANT]
+> **Calibrate or stay silent.** Every IP score is a *probabilistic lead, never an attribution*.
+> The system abstains rather than name a Tor user or a shared relay, and every number in
+> this repo comes from one command (`python -m eval.report`) and is quoted with its condition
+> in [`docs/CLAIMS.md`](docs/CLAIMS.md).
+
+---
+
+## ◼ How it works
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#1646f5','primaryTextColor':'#f2f5ff','primaryBorderColor':'#0b2fc0','lineColor':'#7f9bd8','secondaryColor':'#07124a','tertiaryColor':'#f1f4fc','fontFamily':'monospace'}}}%%
+flowchart LR
+    A["Raw dumps<br/>CSV · JSON · XML"] --> B["Ingest<br/>validate · quarantine · GeoIP"]
+    B --> C["Graph<br/>wallet clustering"]
+    C --> D["Features"]
+    D --> E1["Rules"]
+    D --> E2["Anomaly"]
+    D --> E3["GNN"]
+    C --> E4["Taint"]
+    B --> P["P2P relays<br/>origin estimation"]
+    E1 & E2 & E3 & E4 --> F["Fusion<br/>stacker + SHAP reasons"]
+    F --> Q["Alert queue"]
+    P --> L["Attribution leads<br/>(IP ↔ cluster)"]
+    L --> Q
+    Q --> X["Exit points<br/>trace to cash-out"]
+    Q --> K["Custody ledger<br/>+ PDF case report"]
+```
+
+Seven layers, each replaceable and each tested on its own: **ingest → graph → features →
+engines (rules, anomaly, GNN, correlation) → fusion → API → console**. The fusion
+stacker is a non-negative logistic regression because its coefficients are part of the
+deliverable, and its SHAP values are exact. The full walk-through of every layer is in
+the [deep dive](#-deep-dive) below.
+
+---
+
+## ◼ The console
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/case.jpg" alt="Case overview"><br><sub><b>This case</b>: entities, alerts and where to start</sub></td>
+    <td width="50%"><img src="docs/media/alerts.jpg" alt="Alert queue"><br><sub><b>Alert queue</b>: ranked, with a plain-English reason per row</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/entity.jpg" alt="Entity page"><br><sub><b>Entity</b>: every engine's score, the reason and the evidence</sub></td>
+    <td><img src="docs/media/graph.jpg" alt="Investigation graph"><br><sub><b>Investigation graph</b>: wallets, transactions and broadcast IPs</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/redteam-origin.jpg" alt="Red team origin estimation"><br><sub><b>Red team</b>: true origin vs estimate for injected broadcasts</sub></td>
+    <td><img src="docs/media/cashout.jpg" alt="Trace to cash-out"><br><sub><b>Exit points</b>: where traced value was cashed out</sub></td>
+  </tr>
+</table>
+
+<sub>The console uses the project's <b>cyanotype</b> identity: one cobalt accent that means "interactive, or ours" and never severity; Geist-style prose with every measured value set in mono; and a graph field that stays dark in both themes. See <a href="docs/design/design_analysis.md"><code>docs/design/design_analysis.md</code></a>.</sub>
+
+---
+
+## ◼ By the numbers
+
+<table>
+  <tr>
+    <td align="center"><h3>5 of 5</h3><sub>illicit operations detected<br>(4 of 4 on the shifted set)</sub></td>
+    <td align="center"><h3>0.934</h3><sub>alert precision<br>(0.943 shifted)</sub></td>
+    <td align="center"><h3>0 / 949</h3><sub>false alerts on a dataset<br>with nothing planted</sub></td>
+    <td align="center"><h3>20 of 30</h3><sub>live red-team injections caught,<br>nothing retrained</sub></td>
+  </tr>
+</table>
+
+<sub>All figures are on <b>simulated</b> generator data: they describe our simulator, not Bitcoin. Source and exact wording: <a href="docs/CLAIMS.md"><code>docs/CLAIMS.md</code></a> (D1, D2, D3, D5).</sub>
+
+---
+
+## ◼ Quick start
+
+Requires Python 3.11 and [uv](https://docs.astral.sh/uv/).
+
+```sh
+make setup         # uv sync --extra dev
+make test          # pytest
+make run-pipeline  # end-to-end offline run
+```
+
+Then serve the API and the built console together:
+
+```sh
+uvicorn api.app:app --host 127.0.0.1 --port 8000   # console at http://127.0.0.1:8000/app/
+```
+
+**Stage demo:** `scripts/demo.sh --preflight`, then `scripts/demo.sh --pause`
+([`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md)).
+
+### ◼ Runs on an air-gapped laptop
+
+No network calls at any stage (`offline: true` in `config.yaml`). Build a wheelhouse
+while online, carry it across, install with `./offline/install.sh` and run with
+`./offline/run_offline.sh`: one process, no npm, no second server. A kernel-namespace
+check proves it: `unshare -rn sh -c 'ip link set lo up; ./offline/airgap_check.sh'`
+runs 26 checks with nothing but loopback. Details under *Running it offline* below.
+
+---
+
+## ◼ Deep dive
+
+Every layer, its command and its caveats. Click to expand.
+
+
+<details>
+<summary><b>Repository layout</b></summary>
 
 | Path | What lives here |
 | --- | --- |
@@ -21,17 +175,22 @@ Runs fully air-gapped: no network calls at any stage (`offline: true` in `config
 | `engines/gnn/` | Graph neural network scoring |
 | `engines/correlation/` | Cross-case / entity correlation |
 | `fusion/` | Combines engine scores into one risk score; `incremental.py` re-runs it over new transactions only |
+| `intel/` | Offline attribution tag store: sealed bundles, OFAC/CSV/demo importers, propagation (docs/TAGSTORE.md) |
 | `api/` | Local HTTP API: alerts, graph, live monitoring, red-team injection |
 | `custody.py` | Hash-chained chain-of-custody ledger |
 | `web/` | Local UI |
 | `eval/` | Metrics, benchmarks, ground-truth comparison |
 | `offline/` | Pipeline orchestration, air-gapped packaging |
+| `scripts/` | The one-command stage demo (`demo.sh`) and its pinned artifact hashes |
 | `vendor/` | Cloned reference repos — read-only, never imported (see CONTRIBUTING.md) |
 | `tests/` | Our tests |
-| `data/` | `raw/`, `processed/`, `geoip/` — gitignored |
+| `data/` | `raw/`, `processed/`, `geoip/`, `tags/` — gitignored |
 | `docs/` | Design notes |
 
-## Generating data
+</details>
+
+<details>
+<summary><b>Generating data</b></summary>
 
 ```sh
 python -m generator.main --n-actors 5000 --n-transactions 200000 \
@@ -67,7 +226,10 @@ Volume scales with the gossip settings: at defaults, 200k transactions produce
 ~720k rows (~1.2 GB across all three formats). Turn down `gossip.max_hops_per_tx`
 or `--relay-observation-rate`, or emit fewer formats, if that is too much.
 
-## Ingesting
+</details>
+
+<details>
+<summary><b>Ingesting</b></summary>
 
 ```sh
 python -m ingest.pipeline --input data/raw/ --output data/processed/transactions.parquet
@@ -90,7 +252,10 @@ config, no network) adding `geo_country`, `asn`, `asn_org` and `high_risk_asn`.
 networks the correlation engine should discount. Missing databases degrade to null
 columns instead of failing.
 
-## Graph and clustering
+</details>
+
+<details>
+<summary><b>Graph and clustering</b></summary>
 
 ```python
 from graph.builder import from_parquet, iter_transactions, load
@@ -121,7 +286,10 @@ participants are never merged. Wallets are merged with union-find (`DSU`), and
 dashboard's link-analysis view: aggregated value, transaction counts, txids per
 link, broadcast IPs and the collapse-guard flag per entity.
 
-## Features
+</details>
+
+<details>
+<summary><b>Features</b></summary>
 
 ```sh
 python -m features.engineer --input data/processed/transactions.parquet \
@@ -143,7 +311,10 @@ signal), `peel_ratio` (only meaningful with exactly two outputs, NaN otherwise),
 Thresholds — round units, dormancy gap and burst, velocity window — live under
 `features:` in `config.yaml`.
 
-## Rules engine
+</details>
+
+<details>
+<summary><b>Rules engine</b></summary>
 
 ```sh
 python -m engines.rules --input data/processed/transactions.parquet \
@@ -172,7 +343,10 @@ shape of number while tuning a threshold, but it is a working tool, not a source
 to quote: figures in this README and the slides come from `python -m eval.report`
 and nowhere else.
 
-## GNN engine
+</details>
+
+<details>
+<summary><b>GNN engine</b></summary>
 
 ```sh
 pip install -e '.[gnn]'      # torch is an extra; nothing else needs it
@@ -197,7 +371,10 @@ never retrained, and its error rate there is unknown. It is one signal among
 several in `fusion/`; the rules engine is what an investigator should see first.
 The full caveat is in `engines/gnn/train.py`'s docstring.
 
-## IP correlation
+</details>
+
+<details>
+<summary><b>IP correlation</b></summary>
 
 ```sh
 python -m engines.correlation.scorer --input data/processed/transactions.parquet \
@@ -234,7 +411,10 @@ the actor's true broadcast address — against a ceiling of 84.2%, since a
 transaction broadcast through Tor has no observable true origin at all.
 (`eval/results.md` §6.)
 
-## Origin estimation
+</details>
+
+<details>
+<summary><b>Origin estimation</b></summary>
 
 ```sh
 bash offline/fetch_intel.sh            # once, while online
@@ -276,7 +456,10 @@ sparse samples. Default is `first_timestamp` on that evidence.
 If a dataset has no multi-hop records at all, origin estimation reports
 **degraded mode** and `/stats` says so, rather than implying an estimate was made.
 
-## Fusion
+</details>
+
+<details>
+<summary><b>Fusion</b></summary>
 
 ```sh
 python -m fusion.pipeline    # every engine, then one ranked explained alert list
@@ -311,7 +494,10 @@ operation, pre-registered in `docs/detection_unit_protocol.md`. Case detection
 rate, alert precision and trace coverage are the numbers that matter; wallet
 recall is reported as secondary.
 
-## API
+</details>
+
+<details>
+<summary><b>API</b></summary>
 
 ```sh
 uvicorn api.app:app --host 127.0.0.1 --port 8000
@@ -332,13 +518,32 @@ The alert id is the entity id: there is one alert per entity.
 `GET /transactions/{txid}/propagation` — the propagation tree as Cytoscape
 elements, with `layout: {name: dagre, roots: [origin]}`, the estimated origin
 marked `origin`, runner-ups `runner_up`, and an IP-class badge on every node.
+`GET /transactions/{txid}/origination` — the origination model's answer per
+capture the txid was seen in.
+`GET /peers/{peer}/profile`, `GET /asns/{asn}/profile` — the reverse
+direction: what a peer (IP or onion identity) or every peer of an ASN did on
+the network. Each lookup is written to the custody ledger. See
+docs/CORRELATION.md.
+`GET /tags/{entity|transaction|actor|peer}/{subject}` — attribution tags from
+the offline tag store (`intel/`): sealed bundles (OFAC SDN, operator CSV
+lists, a simulated demo bundle) carried across the air gap and imported with
+`python -m intel.bundle import`. Each tag shows its source and date, and
+conflicts are shown, never resolved. Tags feed fusion as `tag_score`. See
+docs/TAGSTORE.md.
+`GET /exit-points/{address|entity|actor}/{subject}` (and `/packet` for the
+PDF) — trace a seed's funds forward under haircut and poison taint, stop at
+CoinJoins, and rank clusters tagged exchange/VASP as candidate cash-out points.
+It is an investigative lead, not proof of ownership. See docs/EXIT_POINTS.md.
 
 **No authentication**, deliberately, for the demo — it binds to localhost and
 serves synthetic data. A deployment would need auth, per-case authorisation, an
 audit log of who read which entity, and a CORS list that is not a dev-server
 convenience. Said again at the top of `api/app.py`.
 
-## Live monitoring
+</details>
+
+<details>
+<summary><b>Live monitoring</b></summary>
 
 The rest of this system is a batch pipeline: point it at a dump, get a ranked
 alert list. That is the *analysis* half of the problem. The *monitoring* half
@@ -378,7 +583,10 @@ the custody ledger points at them.
 python -m api.monitor feed --batches 6 --interval 4   # synthetic arrivals
 ```
 
-## Chain of custody
+</details>
+
+<details>
+<summary><b>Chain of custody</b></summary>
 
 Every consequential action is appended to a hash-chained, append-only ledger:
 data acquired, pipeline run, traffic arrived, analyst verdict, case report
@@ -400,7 +608,10 @@ ledger on purpose, is in
 [`docs/chain_of_custody.md`](docs/chain_of_custody.md). The console draws it at
 `/custody`.
 
-## Red team
+</details>
+
+<details>
+<summary><b>Red team</b></summary>
 
 A demo surface for the one question an audience actually wants answered: *can I
 make it miss?* Open `/redteam` in the console, pick a laundering typology, set
@@ -438,15 +649,17 @@ file hash, and checks that an incremental re-run gives the same scores as a
 full one — which is the only thing that makes "incremental" a speed-up rather
 than a different, faster, wrong detector.
 
-Timings, the stage that dominates, and the optimisation that turned out to be
-slower are in [`docs/redteam_performance.md`](docs/redteam_performance.md):
-**3.45 s median** against a 30-second target, on a CPU-only laptop — that is
-profiling on the demo dataset with the bundle already warm. The evaluation
-measures a different thing under different conditions: **2.8 s median
-time-to-detect** over the 30 criminal injections into the shifted set, with the
-dataset growing under each run (`eval/results.md` §7).
+How fast a run is depends on the machine's state, so this README quotes no
+wall-clock times. The machine-independent measure is transactions-to-detect,
+and [`docs/CLAIMS.md`](docs/CLAIMS.md) says which performance numbers may be
+quoted and how to word them. The profiling (the stage that dominates, and the
+optimisation that turned out to be slower) is in
+[`docs/redteam_performance.md`](docs/redteam_performance.md).
 
-## Running it offline
+</details>
+
+<details>
+<summary><b>Running it offline</b></summary>
 
 The whole system installs and runs on a machine that has never been online.
 Two halves: one script gathers everything while you still have internet,
@@ -489,7 +702,7 @@ needs **no npm, no node_modules and no second web server**. The console is
 mounted at `/app/` rather than at the root because three of its routes —
 `/alerts`, `/entities/{id}`, `/custody` — are also API paths; `/` redirects.
 
-### Proving it
+#### Proving it
 
 ```sh
 python -m pytest tests/test_offline_guarantee.py -q
@@ -512,7 +725,10 @@ FAIL each. [`offline/OFFLINE_CHECKLIST.md`](offline/OFFLINE_CHECKLIST.md) has
 the manual items too — a script cannot tell you whether the graph *looks*
 right.
 
-## Evaluation
+</details>
+
+<details>
+<summary><b>Evaluation</b></summary>
 
 ```sh
 python -m eval.report      # writes eval/results.md
@@ -531,7 +747,10 @@ The **shifted** set (`--shifted`) deforms the typologies — jittered peel ratio
 deeper chains, longer windows, interleaved CoinJoins. Where both are reported,
 the shifted number is the headline.
 
-## Configuration
+</details>
+
+<details>
+<summary><b>Configuration</b></summary>
 
 Everything tunable lives in `config.yaml` at the repo root: input schema field
 names, GeoIP database paths, model paths, risk-score weights, thresholds.
@@ -545,17 +764,15 @@ config.field("tx_id")            # -> the column name in the incoming dataset
 config.get("risk_weights.rules") # -> 0.35
 ```
 
-## Getting started
+</details>
 
-Requires Python 3.11 and [uv](https://docs.astral.sh/uv/).
 
-```sh
-make setup         # uv sync --extra dev
-make test          # pytest
-make lint          # ruff
-make run-pipeline  # end-to-end offline run
-```
+---
 
-## License
+<div align="center">
 
-MIT — see `LICENSE`. `vendor/` is excluded; each vendored repo keeps its own license.
+**Team JL** · Smart India Hackathon 2026 · Problem SIH26146
+
+MIT, see [`LICENSE`](LICENSE). `vendor/` is excluded; each vendored repo keeps its own license.
+
+</div>

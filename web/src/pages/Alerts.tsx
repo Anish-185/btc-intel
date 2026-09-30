@@ -17,6 +17,7 @@ import {
   type SortKey,
   type Verdict,
 } from "../components/AlertTable";
+import { ActorQueue, ACTOR_STATEMENT } from "../components/ActorQueue";
 import { ErrorNote, Label, Notice, SkeletonRows } from "../components/ui";
 import { Shell } from "../components/Shell";
 import { useToast } from "../components/Toasts";
@@ -36,6 +37,10 @@ export function Alerts() {
   const patternType = params.get("pattern_type") ?? "";
   const sortKey = (params.get("sort") as SortKey) ?? "risk_score";
   const sortDir = (params.get("dir") as "asc" | "desc") ?? "desc";
+  // Entities by default; ?view=actors is the actor view. The actor queue did not
+  // improve triage in the seed sweep (eval/results.md section 13).
+  const view = params.get("view") === "actors" ? "actors" : "entities";
+  const actors = useApi((signal) => api.actors(signal), []);
 
   const { data, error, loading } = useApi(
     (signal) => api.alerts({ limit: 200 }, signal),
@@ -100,12 +105,38 @@ export function Alerts() {
     <Shell anchors={ANCHORS}>
       <section className="section" id="queue" ref={head}>
         <div className="section-head">
-          <h1>Alert queue</h1>
+          <h1>{view === "actors" ? "Actor queue" : "Alert queue"}</h1>
           <span className="label">
-            {loading ? "loading" : `${rows.length} of ${all.length} alerts`}
+            {view === "actors"
+              ? actors.loading
+                ? "loading"
+                : `${actors.data?.total ?? 0} actors`
+              : loading
+                ? "loading"
+                : `${rows.length} of ${all.length} alerts`}
           </span>
         </div>
 
+        <div className="filters" role="group" aria-label="Queue view">
+          <button
+            type="button"
+            className={`btn${view === "entities" ? "" : " btn-quiet"}`}
+            aria-pressed={view === "entities"}
+            onClick={() => update("view", "")}
+          >
+            entities
+          </button>
+          <button
+            type="button"
+            className={`btn${view === "actors" ? "" : " btn-quiet"}`}
+            aria-pressed={view === "actors"}
+            onClick={() => update("view", "actors")}
+          >
+            actors (view)
+          </button>
+        </div>
+
+        {view === "entities" && (
         <div className="filters">
           <label className="field">
             <span className="label">Min risk</span>
@@ -147,9 +178,10 @@ export function Alerts() {
             </button>
           )}
         </div>
+        )}
       </section>
 
-      {saturated && (
+      {view === "entities" && saturated && (
         <div style={{ marginBottom: "var(--sp-4)" }}>
           <Notice title="Risk scores are saturated">
             Every alert here scores {rows[0].risk_score.toFixed(3)}. The fused score separates
@@ -160,7 +192,20 @@ export function Alerts() {
       )}
 
       <section ref={table} style={{ marginTop: "var(--sp-2)" }}>
-        {error ? (
+        {view === "actors" ? (
+          actors.error ? (
+            <ErrorNote error={actors.error} />
+          ) : actors.loading ? (
+            <SkeletonRows rows={8} />
+          ) : (actors.data?.actors.length ?? 0) === 0 ? (
+            <p className="soft">No actor is above the alert threshold.</p>
+          ) : (
+            <>
+              <p className="soft">{actors.data?.statement ?? ACTOR_STATEMENT}</p>
+              <ActorQueue actors={actors.data!.actors} />
+            </>
+          )
+        ) : error ? (
           <ErrorNote error={error} />
         ) : loading ? (
           <SkeletonRows rows={8} />

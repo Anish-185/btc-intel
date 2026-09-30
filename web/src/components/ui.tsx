@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { RISK, brailleMeter, riskLevel } from "../lib/risk";
 import { useCountUp } from "../lib/motion";
+import type { Validity } from "../api/types";
 
 export function Label({ children }: { children: ReactNode }) {
   return <p className="label">{children}</p>;
@@ -53,6 +54,28 @@ export function RiskChip({ score }: { score: number }) {
       <span aria-hidden="true">{RISK[level].glyph}</span>
       {RISK[level].label}
     </span>
+  );
+}
+
+/** "pass", or the tier and every reason, e.g. "qualified: coinjoin, dandelion stem". */
+export function validityLabel(validity: Validity): string {
+  if (validity.tier === "PASS") return "pass";
+  const reasons = (validity.reasons.length ? validity.reasons : [validity.reason ?? ""])
+    .map((r) => r.replace(/_/g, " ").toLowerCase())
+    .join(", ");
+  return `${validity.tier.toLowerCase().replace(/_/g, " ")}: ${reasons}`;
+}
+
+/** An origin's validity verdict: its tier and reasons. PASS is quiet. */
+export function ValidityChip({ validity }: { validity: Validity }) {
+  const text = validityLabel(validity);
+  if (validity.tier === "PASS") {
+    return <Chip title={validity.evidence.join(" ")}>validity {text}</Chip>;
+  }
+  return (
+    <Chip tone="caution" title={validity.evidence.join(" ")}>
+      <span aria-hidden="true">⚠</span> {text}
+    </Chip>
   );
 }
 

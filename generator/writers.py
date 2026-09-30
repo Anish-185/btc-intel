@@ -18,24 +18,30 @@ FIELDS = ["timestamp", "src_ip", "dst_ip", "src_port", "dst_port", "tx_id",
           "input_addresses", "output_addresses", "input_amounts", "output_amounts",
           "fee", "script_type", "geo_country", "asn"]
 
+#: Written only by a `--wallet-profiles` run; without it the files are exactly
+#: what they always were.
+CONSTRUCTION_FIELDS = ["tx_version", "locktime", "input_sequences", "input_outpoints"]
+
 LIST_FIELDS = {"input_addresses", "output_addresses", "input_amounts", "output_amounts"}
+_LISTS = LIST_FIELDS | {"input_sequences", "input_outpoints"}
 
 JSON_TAIL = "\n]\n"
 XML_TAIL = "</records>\n"
 
 
-def columns(cfg: dict | None = None) -> list[str]:
+def columns(cfg: dict | None = None, fields: list[str] = FIELDS) -> list[str]:
     schema = (cfg or config.load())["schema"]
-    return [schema[f] for f in FIELDS]
+    return [schema.get(f, f) for f in fields]
 
 
 class _Writer:
     ext = ""
     tail = ""
 
-    def __init__(self, path: Path, cfg: dict, append: bool = False):
-        self.path, self.cfg = path, cfg
-        self.cols = columns(cfg)
+    def __init__(self, path: Path, cfg: dict, append: bool = False,
+                 fields: list[str] = FIELDS):
+        self.path, self.cfg, self.fields = path, cfg, fields
+        self.cols = columns(cfg, fields)
         self.n = 0
         if append:
             _truncate_tail(path, self.tail)
@@ -68,8 +74,8 @@ class CsvWriter(_Writer):
         if not hasattr(self, "w"):
             self.w = csv.writer(self.fh)
         sep = self.cfg["ingest"]["list_separator"]
-        self.w.writerow([sep.join(str(v) for v in row[f]) if f in LIST_FIELDS else row[f]
-                         for f in FIELDS])
+        self.w.writerow([sep.join(str(v) for v in row[f]) if f in _LISTS else row[f]
+                         for f in self.fields])
         self.n += 1
 
 
@@ -81,7 +87,7 @@ class JsonWriter(_Writer):
         self.fh.write("[\n")
 
     def write(self, row: dict):
-        named = {c: row[f] for c, f in zip(self.cols, FIELDS)}
+        named = {c: row[f] for c, f in zip(self.cols, self.fields)}
         self.fh.write(("," if self._existing() else "") + json.dumps(named))
         self.n += 1
 
@@ -98,8 +104,8 @@ class XmlWriter(_Writer):
 
     def write(self, row: dict):
         parts = []
-        for col, f in zip(self.cols, FIELDS):
-            if f in LIST_FIELDS:
+        for col, f in zip(self.cols, self.fields):
+            if f in _LISTS:
                 items = "".join(f"<item>{escape(str(v))}</item>" for v in row[f])
                 parts.append(f"<{col}>{items}</{col}>")
             else:
@@ -111,10 +117,13 @@ class XmlWriter(_Writer):
 WRITERS = {"csv": CsvWriter, "json": JsonWriter, "xml": XmlWriter}
 
 
-def open_writers(out_dir: Path, formats, cfg: dict | None = None, append: bool = False):
+def open_writers(out_dir: Path, formats, cfg: dict | None = None, append: bool = False,
+                 construction: bool = False):
     cfg = cfg or config.load()
     out_dir.mkdir(parents=True, exist_ok=True)
-    return [WRITERS[f](out_dir / f"transactions.{f}", cfg, append=append) for f in formats]
+    fields = FIELDS + CONSTRUCTION_FIELDS if construction else FIELDS
+    return [WRITERS[f](out_dir / f"transactions.{f}", cfg, append=append, fields=fields)
+            for f in formats]
 
 
 def _truncate_tail(path: Path, tail: str) -> None:

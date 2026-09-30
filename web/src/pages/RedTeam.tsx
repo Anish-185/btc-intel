@@ -16,7 +16,7 @@ import {
   type RunResult,
   type Scoreboard,
 } from "../api/redteam";
-import { ErrorNote, Label, Notice, RiskMeter, SkeletonRows } from "../components/ui";
+import { ErrorNote, Label, Notice, RiskMeter, SkeletonRows, validityLabel } from "../components/ui";
 import { Shell } from "../components/Shell";
 import { useToast } from "../components/Toasts";
 import { useApi } from "../lib/useApi";
@@ -528,6 +528,7 @@ function Origin({ result }: { result: RunResult }) {
               <th>Estimated</th>
               <th>Class</th>
               <th className="num">Confidence</th>
+              <th>Validity</th>
               <th className="num">Rank</th>
             </tr>
           </thead>
@@ -540,9 +541,17 @@ function Origin({ result }: { result: RunResult }) {
                   </Link>
                 </td>
                 <td className="mono">{row.true_origin_ip}</td>
-                <td className="mono">{row.estimated_origin_ip ?? "—"}</td>
+                <td className="mono">
+                  {row.answer?.kind === "onion_identity"
+                    ? `${row.answer.onion} (onion identity, not an IP)`
+                    : (row.estimated_origin_ip ?? "—")}
+                  {row.answer?.kind === "broadcasting_peer" && " (broadcaster only)"}
+                </td>
                 <td className="soft">{row.ip_class.replace(/_/g, " ")}</td>
                 <td className="num">{score3(row.confidence)}</td>
+                <td title={row.validity.evidence.join(" ")}>
+                  {validityLabel(row.validity)}
+                </td>
                 <td className="num">{row.rank ?? (row.observed ? "—" : "not observed")}</td>
               </tr>
             ))}

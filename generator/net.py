@@ -20,7 +20,7 @@ class Ip:
     asn: int
     asn_name: str
     country: str
-    kind: str  # residential | hosting | tor_exit
+    kind: str  # residential | hosting | tor_exit | onion
 
 
 class IpAllocator:
@@ -39,6 +39,14 @@ class IpAllocator:
                 break
         self._seen.add(addr)
         return Ip(addr, pool["asn"], pool["name"], pool["country"], kind)
+
+    def allocate_onion(self) -> Ip:
+        """A Tor v3 hidden-service address: 56 base32 characters. It has no ASN
+        and no country — that absence is the point of it."""
+        alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+        addr = "".join(self.rng.choice(alphabet) for _ in range(56)) + ".onion"
+        self._seen.add(addr)
+        return Ip(addr, 0, "tor", "ZZ", "onion")
 
 
 @dataclass
@@ -86,16 +94,52 @@ class GossipNet:
                 break
         return peers
 
-    def diffuse(self, origin: Ip, t0: float, rng: random.Random) -> list[tuple[float, Ip, Ip]]:
+    def stem(self, origin: Ip, t0: float, rng: random.Random, entries: list[int],
+             length: int) -> tuple[list[tuple[float, Ip, Ip]], int, float]:
+        """Dandelion stem phase, in BIP-156's shape: the sender hands the
+        transaction to ONE peer, and each stem node forwards it to one peer of
+        its own, `length` hops in all; the last one fluffs (`diffuse` from it).
+
+        Returns (stem hops, the fluff node, the time it holds the transaction).
+        Simplifications, all named in docs/VALIDITY.md: the stem successor is a
+        fresh uniform draw per hop rather than one of two per-epoch Dandelion
+        destinations, stem hops use the ordinary per-hop delay, the length is
+        drawn by the caller rather than by a per-hop coin at each node, and
+        there is no embargo timer — a stem is never lost.
+        """
+        mean = self.cfg["delay_mean_ms"] / 1000.0
+        node = rng.choice(entries)
+        t = t0 + rng.expovariate(1.0 / mean)
+        hops = [(t, origin, self.nodes[node])]
+        path = {node}
+        for _ in range(length - 1):
+            options = [p for p in self.peers[node] if p not in path]
+            if not options:
+                break
+            nxt = rng.choice(options)
+            t += rng.expovariate(1.0 / mean)
+            hops.append((t, self.nodes[node], self.nodes[nxt]))
+            path.add(nxt)
+            node = nxt
+        return hops, node, t
+
+    def diffuse(self, origin: Ip, t0: float, rng: random.Random,
+                entries: list[int] | None = None) -> list[tuple[float, Ip, Ip]]:
         """Bitcoin-ish diffusion: exponential per-hop delay, breadth over peers.
 
         Returns hops as (timestamp, from_ip, to_ip). The origin announces to
         each of its own peers first, so it sits at the centre of its immediate
         neighbourhood rather than dangling off a single edge.
+
+        `entries` pins the origin's peers. A sender keeps its connections from
+        one transaction to the next, so a caller simulating several
+        transactions from one sender passes the same list each time; left out,
+        a fresh set is drawn per transaction, which is what `generator.main`
+        has always done.
         """
         mean = self.cfg["delay_mean_ms"] / 1000.0
         budget = self.cfg["max_hops_per_tx"]
-        entries = self.origin_peers(rng)
+        entries = self.origin_peers(rng) if entries is None else entries
         hops = []
         seen: set[int] = set()
         queue = []

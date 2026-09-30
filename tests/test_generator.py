@@ -233,6 +233,23 @@ def test_inject_is_deterministic_and_respects_param_overrides(tmp_path):
     assert ra["transactions"] == 6 + 3  # victims + peel hops, exactly as overridden
 
 
+
+@pytest.mark.parametrize("profiled", [False, True])
+def test_two_regenerations_write_byte_identical_injection_rows(tmp_path, profiled):
+    """Dataset plus injection, rebuilt twice: every relay row, in every format,
+    is the same bytes. Relay timing comes from the injection's own seeded stream."""
+    extra = {"wallet_profiles": True} if profiled else {}
+    files = []
+    for name in ("a", "b"):
+        _, d = run(tmp_path / name, n_transactions=600, **extra)
+        before = {f: (d / f"transactions.{f}").stat().st_size for f in ("csv", "json", "xml")}
+        inject_pattern(d, "ransomware_collector", {"n_counterparties": 10}, seed=321)
+        files.append({f: (d / f"transactions.{f}").read_bytes() for f in before})
+        assert all((d / f"transactions.{f}").stat().st_size > n for f, n in before.items())
+    assert files[0] == files[1]
+    injection = read_gt(tmp_path / "a")["injections"][-1]
+    assert {"broadcast", "relay_observation_rate"} <= set(injection)
+
 def test_inject_rejects_unknown_typology(tmp_path):
     _, d = run(tmp_path, formats="csv", n_transactions=400)
     with pytest.raises(KeyError):

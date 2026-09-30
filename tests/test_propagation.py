@@ -11,6 +11,7 @@ different ceiling definitions in circulation at once.
 from __future__ import annotations
 
 import json
+import random
 
 import networkx as nx
 import pandas as pd
@@ -319,3 +320,58 @@ def test_cli_writes_origins_parquet(datasets, tmp_path):
     assert origins["confidence"].between(0, 1).all()
     assert not summary["degraded_mode"]["degraded"]
     assert origins["runner_up_ips"].map(len).max() <= CFG["engines"]["propagation"]["runner_ups"]
+
+
+# --- determinism ----------------------------------------------------------
+def _hops(rows: list[tuple[str, str, float]]) -> pd.DataFrame:
+    """(src, dst, seconds after T0) -> a relay frame."""
+    return pd.DataFrame([{"txid": "t1", "src_ip": s, "dst_ip": d,
+                          "timestamp": T0 + pd.Timedelta(seconds=o), "asn": None}
+                         for s, d, o in rows])
+
+
+def test_every_tree_ties_at_its_earliest_moment():
+    """Not an edge case — the shape of the input guarantees it.
+
+    One relay record is one hop with one timestamp, so its source and its
+    destination are stamped identically and the earliest moment is always shared
+    by at least two addresses. Anything that ranks on `first_seen` is therefore
+    always resolving a tie, and how it resolves it is not a detail.
+    """
+    tree = build_trees(_hops([("10.0.0.1", "10.0.0.2", 0.0),
+                              ("10.0.0.2", "10.0.0.3", 1.0)]))["t1"]
+    earliest = min(tree.first_seen.values())
+    assert sum(1 for v in tree.first_seen.values() if v == earliest) == 2
+
+
+def test_the_tie_is_broken_by_who_was_sending():
+    """`src -> dst at t` says the source already had it and the destination
+    learned it at t. Ordering the tie on that is reading the evidence; ordering
+    it on the address would discard it."""
+    # The sender's address sorts *after* the receiver's, so an address-ordered
+    # tie-break would pick the wrong one and this test would fail.
+    tree = build_trees(_hops([("10.0.0.9", "10.0.0.1", 0.0),
+                              ("10.0.0.1", "10.0.0.5", 1.0)]))["t1"]
+    assert tree.earliest() == "10.0.0.9"
+    assert tree.order()[0] == "10.0.0.9"
+    assert max(first_timestamp(tree, CFG), key=first_timestamp(tree, CFG).get) == "10.0.0.9"
+
+
+@pytest.mark.parametrize("estimator", sorted(ESTIMATORS))
+def test_an_estimator_is_a_function_of_the_evidence_not_the_row_order(estimator):
+    """The same hops, read in a different order, must score identically.
+
+    This failed before `PropagationTree.order()` existed: ties fell to dict
+    insertion order, so a capture concatenated from two rotated log files scored
+    differently from the same capture read in timestamp order — and on generated
+    data the insertion order happened to favour the true origin, which flattered
+    every published accuracy figure by about fourteen points.
+    """
+    rows = [("10.0.0.1", "10.0.0.2", 0.0), ("10.0.0.2", "10.0.0.3", 0.5),
+            ("10.0.0.2", "10.0.0.4", 0.5), ("10.0.0.4", "10.0.0.5", 1.5),
+            ("10.0.0.3", "10.0.0.6", 1.5)]
+    straight = ESTIMATORS[estimator](build_trees(_hops(rows))["t1"], CFG)
+    for seed in (1, 2, 3):
+        shuffled = list(rows)
+        random.Random(seed).shuffle(shuffled)
+        assert ESTIMATORS[estimator](build_trees(_hops(shuffled))["t1"], CFG) == straight

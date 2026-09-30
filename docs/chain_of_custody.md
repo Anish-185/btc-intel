@@ -23,6 +23,8 @@ in plain words:
 | `export.case_report` | a PDF is exported | the data it was made from, and the PDF's own SHA-256 |
 | `redteam.inject` | an attack is injected | the dataset after the injection |
 | `redteam.reset` | the dataset is restored | every restored file |
+| `tags.bundle_retired` | a tag bundle is taken out of the store (moved, never deleted) | the bundle's files at their new path, and why |
+| `annotation` | an earlier entry needs explaining | nothing new; it names the entry it annotates (`annotates_seq`, `annotates_hash`). The ledger is append-only, so a mistaken or test entry is explained, never removed |
 
 ## Why the entries are chained
 

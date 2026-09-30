@@ -26,6 +26,11 @@ ingest:
   output_path: data/processed/transactions.parquet
   timestamp_unit: iso    # s | ms | iso
   list_separator: ";"    # how list fields are packed into a single CSV cell
+  # Where output_path's rows came from: simulated | real. Nothing in a relay
+  # log says whether it was generated, so it is declared here and a peer
+  # profile built from it states it in its header. The demo dataset is
+  # generator/ output; set `real` only for an actual case dataset.
+  provenance: simulated
 
 intel:
   # Public IP intelligence, fetched once by offline/fetch_intel.sh. Read from
@@ -86,6 +91,16 @@ graph:
     min_votes: 2                # below this the change output is left undecided
     # a tie between outputs is never resolved — guessing here corrupts clusters
 
+  # Wallet fingerprints corroborate merges; they never make one
+  # (graph.clustering.corroborate). A merge joining wallets whose spending
+  # transactions carry two different confident fingerprints keeps its union
+  # but has its confidence multiplied by this. Half, because one software
+  # mismatch is a reason to doubt a merge, not proof it is wrong: people run
+  # two wallets over one seed, and a fingerprint is itself a probability.
+  fingerprint:
+    corroborate: true
+    mismatch_factor: 0.5
+
   collapse_guard:
     max_cluster_wallets: 500    # above this a cluster is flagged, not trusted
     reason: "suspicious_merge — needs review"
@@ -93,6 +108,31 @@ graph:
 features:
   entity_path: data/processed/features.parquet
   transaction_path: data/processed/features_tx.parquet
+  # The third grain: one row per candidate peer per txid per capture
+  # (features/relay.py). Rows still identified by a wtxid go to the quarantine
+  # file rather than into the matrix, following ingest/'s convention.
+  relay_path: data/processed/features_relay.parquet
+  relay_quarantine_path: data/processed/features_relay_quarantine.parquet
+
+  # Wallet-construction fingerprints (features/fingerprint.py, docs/FINGERPRINTS.md).
+  fingerprint:
+    model_path: data/processed/fingerprint_model.json
+    # Below this calibrated confidence the answer is "unknown". Rationale: at
+    # 0.6 a named family is right at least 1.5 times as often as it is wrong
+    # on the calibration captures. Under that, a label points an analyst at a
+    # software family more often wrongly than a coin flip's margin justifies.
+    # Fixed before the first evaluation and not tuned on a test capture.
+    unknown_below: 0.6
+    # Fewer observable tells than this and the answer is "unknown" whatever the
+    # score: a transaction showing only its input/output counts and script
+    # type has not shown how it was built.
+    min_tells: 4
+    laplace: 1.0
+    # Whether the console shows fingerprints by default (the API answers
+    # either way). Set by the pre-registered rule in docs/FINGERPRINTS.md
+    # ("Open-set revision"): off while the leave-one-profile-out
+    # harmful-mislabel rate (all tells) is above 0.10.
+    console_display: false
 
   # "suspiciously round": a multiple of one of these, to within the tolerance
   round_units: [1.0, 0.5, 0.1, 0.05, 0.01]
@@ -208,6 +248,11 @@ engines:
         correct_infrastructure: 0.3
         wrong_uninvolved_third_party: -3.0
         abstained: 0.0
+        # The metric revision, pre-registered with a rationale for each in
+        # docs/VALIDITY.md §"Metric revision" before any rerun. Not tuned.
+        qualified_correct: 0.3              # = correct_infrastructure: right, not IP-actionable
+        qualified_wrong: -1.0               # the same ~1/3 scaling as 0.3 / 1.0
+        coinjoin_input_misattribution: -3.0 # = wrong_uninvolved_third_party: a false ownership claim
 
     single_row_confidence: 0.15   # one observation is a guess, not an estimate
 
@@ -265,11 +310,69 @@ engines:
       free_entities: 3          # an IP tied to this many clusters is not penalised
       min_factor: 0.02          # floor, so a link is weakened but never erased
 
+    # The reverse direction: peer -> behavioural profile (profile.py).
+    profile:
+      # Below this many announcements a peer gets no timing signature, only a
+      # sentence saying so. Rationale: the standard error of an inter-arrival
+      # standard deviation is about sd/sqrt(2(n-1)) — 16% at 20 announcements,
+      # 50% at 3 — and an active-hours histogram over 24 bins from fewer than
+      # 20 events is mostly empty bins, which reads as a schedule it is not.
+      # Fixed from that arithmetic, not tuned on any profile.
+      min_timing_observations: 20
+      relayed_sample: 10          # relayed transactions listed; the rest are counted
+      evidence_rows: 20           # raw rows listed per linked cluster; the rest counted
+
 risk_weights:
   rules: 0.35
   anomaly: 0.25
   gnn: 0.25
   correlation: 0.15
+
+tags:
+  # The attribution store (intel/, docs/TAGSTORE.md): sealed bundles imported
+  # with `python -m intel.bundle import`. Read from disk only.
+  store_dir: data/tags
+  # tag_score's weight in the unfitted fallback (risk_weights stay a distribution
+  # over the original engines; this is added beside them).
+  fallback_weight: 0.25
+  # How much a tag of each category counts as risk (tag_score = weight x
+  # effective confidence). Exchange/VASP tags say where money went, not that an
+  # entity is suspect, so they are shown and never scored.
+  risk:
+    exchange/VASP: 0.0
+    sanctioned: 1.0
+    ransomware: 1.0
+    darknet market: 1.0
+    scam: 1.0
+    mixer: 0.5
+    other: 0.5
+
+exit_point:
+  # Tracing a seed's funds forward to candidate cash-out points
+  # (analysis/exit_point.py, fusion.taint.trace, docs/EXIT_POINTS.md).
+  #
+  # Depth: 8 hops. Generator layering reaches its sink in at most 5 hops
+  # (depth 2-4 plus the merge), and a ransomware peel chain runs up to 12
+  # peels, most of which clustering folds back into the collector's own
+  # entity. Published exchange-deposit studies find most illicit funds reach a
+  # service within a handful of hops. Beyond 8, every trace reaches everyone,
+  # and what is still in flight at the limit is reported, not dropped.
+  max_hops: 8
+  # Haircut: an entity whose summed tainted inflow at a hop is under 0.1% of
+  # the seed's outflow is not followed. Summed per entity, not per edge:
+  # layering fans out into branches that are each small (fan 4-10, up to four
+  # layers) and merges them again, and a per-edge 1% floor never reached the
+  # merge. Amounts are propagated per entity per hop, so a low floor costs
+  # little; paths are capped at paths_per_entity.
+  min_share: 0.001
+  # Poison has no fractions to prune on, so an edge under this value (dust and
+  # fee-sized change) is not followed.
+  min_value_btc: 0.001
+  paths_per_entity: 3
+  # An untagged entity keeping at least this share of the traced flow is shown
+  # as an "untagged sink". It is never named as a service.
+  sink_min_share: 0.05
+  candidates: 10
 
 eval:
   # The one canonical evaluation setup. Every number in eval/results.md comes
@@ -294,6 +397,59 @@ eval:
   results_path: eval/results.md
   calibration_bins: 5
 
+  ground_truth:
+    # Origin accuracy against known truth on real relay data (eval/ground_truth/).
+    # Protocol pre-registered in docs/GROUND_TRUTH.md, committed before any
+    # signet number existed.
+    fixtures_dir: tests/fixtures/ground_truth
+    # Preflight thresholds. Each one refuses a capture rather than warning:
+    # a warning in a log is not a number an investigator will decline to quote.
+    min_subsecond_share: 0.5      # logtimemicros=1, or a pcap
+    max_unresolved_wtxid_share: 0.05   # after the label file has resolved what it can
+    wilson_z: 1.96                # 95% intervals; the samples are dozens, not thousands
+    # The observer's clock resolution, used for the timing ceiling: two
+    # announcements closer together than this cannot be ordered at all.
+    clock_resolution_seconds: 0.000001
+    delta_percentiles: [50, 90, 99]
+    # Defaults for a broadcast run on the collection host.
+    n_transactions: 50
+    interval_seconds: 20.0
+
+origination:
+  # The supervised per-(txid, peer) model. Corpus: origination/manifest.json;
+  # results: docs/ORIGINATION_RESULTS.md and eval/results.md section 9.
+  corpus_dir: data/processed/eval/origination
+  model_path: data/processed/origination_model.pkl
+  output_path: data/processed/tx_origination.parquet
+  results_doc: docs/ORIGINATION_RESULTS.md
+  # Fixed before any result existed and not tuned afterwards. Tuning these
+  # until the cross-topology row looked better would turn the test set into a
+  # validation set.
+  gbm:
+    max_iter: 300
+    learning_rate: 0.05
+    max_leaf_nodes: 15
+    min_samples_leaf: 40
+    l2_regularization: 1.0
+  ece_bins: 10
+  explain_top_features: 3
+
+validity:
+  # analysis/validity.py — conditions under which an origin attribution is
+  # invalid. A failed check forces abstention through low_confidence_origin /
+  # eval.origin.flagged_at; `enforce: false` switches it off there (the
+  # no-abstention floor, and the "without validity" comparison).
+  enforce: true
+  # tiered: only ABSTAIN withholds; QUALIFIED restricts what the answer claims;
+  # ANNOTATE flags. binary: P6's gate, every non-PASS verdict abstains.
+  mode: tiered
+  results_doc: docs/VALIDITY.md
+  dandelion:
+    # Fixed before the first result, from the shape a stem leaves rather than
+    # from the data: a lone first announcement followed by a burst. Not tuned.
+    min_candidates: 4           # at least two gaps after the first
+    isolation_ratio: 5.0        # first gap / median later gap
+
 fusion:
   alerts_parquet: data/processed/final_alerts.parquet
   # Analyst verdicts from the API, for recalibrating fusion/stacker.py later.
@@ -301,6 +457,9 @@ fusion:
   # Saved investigation views (the graph the analyst actually built).
   investigations_dir: data/processed/investigations
   alerts_json: data/processed/final_alerts.json
+  # Actors (fusion/actors.py, docs/ACTORS.md): clusters joined to peer
+  # identities. Written beside the alerts by `python -m fusion.pipeline`.
+  actors_json: data/processed/final_actors.json
   model_path: models/stacker.joblib
   alert_threshold: 0.5        # composite score above which an alert is explained
   leads_per_entity: 3         # top-k IP attribution leads shown per alert
@@ -319,7 +478,7 @@ fusion:
     # correlation_score is deliberately absent: an IP correlation is an
     # attribution lead about *who*, not evidence that an entity is risky.
     # It is surfaced per alert under "leads" instead.
-    signals: [rule_score, anomaly_score, gnn_score, taint_score]
+    signals: [rule_score, anomaly_score, gnn_score, taint_score, tag_score]
     non_negative: true          # every signal may only ever raise risk
     seed: 42
     test_fraction: 0.3        # chronological hold-out, never random
@@ -343,6 +502,29 @@ monitor:
   # A file is only read once its size has stopped changing, so a writer still
   # copying into the directory is not parsed half-written.
   settle_seconds: 0.4
+
+p2p:
+  # Real Bitcoin P2P relay observations, read from files (p2p/capture_reader.py).
+  # Nothing here opens a socket: a capture is produced on a collection host by
+  # bitcoind or tcpdump and carried across the air gap — see docs/CAPTURE.md.
+  capture_dir: data/capture
+  port: 8333
+  # Magics we resynchronise a desynchronised TCP stream on: main, testnet3,
+  # signet, regtest. Any other value in a capture is not a stream we understand.
+  network_magics: [f9beb4d9, 0b110907, 0a03cf40, fabfb5da]
+  # The capture host's own addresses, which decide inbound from outbound. Left
+  # empty the reader infers it as the address common to every flow — true for a
+  # capture taken on the node itself, false on a span port or a multi-homed
+  # host, which is exactly when to fill this in.
+  local_ips: []
+  # How much of the `direction` column is evidence rather than assumption. The
+  # direction on a relay event is always inferred — from which end of a pcap
+  # flow was local, or from the verb on a debug.log line — so what varies is how
+  # the observer's own address was established, and that is what is scored here.
+  direction_confidence:
+    explicit: 1.0                 # passed in by the operator running the build
+    label_file: 1.0               # recorded by the broadcaster at capture time
+    "config:p2p.local_ips": 0.9   # a standing statement about the deployment
 
 custody:
   # The chain-of-custody ledger: append-only, hash-chained, tamper-evident.
@@ -452,6 +634,66 @@ generator:
     tor_exit:
       - {asn: 208294, name: TorExit, country: DE, prefix: "185.220"}
       - {asn: 4224, name: CalyxTor, country: US, prefix: "162.247"}
+
+  # Wallet-construction profiles (generator/wallets.py; tells and their basis in
+  # docs/FINGERPRINTS.md). OFF unless `generator.main --wallet-profiles` or a
+  # corpus manifest with a `fingerprint` block asks for them: every draw comes
+  # from its own stream, so with profiles off the output is byte-identical to
+  # what it was (pinned in tests/test_fingerprint.py). Each value is a
+  # probability map drawn per transaction. These are this simulation's
+  # stand-ins for the families named, not measurements of them: which parts
+  # are documented behaviour and which are assumptions is in the doc.
+  wallet_profiles:
+    start_height: 850000            # block height at the simulated clock's start
+    payment_mix: {core_like: 0.45, electrum_like: 0.30, legacy_naive: 0.25}
+    payee_types: {p2wpkh: 0.50, p2tr: 0.20, p2sh: 0.15, p2pkh: 0.15}
+    profiles:
+      core_like:
+        version: {2: 1.0}
+        anti_fee_sniping: 0.95      # nLockTime = height, else 0
+        rbf: 0.9                    # nSequence 0xFFFFFFFD
+        bip69: 0.0
+        change_position: {random: 1.0}
+        fee: {fractional: 1.0}
+        input_types: {p2wpkh: 0.6, p2tr: 0.4}
+        change_type: {match_inputs: 1.0}
+      electrum_like:
+        version: {2: 1.0}
+        anti_fee_sniping: 0.9
+        rbf: 0.85
+        bip69: 0.85
+        change_position: {random: 1.0}
+        fee: {integer: 0.8, fractional: 0.2}
+        input_types: {p2wpkh: 0.85, p2sh: 0.15}
+        change_type: {match_inputs: 1.0}
+      legacy_naive:
+        version: {1: 0.9, 2: 0.1}
+        anti_fee_sniping: 0.0
+        rbf: 0.0
+        bip69: 0.0
+        change_position: {last: 0.9, random: 0.1}
+        fee: {absolute: 0.85, fractional: 0.15}
+        input_types: {p2pkh: 0.8, p2sh: 0.2}
+        change_type: {reuse_input: 0.7, match_inputs: 0.3}
+      coordinator_coinjoin:
+        version: {1: 0.5, 2: 0.5}
+        anti_fee_sniping: 0.0
+        rbf: 0.0
+        bip69: 0.3
+        change_position: {random: 1.0}
+        fee: {integer: 0.7, fractional: 0.3}
+        input_types: {p2wpkh: 0.7, p2tr: 0.3}
+        change_type: {match_inputs: 1.0}
+        participant_change: 0.8     # share of participants given a change output
+      batch_withdrawal:
+        version: {2: 0.7, 1: 0.3}
+        anti_fee_sniping: 0.2
+        rbf: 0.1
+        bip69: 0.0
+        change_position: {last: 0.7, random: 0.3}
+        fee: {round: 0.7, integer: 0.3}
+        input_types: {p2wpkh: 0.6, p2sh: 0.4}
+        change_type: {match_inputs: 1.0}
 
 gossip:
   n_nodes: 500

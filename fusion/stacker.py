@@ -52,7 +52,8 @@ import config
 # about *who*, not about whether an entity is risky; folding it into a risk
 # score conflates attribution with suspicion. It is surfaced per alert as a
 # separate "leads" section instead.
-SIGNALS = ["rule_score", "anomaly_score", "gnn_score", "taint_score"]
+# tag_score: the attribution store's risk-weighted tags (intel/store.py).
+SIGNALS = ["rule_score", "anomaly_score", "gnn_score", "taint_score", "tag_score"]
 
 
 class NonNegativeLogistic:
@@ -146,13 +147,24 @@ class Stacker:
 
 
 def default_weights(cfg: dict | None = None) -> dict[str, float]:
-    """config.yaml's risk_weights, used when there are no labels to fit on."""
+    """config.yaml's risk_weights, used when there are no labels to fit on.
+
+    The fallback is a weighted average over the signals present. `tag_score`
+    is present only when a tag bundle is loaded: without one, the weights (and
+    so every unfitted score and alert) are exactly what they were before the
+    tag store existed. Decided from the store, not from the data, so a subset
+    of entities scores the same as the whole frame."""
+    from intel.store import loaded
+
     cfg = cfg or config.load()
     weights = dict(cfg["risk_weights"])
-    return {"rule_score": weights.get("rules", 0.35),
-            "anomaly_score": weights.get("anomaly", 0.25),
-            "gnn_score": weights.get("gnn", 0.25),
-            "taint_score": weights.get("taint", 0.25)}
+    out = {"rule_score": weights.get("rules", 0.35),
+           "anomaly_score": weights.get("anomaly", 0.25),
+           "gnn_score": weights.get("gnn", 0.25),
+           "taint_score": weights.get("taint", 0.25)}
+    if loaded(cfg):
+        out["tag_score"] = cfg["tags"]["fallback_weight"]
+    return out
 
 
 def chronological_split(signals: pd.DataFrame, cfg: dict | None = None):

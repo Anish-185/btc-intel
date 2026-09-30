@@ -2,12 +2,15 @@ import { Suspense, lazy } from "react";
 import { Route, Routes } from "react-router-dom";
 import { ToastHost } from "./components/Toasts";
 import { Home } from "./pages/Home";
+import { Case } from "./pages/Case";
 import { Alerts } from "./pages/Alerts";
 import { Entity } from "./pages/Entity";
 import { Transaction } from "./pages/Transaction";
 import { RedTeam } from "./pages/RedTeam";
 import { Monitor } from "./pages/Monitor";
+import { Actor } from "./pages/Actor";
 import { Custody } from "./pages/Custody";
+import { Asn, Peer, Peers } from "./pages/Peer";
 
 // The investigation graph pulls in Cytoscape and its extensions — the heaviest
 // thing the console loads, and only this route needs it.
@@ -20,9 +23,14 @@ export function App() {
     <ToastHost>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/case" element={<Case />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/entities/:id" element={<Entity />} />
+        <Route path="/actors/:id" element={<Actor />} />
         <Route path="/tx/:txid" element={<Transaction />} />
+        <Route path="/peers" element={<Peers />} />
+        <Route path="/peers/:peer" element={<Peer />} />
+        <Route path="/asns/:asn" element={<Asn />} />
         <Route path="/redteam" element={<RedTeam />} />
         <Route path="/monitor" element={<Monitor />} />
         <Route path="/custody" element={<Custody />} />

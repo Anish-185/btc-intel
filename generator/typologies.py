@@ -253,6 +253,54 @@ def coinjoin(w: World) -> list[Tx]:
     return [w.tx(participants[0], inputs, outputs, "coinjoin")]
 
 
+def shape(rng, kind: str, cluster: str, cfg: dict) -> dict:
+    """A transaction's input/output structure without a `World`, for the
+    origination corpus, which simulates announcements rather than a ledger.
+
+      payment   1-3 inputs from the sender's cluster, a payment and change.
+      batch     3-6 inputs from ONE cluster paying 3-12 identical amounts — an
+                exchange's batched withdrawal. The confounder: its outputs look
+                exactly like a mix's, and only the ownership of the inputs,
+                which a structural check cannot see, tells them apart.
+      coinjoin  the `coinjoin` typology's shape: one input per participant,
+                each from a distinct cluster, equal-denomination outputs.
+
+    `clusters` is ground truth (who owns each input); the detector never reads it.
+    """
+    def addr(owner: str) -> str:
+        return f"{owner}-{rng.getrandbits(40):010x}"
+
+    if kind == "coinjoin":
+        p = cfg["generator"]["typology_params"]["coinjoin"]
+        denom = rng.choice(p["denomination_btc"])
+        owners = [cluster] + [f"cj{rng.getrandbits(32):08x}"
+                              for _ in range(rng.randint(*p["participants"]) - 1)]
+        inputs = [(addr(o), round(denom * rng.uniform(1.0, 1.5), 8)) for o in owners]
+        outputs = [(addr(o), round(denom * 0.999, 8)) for o in owners]
+        rng.shuffle(outputs)
+        clusters = owners
+    elif kind == "batch":
+        n_in = rng.randint(3, 6)
+        amount = round(rng.choice([0.01, 0.05, 0.1, 0.5]), 8)
+        inputs = [(addr(cluster), round(rng.uniform(0.5, 5.0), 8)) for _ in range(n_in)]
+        outputs = [(addr(f"payee{rng.getrandbits(32):08x}"), amount)
+                   for _ in range(rng.randint(3, 12))]
+        clusters = [cluster] * n_in
+    elif kind == "payment":
+        n_in = rng.randint(1, 3)
+        inputs = [(addr(cluster), round(rng.uniform(0.001, 2.0), 8)) for _ in range(n_in)]
+        total = sum(v for _, v in inputs)
+        pay = round(total * rng.uniform(0.1, 0.9), 8)
+        outputs = [(addr(f"payee{rng.getrandbits(32):08x}"), pay),
+                   (addr(cluster), round(total - pay - 0.0001, 8))]
+        clusters = [cluster] * n_in
+    else:
+        raise ValueError(f"unknown shape {kind!r}")
+    return {"shape": kind, "in_addrs": [a for a, _ in inputs], "in_vals": [v for _, v in inputs],
+            "out_addrs": [a for a, _ in outputs], "out_vals": [v for _, v in outputs],
+            "input_clusters": len(set(clusters))}
+
+
 TYPOLOGIES = {
     "normal": normal,
     "ransomware_collector": ransomware_collector,

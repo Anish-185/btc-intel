@@ -23,6 +23,7 @@ import pandas as pd
 
 import config
 import custody
+from analysis.validity import NOT_ASSESSED
 from engines.anomaly.detector import fit_score
 from engines.correlation.scorer import correlate
 from engines.propagation.estimators import estimate_all, is_anonymized_entry
@@ -32,6 +33,7 @@ from engines.rules.schema import alerts_to_frame
 from graph.builder import build_graph, load
 from graph.entity_graph import build_entity_graph
 from ingest.ip_intel import load_intel
+from intel.store import tag_scores
 
 from .explain import explain_entity
 from .ordering import lead_confidence, sort as sort_alerts, sort_key, taint_hops
@@ -109,6 +111,7 @@ def collect_signals(df: pd.DataFrame, cfg: dict, watchlist_path=None) -> dict:
     signals = signals.merge(gnn_scores(df, cfg), on="entity_id", how="left")
     signals = signals.merge(taint[["entity_id", "taint_score", "taint_path"]],
                             on="entity_id", how="left")
+    signals = signals.merge(tag_scores(features, cfg), on="entity_id", how="left")
     for column in SIGNALS:
         if column not in signals:
             signals[column] = 0.0
@@ -117,7 +120,7 @@ def collect_signals(df: pd.DataFrame, cfg: dict, watchlist_path=None) -> dict:
     return {"signals": signals, "alerts": alerts, "links": links, "features": features,
             "graph": graph, "entity_graph": entity_graph, "origins": origins,
             "propagation": propagation_status, "watchlist": watchlist,
-            "taint": taint, "seed_entities": seed_entities}
+            "taint": taint, "seed_entities": seed_entities, "intel": intel}
 
 
 def labels_for(signals: pd.DataFrame, ground_truth: dict, features: FeatureSet,
@@ -130,6 +133,21 @@ def labels_for(signals: pd.DataFrame, ground_truth: dict, features: FeatureSet,
             for wallet in cluster["wallets"]:
                 bad_entities.add(features.entity_of(wallet))
     return signals["entity_id"].isin(bad_entities).astype(int)
+
+
+LEAD_CALIBRATION_BASIS = ("uncalibrated: evidence-weighted count of origin estimates, "
+                          "discounted for shared infrastructure")
+
+
+def _lead_validity(row) -> dict:
+    """A lead's verdict. Correlation builds no lead from a QUALIFIED answer, so
+    a lead is PASS, or ANNOTATE naming the flags its observations carried."""
+    tier = getattr(row, "validity", None)
+    if tier is None or (isinstance(tier, float) and pd.isna(tier)):
+        return NOT_ASSESSED.as_dict()
+    reasons = list(getattr(row, "validity_reasons", []) or [])
+    return {"tier": tier, "reason": reasons[0] if reasons else None, "reasons": reasons,
+            "confidence": None, "evidence": [str(row.validity_evidence)]}
 
 
 def attribution_leads(links: pd.DataFrame, cfg: dict) -> dict[str, list[dict]]:
@@ -158,7 +176,9 @@ def attribution_leads(links: pd.DataFrame, cfg: dict) -> dict[str, list[dict]]:
                            "anonymized_entry_point": anonymized,
                            "label": ("anonymized entry point" if anonymized
                                      else "candidate origin"),
-                           "evidence": str(row.reason)})
+                           "evidence": str(row.reason),
+                           "calibration_basis": LEAD_CALIBRATION_BASIS,
+                           "validity": _lead_validity(row)})
     return out
 
 
@@ -254,13 +274,14 @@ def run(input_path=None, ground_truth=None, out_parquet=None, out_json=None,
         "alerts": json.loads(alerts.to_json(orient="records")),
     }
     js.write_text(json.dumps(payload, indent=2))
+    actors_path = write_actors(df, bundle, stacker, alerts, cfg, actors_path_for(js, cfg))
 
     # The analysis itself is an event in the case: which data went in, which
     # model scored it, and what came out. A reviewer reading the alert list a
     # year later can tell whether it was produced from the data they hold.
     entry = custody.record("analysis", {
         "files": [custody.seal(Path(input_path or cfg["ingest"]["output_path"])),
-                  custody.seal(parquet), custody.seal(js)],
+                  custody.seal(parquet), custody.seal(js), custody.seal(actors_path)],
         "entities": len(bundle["signals"]), "alerts": len(alerts),
         "alert_threshold": f["alert_threshold"],
         "stacker_fitted": bool(stacker.metrics.get("fitted", True)),
@@ -272,7 +293,35 @@ def run(input_path=None, ground_truth=None, out_parquet=None, out_json=None,
             "watchlist_seeds": len(bundle["seed_entities"]),
             "tainted": int((bundle["signals"]["taint_score"] > 0).sum()),
             "stacker": stacker.metrics, "degraded_mode": bundle["propagation"]["degraded"],
-            "parquet": str(parquet), "json": str(js)}
+            "parquet": str(parquet), "json": str(js), "actors": str(actors_path)}
+
+
+def actors_path_for(alerts_json: Path, cfg: dict) -> Path:
+    """Actors live beside the alerts they were built with: the configured path
+    for the configured alerts, else `<alerts>_actors.json` next to them."""
+    if Path(alerts_json).resolve() == Path(cfg["fusion"]["alerts_json"]).resolve():
+        return Path(cfg["fusion"]["actors_json"])
+    return Path(alerts_json).with_name(Path(alerts_json).stem + "_actors.json")
+
+
+def write_actors(df: pd.DataFrame, bundle: dict, stacker: Stacker, alerts: pd.DataFrame,
+                 cfg: dict, path: Path) -> Path:
+    """Actors over the same bundle and stacker as the alerts (fusion/actors.py)."""
+    from engines.correlation.profile import build_sources
+
+    from . import actors
+    # The dataset's own IP intelligence, as every other engine in this run used:
+    # without its node_intel.json overlay the generator's relays read as
+    # residential, origin confidence spreads over them, and every lead scores
+    # lower here than on the peer page.
+    src = build_sources(cfg, transactions=df, features=bundle["features"],
+                        intel=bundle["intel"])
+    built = actors.build(bundle["signals"], stacker, actors.peer_links(src, cfg), cfg,
+                         set(alerts["entity_id"]))
+    path.write_text(json.dumps({"alert_threshold": cfg["fusion"]["alert_threshold"],
+                                "statement": actors.STATEMENT,
+                                "actors": json.loads(actors.to_json(built))}, indent=1))
+    return path
 
 
 def main(argv=None) -> None:

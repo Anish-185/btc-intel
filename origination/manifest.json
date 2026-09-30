@@ -1,0 +1,40 @@
+{
+  "name": "origination-corpus-v1",
+  "seed": 2026,
+  "note": "Every capture is a pure function of this file and config.yaml's gossip/generator blocks. Edit a value here and the corpus hash changes, so a cached corpus is never served for a different manifest.",
+  "topology": {
+    "families": ["relay_hub", "uniform", "small_world", "scale_free"],
+    "n_nodes": [150, 300, 600],
+    "relay_share": [0.04, 0.12],
+    "graphs_per_topology": 3
+  },
+  "cross_topology_test": [
+    "relay_hub-n600-r0.04",
+    "uniform-n150-r0.12",
+    "small_world-n300-r0.04",
+    "small_world-n600-r0.12",
+    "scale_free-n150-r0.04",
+    "scale_free-n300-r0.12"
+  ],
+  "capture": {
+    "per_graph": 30,
+    "observer_count": [1, 3],
+    "placement": {
+      "random": 0.35,
+      "hub": 0.2,
+      "edge": 0.15,
+      "leaf": 0.1,
+      "relay_only": 0.1,
+      "isolated": 0.1
+    },
+    "message_loss": [0.0, 0.1, 0.3, 0.6],
+    "sender_adjacency": [0.0, 0.7],
+    "n_transactions": [20, 60],
+    "senders": [3, 30],
+    "tx_interval_s": 15.0
+  },
+  "split": {
+    "within_test_share": 0.2,
+    "calibration_share": 0.2
+  }
+}

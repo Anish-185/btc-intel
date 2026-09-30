@@ -5,9 +5,10 @@
  *  whether the entity is criminal. The wording here is fixed: "associated
  *  with", never "belongs to". Every lead states its class, its confidence, and
  *  whether the origin estimate behind it was weak. */
+import { Link } from "react-router-dom";
 import type { Lead } from "../api/types";
 import { ipClass } from "../lib/format";
-import { Chip } from "./ui";
+import { Chip, ValidityChip } from "./ui";
 
 export function LeadsPanel({
   leads,
@@ -39,7 +40,9 @@ export function LeadsPanel({
             <article className="lead" key={`${lead.ip}-${lead.observations}`}>
               <div>
                 <p className="lead-ip">
-                  {lead.ip}{" "}
+                  <Link to={`/peers/${encodeURIComponent(lead.ip)}`} title="Peer profile">
+                    {lead.ip}
+                  </Link>{" "}
                   <Chip title={cls.label}>
                     <span aria-hidden="true">{cls.code}</span> {cls.label}
                   </Chip>{" "}
@@ -48,6 +51,7 @@ export function LeadsPanel({
                       <span aria-hidden="true">⚠</span> anonymized entry point
                     </Chip>
                   )}
+                  {lead.validity && <ValidityChip validity={lead.validity} />}{" "}
                   {lowConfidence && (
                     <Chip tone="caution" title="The origin estimate behind this lead is weak">
                       <span aria-hidden="true">⚠</span> low confidence origin

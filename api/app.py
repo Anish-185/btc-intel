@@ -21,7 +21,7 @@ import hashlib
 import json
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,11 +35,18 @@ from pydantic import BaseModel
 
 import config
 import custody
-from engines.propagation.estimators import estimate_origin
+from analysis import validity
+from analysis.validity import NOT_ASSESSED
+from engines.propagation.estimators import CALIBRATION_BASIS, estimate_origin
+from graph.builder import iter_transactions
 from engines.propagation.tree import build_trees, degraded_mode
+from engines.correlation import profile as correlation_profile
+from features import fingerprint
 from engines.rules.detectors import FeatureSet
+from origination.model import OriginationModel
 from graph.builder import IP, TRANSACTION, WALLET, build_graph, load
 from ingest.ip_intel import load_intel
+from intel import store as tag_store
 
 from fusion import incremental
 from fusion.ordering import NO_TAINT, TIEBREAKERS
@@ -86,13 +93,16 @@ def _commit() -> str:
 # Where the API reads from. Defaults come from config.yaml; configure() points
 # the app at another set of artefacts (a second case, or a test fixture).
 STATE: dict = {"transactions": None, "intel_dir": None, "alerts_json": None,
-               "feedback": None}
+               "feedback": None, "relay": None, "model": None}
 
 
 def configure(transactions=None, node_intel=None, alerts_json=None,
-              feedback=None) -> None:
+              feedback=None, relay=None, model=None) -> None:
+    """`relay` and `model` are the relay matrix and origination model the peer
+    profiles read; None means config.yaml's paths."""
     STATE.update({"transactions": transactions, "intel_dir": node_intel,
-                  "alerts_json": alerts_json, "feedback": feedback})
+                  "alerts_json": alerts_json, "feedback": feedback,
+                  "relay": relay, "model": model})
     invalidate()
 
 
@@ -102,9 +112,25 @@ def invalidate() -> None:
     Called when the artefacts change under us — a red-team injection, or a
     reset — so the next request rebuilds rather than serving the old case.
     """
-    for cached in (_transactions, _intel, _features):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags,
+                   _money):
         cached.cache_clear()
     BUNDLE.clear()
+
+
+@lru_cache(maxsize=1)
+def _money() -> tuple:
+    """The entity-level value graph and a txid index, for exit-point tracing."""
+    from graph.builder import graph_transactions
+    from graph.entity_graph import build_entity_graph
+    graph, features = _features()
+    return (build_entity_graph(graph, features.clustering, config.load()),
+            {tx.txid: tx for tx in graph_transactions(graph)})
+
+
+@lru_cache(maxsize=1)
+def _tags() -> tag_store.TagStore:
+    return tag_store.load(config.load())
 
 
 @lru_cache(maxsize=1)
@@ -129,6 +155,27 @@ def _features() -> tuple:
     cfg = config.load()
     graph = build_graph(_transactions(), cfg)
     return graph, FeatureSet.from_graph(graph, cfg)
+
+
+@lru_cache(maxsize=1)
+def _profiles() -> correlation_profile.Sources:
+    """The reverse direction's inputs: the hop dataset this API serves, the
+    relay matrix, and the origination model's answers over it. Built once."""
+    cfg = config.load()
+    try:
+        df = _transactions()
+    except FileNotFoundError:
+        df = None
+    graph_features = _features()[1] if df is not None else None
+    matrix = pd.read_parquet(STATE["relay"]) if STATE["relay"] else None
+    model = OriginationModel.load(STATE["model"]) if STATE["model"] else None
+    return correlation_profile.build_sources(cfg, df, matrix, model, graph_features, _intel())
+
+
+@lru_cache(maxsize=1)
+def _fingerprints() -> dict[str, dict]:
+    """txid -> wallet-construction fingerprint, for every served transaction."""
+    return fingerprint.answers_for(iter_transactions(_frame()))
 
 
 # The full signal bundle: every engine's output for every entity. Built on
@@ -169,7 +216,8 @@ def commit_bundle(updated: dict) -> None:
             "alerts": json.loads(alerts.to_json(orient="records")),
         }
         Path(cfg["fusion"]["alerts_json"]).write_text(json.dumps(payload, indent=2))
-    for cached in (_transactions, _intel, _features):
+    for cached in (_transactions, _intel, _features, _profiles, _fingerprints, _tags,
+                   _money):
         cached.cache_clear()
     BUNDLE.clear()
     BUNDLE.update(updated)
@@ -188,7 +236,18 @@ def _alerts() -> dict:
 
 
 def _alert_rows() -> list[dict]:
-    return list(_alerts().get("alerts", []))
+    # Leads stay a JSON string on this route (the console's type); each one is
+    # given a validity verdict first, so no route serves an origin without one.
+    return [{**row, "leads": json.dumps(_leads(row["leads"]))} if row.get("leads") else row
+            for row in _alerts().get("alerts", [])]
+
+
+def _leads(raw) -> list[dict]:
+    """A stored alert's leads, each carrying a validity verdict. Leads written
+    before the validity layer existed are marked NOT_ASSESSED, never PASS."""
+    leads = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    return [lead if "validity" in lead else {**lead, "validity": NOT_ASSESSED.as_dict()}
+            for lead in leads]
 
 
 def _alert_for(entity_id: str) -> dict | None:
@@ -353,10 +412,29 @@ def entity(entity_id: str) -> dict:
         "reason": alert.get("reason"),
         "evidence": alert.get("evidence", []),
         "taint_path": alert.get("taint_path", []),
-        "leads": json.loads(alert["leads"]) if alert.get("leads") else [],
+        "leads": _leads(alert.get("leads")),
+        "fingerprints": _entity_fingerprints(set(wallets), features),
         "caveat": ("scores rank leads for a human; an entity without an alert is not "
                    "cleared, only unremarkable"),
     }
+
+
+def _entity_fingerprints(wallets: set[str], features) -> dict:
+    """How the transactions spending this entity's wallets were built, and how
+    sure the clustering is that these wallets belong together — a fingerprint
+    mismatch lowers that confidence and never made the cluster."""
+    answers = _fingerprints()
+    spent = sorted({tx.txid for tx in iter_transactions(_frame())
+                    if wallets & set(tx.input_addresses)})
+    cluster = features.clustering.cluster_of(next(iter(wallets))) if wallets else None
+    conflicts = features.clustering.conflicts.get(cluster, [])
+    return {**fingerprint.distribution([answers[t] for t in spent if t in answers]),
+            "cluster_confidence": features.clustering.confidence.get(cluster, 1.0),
+            "conflicts": [{"txid": m["txid"], "heuristic": m["heuristic"],
+                           "fingerprints": m["fingerprints"]} for m in conflicts],
+            "note": ("fingerprints only lower a merge's confidence when the wallets' "
+                     "spending transactions were built differently; they never create one"),
+            "console_display": fingerprint.console_display()}
 
 
 def subgraph(entity_id: str, hops: int) -> dict:
@@ -567,7 +645,10 @@ def propagation(txid: str) -> dict:
         raise HTTPException(404, f"unknown transaction {txid}")
 
     tree = build_trees(rows)[txid]
-    estimate = estimate_origin(tree, _intel(), config.load())
+    tx = next(iter_transactions(rows), None) if "input_addresses" in rows else None
+    cfg = config.load()
+    estimate = estimate_origin(tree, _intel(), cfg, tx=tx)
+    answer = validity.answer(estimate.ip, estimate.validity, cfg)
     runner_ups = {ip: score for ip, score in estimate.runner_ups[:3]}
     ranked = dict(estimate.ranked)
 
@@ -599,6 +680,15 @@ def propagation(txid: str) -> dict:
         "degraded": estimate.degraded,
         "low_confidence_origin": estimate.low_confidence,
         "anonymized_entry_point": estimate.anonymized_entry_point,
+        "probability": estimate.confidence,
+        "calibration_basis": CALIBRATION_BASIS,
+        # PASS, or the reason the origin is withheld and the evidence for it.
+        # An ABSTAIN-tier verdict also sets low_confidence_origin.
+        "validity": estimate.validity.as_dict(),
+        # What the answer may claim: an IP attribution, an onion identity (no
+        # IP), or a CoinJoin's broadcasting peer (no input ownership). None
+        # when the verdict withholds it.
+        "answer": answer,
         "n_observations": estimate.n_observations,
         "runner_ups": [{"ip": ip, "score": round(float(s), 6)} for ip, s in runner_ups.items()],
         "caveat": ("estimated origin is a probabilistic lead, not an attribution — "
@@ -609,6 +699,217 @@ def propagation(txid: str) -> dict:
         "layout": {"name": "dagre", "roots": [estimate.ip] if estimate.ip else []},
         "elements": {"nodes": nodes, "edges": edges},
     }
+
+
+@app.get("/transactions/{txid}/fingerprint")
+def transaction_fingerprint(txid: str) -> dict:
+    """How this transaction was likely built: a ranked set of construction
+    patterns, or unknown. Not which software built it, and never a party."""
+    answer = _fingerprints().get(txid)
+    if answer is None:
+        raise HTTPException(404, f"transaction {txid} has no structure in the served dataset")
+    return {"txid": txid, **answer, "console_display": fingerprint.console_display()}
+
+
+@app.get("/transactions/{txid}/origination")
+def origination(txid: str) -> dict:
+    """The origination model's answer for this txid, once per capture it was
+    seen in. The same frame a peer profile's `originated` reads, so every
+    transaction a profile claims shows the same peer here."""
+    answers = correlation_profile.transaction_origination(txid, _profiles())
+    return {"txid": txid, "captures": answers,
+            "note": None if answers else "no capture in the relay matrix contains this txid"}
+
+
+# --- the reverse direction: peer -> profile -------------------------------
+def _lookup_record(kind: str, subject: str, profile: dict | None) -> dict:
+    """Every profile lookup goes in the custody ledger, found or not: which
+    peers an investigation asked about is itself part of the record."""
+    return custody.record(f"lookup.{kind}_profile", {
+        "subject": subject, "found": profile is not None,
+        "simulated_only": (profile or {}).get("header", {}).get("simulated_only"),
+        "files": _evidence_seal()["files"]})
+
+
+@app.get("/peers/{peer}/profile")
+def peer_profile(peer: str) -> dict:
+    """What one peer — an IP or an onion identity — did on the network."""
+    peer = peer.strip()
+    profile = correlation_profile.peer_profile(peer, _profiles())
+    entry = _lookup_record("peer", peer, profile)
+    if profile is None:
+        raise HTTPException(404, f"peer {peer} is not in any capture or the relay-hop dataset")
+    return {**profile, "custody": {"seq": entry.get("seq")}}
+
+
+# --- tags -----------------------------------------------------------------
+@app.get("/tags/{kind}/{subject}")
+def tags(kind: str, subject: str) -> dict:
+    """The attribution store's tags on one page's subject, with source and date
+    (docs/TAGSTORE.md). An actor and a peer list their clusters' tags, each
+    under its own cluster: a tag never crosses an actor join."""
+    store, (_, features) = _tags(), _features()
+    clustering = features.clustering
+    body: dict = {"entities": [], "addresses": []}
+    if kind == "entity":
+        body["entities"] = [store.entity(subject, clustering)]
+    elif kind == "transaction":
+        rows = _transactions()[_transactions()["txid"] == subject]
+        if rows.empty:
+            raise HTTPException(404, f"transaction {subject} is not in the served dataset")
+        addresses = dict.fromkeys(a for r in rows.itertuples()
+                                  for a in [*r.input_addresses, *r.output_addresses])
+        body["addresses"] = [t for t in (store.address(a, clustering) for a in addresses)
+                             if t["tags"]]
+    elif kind == "actor":
+        actor = _actor(subject)
+        if actor is None:
+            raise HTTPException(404, f"unknown actor {subject}")
+        body["entities"] = [store.entity(m, clustering) for m in actor["members"]]
+    elif kind == "peer":
+        profile = correlation_profile.peer_profile(subject.strip(), _profiles())
+        if profile is None:
+            raise HTTPException(404, f"peer {subject} is not in any capture")
+        body["entities"] = [store.entity(c["cluster_id"], clustering)
+                            for c in profile["linked_clusters"]]
+    else:
+        raise HTTPException(404, "kind is one of entity, transaction, actor, peer")
+    return {"kind": kind, "subject": subject, **store.header(), **body}
+
+
+# --- exit points ------------------------------------------------------------
+def _exit_points(kind: str, subject: str) -> dict:
+    from analysis.exit_point import exit_points
+    (_, features), (money, txs) = _features(), _money()
+    actor = None
+    if kind == "actor":
+        actor = _actor(subject)
+        if actor is None:
+            raise HTTPException(404, f"unknown actor {subject}")
+    elif kind == "entity" and subject not in money:
+        raise HTTPException(404, f"entity {subject} has no value flow in the served dataset")
+    elif kind == "address" and features.clustering.cluster_of(subject) is None \
+            and subject not in money:
+        raise HTTPException(404, f"address {subject} is not in the served dataset")
+    elif kind not in ("entity", "address", "actor"):
+        raise HTTPException(404, "kind is one of address, entity, actor")
+    return exit_points(kind, subject, money, features, _tags(), txs, actor, config.load())
+
+
+@app.get("/exit-points/{kind}/{subject}")
+def exit_points_view(kind: str, subject: str) -> dict:
+    """Trace a seed's funds forward to candidate cash-out points
+    (docs/EXIT_POINTS.md). An investigative lead, not proof of ownership."""
+    return _exit_points(kind, subject)
+
+
+@app.get("/exit-points/{kind}/{subject}/packet")
+def exit_point_packet(kind: str, subject: str) -> Response:
+    """The investigator packet as a PDF, through the case-report path. Its
+    hash, the evidence seal and the tag bundles go into the custody ledger."""
+    from .case_report import render_packet
+    result = _exit_points(kind, subject)
+    seal = _evidence_seal()
+    pdf = render_packet(result, datetime.now(UTC), custody=seal)
+    digest = hashlib.sha256(pdf).hexdigest()
+    entry = custody.record("export.exit_point_packet", {
+        "files": seal["files"], "kind": kind, "subject": subject,
+        "candidates": [c["entity_id"] for t in result["traces"] for c in t["candidates"]],
+        "tag_bundles": [b.get("manifest_hash") for b in result["tag_bundles"]],
+        "simulated_tags": result["simulated_tags"],
+        "packet_sha256": digest, "packet_bytes": len(pdf), "sealed_at_head": seal["head"]})
+    return Response(pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="btc-intel-exit-{kind}-{subject[:16]}.pdf"',
+        "x-custody-entry": str(entry.get("seq") or ""), "x-custody-report-sha256": digest})
+
+
+# --- actors ---------------------------------------------------------------
+def _actors() -> dict:
+    """fusion/actors.py's output, written beside the alerts it was built with."""
+    from fusion.pipeline import actors_path_for
+    cfg = config.load()
+    path = actors_path_for(Path(STATE["alerts_json"] or cfg["fusion"]["alerts_json"]), cfg)
+    return json.loads(path.read_text()) if path.exists() else {"actors": []}
+
+
+def _actor(actor_id: str) -> dict | None:
+    return next((a for a in _actors()["actors"] if a["actor_id"] == actor_id), None)
+
+
+def _drill_down(actor: dict) -> dict:
+    """Where each part of an actor is evidenced, in the views that already exist."""
+    return {"entities": {m: f"/entities/{m}" for m in actor["members"]},
+            "peers": {p: f"/peers/{p}/profile" for p in actor["peers"]},
+            "transactions": sorted({e["txid"] for lk in actor["links"]
+                                    for e in lk["evidence"]})}
+
+
+@app.get("/actors")
+def actors_queue(limit: int | None = None, offset: int = Query(0, ge=0),
+                 alerted_only: bool = True) -> dict:
+    """The actor queue: clusters joined to peer identities (docs/ACTORS.md),
+    highest risk first. `alerted_only=false` lists every actor."""
+    cfg = config.load()
+    size = min(limit or cfg["api"]["page_size"], cfg["api"]["max_page_size"])
+    payload = _actors()
+    rows = [a for a in payload["actors"] if a["alerted"] or not alerted_only]
+    return {"alert_threshold": payload.get("alert_threshold"),
+            "statement": payload.get("statement"), "total": len(rows),
+            "limit": size, "offset": offset, "actors": rows[offset:offset + size]}
+
+
+@app.get("/actors/{actor_id}")
+def actor_detail(actor_id: str) -> dict:
+    """One actor with its members, linked peers (basis, confidence, validity
+    tiers) and drill-down to the per-entity, per-peer and per-transaction views.
+    Every view is recorded in the custody ledger, found or not."""
+    actor = _actor(actor_id)
+    entry = custody.record("actor.view", {"subject": actor_id, "found": actor is not None,
+                                          "files": _evidence_seal()["files"]})
+    if actor is None:
+        raise HTTPException(404, f"unknown actor {actor_id}")
+    return {**actor, "drill_down": _drill_down(actor), "custody": {"seq": entry.get("seq")}}
+
+
+@app.post("/actors/{actor_id}/verdict")
+def actor_verdict(actor_id: str, body: Feedback) -> dict:
+    """An analyst's verdict on an actor, appended beside the entity feedback
+    (never into it: the stacker trains on entity verdicts) and recorded in the
+    custody ledger."""
+    if body.status not in ("confirmed", "false_positive"):
+        raise HTTPException(422, "status must be 'confirmed' or 'false_positive'")
+    actor = _actor(actor_id)
+    if actor is None:
+        raise HTTPException(404, f"unknown actor {actor_id}")
+    entity_feedback = Path(STATE["feedback"] or config.get("fusion.feedback_parquet"))
+    path = entity_feedback.with_name("actor_feedback.parquet")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = pd.DataFrame([{"actor_id": actor_id, "members": json.dumps(actor["members"]),
+                         "peers": json.dumps(actor["peers"]), "status": body.status,
+                         "risk_score": float(actor["risk_score"]),
+                         "recorded_at": pd.Timestamp.now(tz="UTC")}])
+    if path.exists():
+        row = pd.concat([pd.read_parquet(path), row], ignore_index=True)
+    row.to_parquet(path, index=False)
+    entry = custody.record("actor.verdict", {
+        "files": [custody.seal(path)], "actor_id": actor_id, "status": body.status,
+        "members": actor["members"], "peers": actor["peers"],
+        "risk_score": float(actor["risk_score"])})
+    return {"actor_id": actor_id, "status": body.status, "recorded": len(row),
+            "custody": {"seq": entry.get("seq")}}
+
+
+@app.get("/asns/{asn}/profile")
+def asn_profile(asn: str) -> dict:
+    """Every peer seen in an ASN, aggregated, with the per-peer breakdown."""
+    digits = asn.upper().removeprefix("AS")
+    if not digits.isdigit():
+        raise HTTPException(422, "an ASN is a number, optionally prefixed AS")
+    profile = correlation_profile.asn_profile(int(digits), _profiles())
+    entry = _lookup_record("asn", f"AS{int(digits)}", profile)
+    if profile is None:
+        raise HTTPException(404, f"no peer seen in AS{int(digits)}")
+    return {**profile, "custody": {"seq": entry.get("seq")}}
 
 
 # The investigation graph endpoints, sharing this module's cached graph and

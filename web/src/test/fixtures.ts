@@ -75,6 +75,8 @@ export const DETAIL: EntityDetail = {
       anonymized_entry_point: true,
       label: "anonymized entry point",
       evidence: "estimated origin 185.220.9.9, origin confidence 0.21",
+      validity: { tier: "PASS", reason: null, reasons: [], confidence: null,
+        evidence: ["all 3 contributing origin estimates passed validity"] },
     },
   ],
   caveat: "scores rank leads for a human; an entity without an alert is not cleared",

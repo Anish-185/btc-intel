@@ -123,7 +123,7 @@ def signal_frame(n=200, separable=True) -> tuple[pd.DataFrame, pd.Series]:
         rows.append({"entity_id": f"c{i}", "first_seen": i,
                      "rule_score": 0.8 if (bad and separable) else 0.1,
                      "anomaly_score": 0.6 if (bad and separable) else 0.2,
-                     "gnn_score": 0.0, "taint_score": 0.0})
+                     "gnn_score": 0.0, "taint_score": 0.0, "tag_score": 0.0})
         labels.append(int(bad))
     return pd.DataFrame(rows), pd.Series(labels)
 

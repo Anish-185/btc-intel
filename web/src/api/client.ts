@@ -3,7 +3,21 @@
  *
  *  VITE_API_BASE defaults to same-origin, which is what FastAPI serving
  *  web/dist gives us; the dev server proxies instead (see vite.config.ts). */
-import type { AlertsPage, EntityDetail, EntityGraph, Propagation, Stats } from "./types";
+import type {
+  ActorDetail,
+  ActorsPage,
+  AlertsPage,
+  AsnProfile,
+  EntityDetail,
+  EntityGraph,
+  PeerProfile,
+  Propagation,
+  Stats,
+  TxFingerprint,
+  ExitPoints,
+  TagsResponse,
+  TxOrigination,
+} from "./types";
 
 export const API_BASE = (import.meta.env?.VITE_API_BASE ?? "").replace(/\/$/, "");
 
@@ -62,6 +76,28 @@ export const api = {
     get<EntityGraph>(`/entities/${encodeURIComponent(id)}/graph?hops=${hops}`, signal),
   propagation: (txid: string, signal?: AbortSignal) =>
     get<Propagation>(`/transactions/${encodeURIComponent(txid)}/propagation`, signal),
+  fingerprint: (txid: string, signal?: AbortSignal) =>
+    get<TxFingerprint>(`/transactions/${encodeURIComponent(txid)}/fingerprint`, signal),
+  origination: (txid: string, signal?: AbortSignal) =>
+    get<TxOrigination>(`/transactions/${encodeURIComponent(txid)}/origination`, signal),
+  /** Every call is recorded in the custody ledger by the server. */
+  peerProfile: (peer: string, signal?: AbortSignal) =>
+    get<PeerProfile>(`/peers/${encodeURIComponent(peer)}/profile`, signal),
+  asnProfile: (asn: string, signal?: AbortSignal) =>
+    get<AsnProfile>(`/asns/${encodeURIComponent(asn)}/profile`, signal),
+
+  tags: (kind: "entity" | "transaction" | "actor" | "peer", subject: string, signal?: AbortSignal) =>
+    get<TagsResponse>(`/tags/${kind}/${encodeURIComponent(subject)}`, signal),
+
+  exitPoints: (kind: "entity" | "actor" | "address", subject: string, signal?: AbortSignal) =>
+    get<ExitPoints>(`/exit-points/${kind}/${encodeURIComponent(subject)}`, signal),
+  exitPacketUrl: (kind: string, subject: string) =>
+    `${API_BASE}/exit-points/${kind}/${encodeURIComponent(subject)}/packet`,
+
+  actors: (signal?: AbortSignal) => get<ActorsPage>("/actors?limit=200", signal),
+  /** Every call is recorded in the custody ledger by the server. */
+  actor: (id: string, signal?: AbortSignal) =>
+    get<ActorDetail>(`/actors/${encodeURIComponent(id)}`, signal),
 
   reportUrl: (id: string) => `${API_BASE}/entities/${encodeURIComponent(id)}/report`,
 
@@ -76,5 +112,15 @@ export const api = {
     );
     if (!response.ok) throw new ApiError(await detail(response), response.status);
     return (await response.json()) as { alert_id: string; status: string; recorded: number };
+  },
+
+  async actorVerdict(actorId: string, status: "confirmed" | "false_positive") {
+    const response = await fetch(`${API_BASE}/actors/${encodeURIComponent(actorId)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (!response.ok) throw new ApiError(await detail(response), response.status);
+    return (await response.json()) as { actor_id: string; status: string; recorded: number };
   },
 };

@@ -1,0 +1,339 @@
+{
+  "source": "synthetic-test-fixture",
+  "network": "signet-shaped (synthetic)",
+  "topology_condition": "adjacent",
+  "true_origin_ip": "203.0.113.9",
+  "observer_local_ips": [
+    "198.51.100.2"
+  ],
+  "topology_check": {
+    "condition": "adjacent",
+    "observer_is_a_peer": true,
+    "peers": 5,
+    "as_claimed": true,
+    "detail": "synthetic fixture, constructed to the condition"
+  },
+  "created_at": "2026-09-24T12:00:00+00:00",
+  "transactions": [
+    {
+      "txid": "df56cb9190b588cff7d6074cbd6a332d4b3d7a829b94061f4cbf52261cd3801c",
+      "wtxid": "8e1626df6201a80ddd07f97b670a92aa080f490902665a84cf1eaad88782b3a7",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244000.7620413,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "815402ba38e1d4cb04b0ea1cb640ac8f38dc0f056d6b13512bf70c6fe2d13850",
+      "wtxid": "e2ce3f01e277dac40e33e29c7f4cb56c219351559e9e8f36ed850f71ffcaf7c5",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244021.106119,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "9e87477b6bdaf7d8f6eb5973740a3d16c604eb09603bda7f4c1658ed450dda55",
+      "wtxid": "4e8705eefbd15ac9b5bca6f82d95cc396f323fd4efe5d87f84f241c6f01a2c3d",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244041.4463394,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "ccbeee5b8f548ac468b988fee1dc1031c86fc0c976f099a1e68876425d872b09",
+      "wtxid": "16351c07b7088feef9da53f8b30d325399fd87e0a546835708223eb4130a6e63",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244060.2396374,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "3e86936d96d8d6571f075e2de012afc3df6d2e7e1a35ff97dfa310f840836a1b",
+      "wtxid": "58f4f8b862f5ff82af870613ec878eaf0bbdb3a94f9ec24aed5fe0b5f68abc5e",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244081.452476,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "c83916f4604b3f177e5850ac9461c99e3b6be087f8e251391ef4d7f3e90ea548",
+      "wtxid": "72aaa29c24f7ffeeb02225e1c043472b3d31312df79536ca8959e9cc498a4ef3",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244101.9600098,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "24ce8cdd21f9385b6d4b5d00ef391da21f3ccaa54e2a14da09bb48e8d606e056",
+      "wtxid": "452a8bdf91b6954f08666574eb1cc36dd340ffd62ccceb3c699bd2030e90b08b",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244121.1555774,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "fef9031fc3a48ae82b4cc6740b4eab9d0432ae46bc420bef931b1d0ddce426d6",
+      "wtxid": "76bdba06ebec8c3daeffe6df5e2c64162f219a5c8e4069a71484791663bd5522",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244141.3266795,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "3e9aec3fd35d18c96d15b9f6c4fee62862639ceef7d08bf82e79bd3ff4cf2e29",
+      "wtxid": "4276619cb7633bb8f49336f2e56b4a0bfe2dd66f51b2fc285bd077853414182c",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244160.8036852,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "3094dd63bad36659bd1095eac4d04341cd6daa0d3b1bf2e202cd6af887eaf46e",
+      "wtxid": "008fdfe8e096e45898d51b6e1d7a17edbed5aaf1c89668e9a41053f8e7256c2f",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244180.0791926,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "726e4fb037141881aa037abe25fac62feef3423eba61ca64dd57946292db2cd2",
+      "wtxid": "29ec5dc00462f1c00676bcaa4649485e3e4efa9ade1b7450837a18bc905d8357",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244201.218113,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "ebe8127268c5e361aa131596b8fb7d8d0b2996d5aae901f7d019630114e7641a",
+      "wtxid": "49cd5dae6c20e3217fed346a35d3ec4e986a8e6ec1af72826191b4dc1d8b1ba5",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244220.8212256,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "a223942594481ef1e30b5f598ff246bf3733e021b7d5960bddd6d5fe26c0dc7d",
+      "wtxid": "7361b52f559de384f2342670bd0adb5c1ccf26de4d4452ce90bc24e07fd86e89",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244240.754494,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "a3c4f043b930e403bd72a828bf148281ca55793d057d8a03c819057f658db5fe",
+      "wtxid": "d369209fc55146ec07f7cbcb58ba78a99d6637e4ae54f1702443acc05cb2efc6",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244260.0620482,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "0f8d4a3b83efec355b86fcaea401427321525471afd028cb862266723f5b25f7",
+      "wtxid": "2ee94e6dbf80c3462bf8133c27e807f9e0da5c49e3206a77e93f079e76550346",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244281.0952897,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "c2110029ff043e55395a0dc04fc12864ff8c2f25659691eb82cd70059c617776",
+      "wtxid": "1a4509a9dc449a883e7955476466fd3915494e403ad7a9a97c196492919cf6e4",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244301.4431922,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "808c0eeb87b1e562ccbccf1944f0c4ea17680c0982a4ec1ab12cb02c1779fe6d",
+      "wtxid": "6da489a237f7a9396d7d2d8b02a06ba07f6fb9843c354c1cc744b64644427005",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244320.7076113,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "450679a4ae9b5af76c146ffa3e7e07afd3b28ca6d9331fdab359d7998f352c96",
+      "wtxid": "bec0b6d558025cb30a29e10c59dec30ee34823748fc050ef82e91cf5ce7656de",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244341.8395889,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "04ea2ba3256785f805b30502804c989a6dab3e4ae15d50d7da33e84157ae2dba",
+      "wtxid": "50dea184c9d1abac3d43749b7d741bb844d563947b00035d6957762c6ef2c4fe",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244361.9105048,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "313cb57e7d7121be3b87439fcdd2938aad0270e2acac69fff7f04946a856faeb",
+      "wtxid": "be98720d6ee84ea020ba635424ccbf8a8f59435ec74a489286d21c5bb6cdef37",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244380.5588894,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "93a131558f4e552266199e4af0c7328bc7a22d60bb8f4f8d481fd75936abffe0",
+      "wtxid": "043b99a5fd0d1c60734e9c5d75a2580142579a4c977afd84352fcbefa8ddcc7a",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244401.1882915,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "8a35292b2907f8c047f43171ef9c3823e2eece7b8e0abd14345c3f9333cde196",
+      "wtxid": "55a5fe57bb678b36608767732442a822cce0d5882bf4b97a58760079be49d5f8",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244420.4940612,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "8260c3280729eaff756732065a24a7f48c3757cb7979de110fb1859ecc3bb47e",
+      "wtxid": "5a40367a68e61124726bedb0fb85d44729e3ce34b4f6f693f6bae3eced8f8bf2",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244440.997132,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "74563cdba6fcab7805cd60f2075b275e28ce1b70d352bad80ffbf8926119f130",
+      "wtxid": "916b43a493646d47c06c2d6182c4bf6f0b001aa66869bd714530444579afa3db",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244460.2969913,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "d6ed44196dbec30c848df1016acc0bd77214f326ef0b4fbfc5f8563a6f5d0611",
+      "wtxid": "73f6eb01c334a07582f1e2faf2bce923aef0e5d79c5de7c76225847924512e81",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244480.492523,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "55c22a6fce0b6bc5b5a29f0c18295983f58fb1dddc03088cfe5f9c47b79bcb96",
+      "wtxid": "d9f8fc8cea325af0059c77d750d1ea5e8599a74627de51716518255d586e44fd",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244500.368478,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "154260a78d8cdbedb3d794edadb7ebabe8976f8ebf3004165d1a4828401e5f6b",
+      "wtxid": "a582c7751affdb00ba91c54b14c7df5be14c8610289446591415edd9e1a29f3c",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244520.1746557,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "1b5f760ae2d11cc08bbaaed4025ef74520fa969f48b0895ae50afb9bf4f47d46",
+      "wtxid": "3c8a1b136a41cfcad32368546574e60294a403afdf9707fdd4390adf17626d0a",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244541.6705856,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "de1f62b92cbbe9ad7643841ebfc9350a1d8eee4534ea84e6dbfd6e6f18676612",
+      "wtxid": "3dedfd3368bf3d83835f9cbba80aba48cd520dac52792532ee74ecd466c669ff",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244560.7782946,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "786a34986f92f9d9a6c39ed076678d967d2db052acdb5a5e5691047df99e0e5f",
+      "wtxid": "8705637dbb2a40f3c4fb58fcf960d16dbe1c48c8e240d7781878954620b4216c",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244580.130518,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "41fdf32ae68bf1d3329a86d4a14d710d95a9a108e69034765f3a93b88e00da0b",
+      "wtxid": "ed09c220b3bf86d09d71c1fa496090f8cc7198b998edb448d5401b880b76f40c",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244601.673419,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "8873e9968ee678490399fc0c21081f34f1b6c2cb115b725cab25bdc7ae202ad7",
+      "wtxid": "16f42ff87415fab4086321a24a53b81c6b8101df3470662210d531249e6bd2e3",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244621.3837428,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "2fdab063830e93ab71215ff3fc38c01004826bac9177092ae6f3a62f456a0e65",
+      "wtxid": "23da44a4264c1906625f395c3d042cf3cf883dc9b5ef604b3c161376d4edc639",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244641.5593345,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "fc9730df321037989a8bda731d99f87378c12cb0bfa24cf88539fac1446d67a6",
+      "wtxid": "461f1a6a2afe39b61bc1d2e8600620ca01f1687e8f465378d2e544ed4fb21f3d",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244661.0646577,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "4cd8915694115e57c82eeb9c0ce71d46f47fa72e6f995dfb0eefb764ad7a5766",
+      "wtxid": "87c49c45052688a85a6b0f7e9a28dce4d65c56c205c33ef4b8c2123b330dcea0",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244681.3298516,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "cd1dfcb8d080cfb30d2e1e05e7d485bd57a9a867ff7965a64e0d1a0c8e9e4bbc",
+      "wtxid": "de1b7a7e204f00b2fff1bcabc09a7f490482365efd248b75f431d6a570d1a5f3",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244701.9897308,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "388d732bd00f5f2ad2923e1760787c3056edaf88e6da2b00e97f8175970e870a",
+      "wtxid": "765e1c60b7c2087afdcc0b88793105ba35bb9d96235e8e1e5b98b7e652a72c42",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244721.5762625,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "3bfe7c432361424eadac29bc2b64b4aff314a37c0c920f62cf13e2ce2589a6e8",
+      "wtxid": "3ee63293ea3ad9c67599dd4369dae1bed3dd94669c811a13e150066887df3732",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244740.7386293,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "f84b67de20723386df78d5f493c26bc9cf6bf1c03e0823b0baa040589af16cdd",
+      "wtxid": "60bbfa8c2ed573664620b2d9755ab25239db622590e2dfc302495d781efdc09b",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244761.1224995,
+      "topology_condition": "adjacent"
+    },
+    {
+      "txid": "d73c9e4a8ec12e4578e878ea9810613fca97a5092f9866b548d87c1a631d8d74",
+      "wtxid": "2274453cd7e4d70d680c6fe8dcb5a614537658d489d65daef482337dd981a179",
+      "raw_hex": "020000001111111111111111111111111111111111111111",
+      "true_origin_ip": "203.0.113.9",
+      "broadcast_wall_clock": 1790244781.7864087,
+      "topology_condition": "adjacent"
+    }
+  ]
+}

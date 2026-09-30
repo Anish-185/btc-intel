@@ -1,11 +1,13 @@
 /** The frame every page sits in: a left rail with the wordmark, the sections,
  *  an on-this-page list, and the theme toggle. Content to the right. */
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, useLocation, useParams } from "react-router-dom";
+import { Link, NavLink, useLocation, useParams } from "react-router-dom";
 import { useBuildCheck } from "../lib/useBuildCheck";
 import { useTheme } from "../lib/theme";
 import { forgetTokens } from "../lib/tokens";
+import { CAPABILITIES, stageFor } from "../content/capabilities";
 import { CommandPalette } from "./CommandPalette";
+import { DotArt } from "./DotArt";
 
 /** ⌘ on a Mac, Ctrl everywhere else. Showing the wrong one teaches the wrong
  *  shortcut, which is worse than showing none. */
@@ -15,9 +17,11 @@ const MOD = typeof navigator !== "undefined" && /Mac|iP(hone|ad)/.test(navigator
 
 const PAGES = [
   { to: "/", label: "Overview" },
+  { to: "/case", label: "This case" },
   { to: "/monitor", label: "Live monitor" },
   { to: "/alerts", label: "Alert queue" },
   { to: "/investigate", label: "Investigation graph" },
+  { to: "/peers", label: "Peer lookup" },
   { to: "/redteam", label: "Red team" },
   { to: "/custody", label: "Chain of custody" },
 ];
@@ -27,13 +31,23 @@ export interface Anchor {
   label: string;
 }
 
-export function Shell({ anchors, children }: { anchors?: Anchor[]; children: ReactNode }) {
+export function Shell({
+  anchors,
+  children,
+  variant = "rail",
+}: {
+  anchors?: Anchor[];
+  children: ReactNode;
+  /** "top" puts the navigation in a bar across the page, for the showcase. */
+  variant?: "rail" | "top";
+}) {
   const [theme, toggleTheme] = useTheme();
   const build = useBuildCheck();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [activeAnchor, setActiveAnchor] = useState<string | null>(null);
   const { pathname } = useLocation();
   const params = useParams();
+  const stage = variant === "rail" ? stageFor(pathname) : null;
 
   // A case and a transaction are places too. Showing the open one in the rail
   // is how a reader learns the console has more than two pages.
@@ -41,7 +55,9 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
     ? { label: `Case ${params.id.slice(0, 10)}…`, to: pathname }
     : params.txid
       ? { label: `Transaction ${params.txid.slice(0, 8)}…`, to: pathname }
-      : null;
+      : params.peer
+        ? { label: `Peer ${params.peer.slice(0, 15)}`, to: pathname }
+        : null;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -74,8 +90,8 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
   }, [anchors, pathname]);
 
   return (
-    <div className="shell">
-      <header className="rail">
+    <div className={variant === "top" ? "shell shell-top" : "shell"}>
+      <header className={variant === "top" ? "topbar" : "rail"}>
         <NavLink to="/" className="wordmark">
           <span className="wordmark-mark" aria-hidden="true" />
           btc-intel
@@ -88,13 +104,13 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
             </NavLink>
           ))}
           {open && (
-            <NavLink to={open.to} className="rail-link" title={params.id ?? params.txid}>
+            <NavLink to={open.to} className="rail-link" title={params.id ?? params.txid ?? params.peer}>
               <span className="mono" style={{ fontSize: "var(--fs-small)" }}>{open.label}</span>
             </NavLink>
           )}
         </nav>
 
-        {anchors?.length ? (
+        {variant === "rail" && anchors?.length ? (
           <>
             <hr className="rail-divider" />
             <p className="label">On this page</p>
@@ -128,9 +144,11 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
             <span className="theme-swatch" aria-hidden="true" />
             {theme === "dark" ? "light" : "dark"}
           </button>
-          <p className="label" style={{ marginTop: "var(--sp-2)" }}>
-            Offline · synthetic data
-          </p>
+          {variant === "rail" && (
+            <p className="label" style={{ marginTop: "var(--sp-2)" }}>
+              Offline, synthetic data
+            </p>
+          )}
         </div>
       </header>
 
@@ -162,6 +180,19 @@ export function Shell({ anchors, children }: { anchors?: Anchor[]; children: Rea
               </p>
             </div>
           </div>
+        )}
+        {stage && (
+          <Link to={`/#${stage.id}`} className="stage-banner" viewTransition>
+            <DotArt name={stage.art} mode={stage.mode} cell={4} className="stage-banner-art" />
+            <span className="stage-banner-copy">
+              <span className="stage-num">
+                stage {String(CAPABILITIES.indexOf(stage) + 1).padStart(2, "0")} of{" "}
+                {CAPABILITIES.length}
+              </span>
+              <span className="stage-banner-name">{stage.name}</span>
+              <span className="stage-banner-title">{stage.title}</span>
+            </span>
+          </Link>
         )}
         {children}
       </main>

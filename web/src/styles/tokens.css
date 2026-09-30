@@ -17,31 +17,41 @@
   color-scheme: light;
 
   /* -- surfaces ------------------------------------------------------- */
-  --paper: #f4f5f7;
+  --paper: #f1f4fc;
   --surface: #ffffff;
-  --sunk: #ecedf1;
+  --sunk: #e6ecfa;
   --field: #070b18; /* dark in both themes, on purpose */
   --field-ink: #dce6ff;
   --field-muted: #7f9bd8;
   --field-rule: #16224a;
 
   /* -- ink: one colour, four alphas ----------------------------------- */
-  --ink: #0b1016;
-  --ink-soft: #0b1016b8; /* 72% — secondary prose      */
-  --ink-muted: #0b10169e; /* 62% — labels, units        */
-  --ink-faint: #0b10167a; /* 48% — disabled, tick marks */
+  --ink: #0a1030;
+  --ink-soft: #0a1030b8; /* 72% — secondary prose      */
+  --ink-muted: #0a10309e; /* 62% — labels, units        */
+  --ink-faint: #0a10307a; /* 48% — disabled, tick marks */
 
   /* -- hairlines ------------------------------------------------------ */
-  --rule: #dcdfe6;
-  --rule-soft: #e9ebf0;
+  --rule: #d3dcf0;
+  --rule-soft: #e3e9f7;
 
   /* -- the accent ----------------------------------------------------- */
-  --evidence: #1b44d8;
-  --evidence-hi: #2b56f0;
-  --evidence-lo: #142f9e;
-  --evidence-w7: #1b44d812;
-  --evidence-w12: #1b44d81f;
+  --evidence: #1646f5;
+  --evidence-hi: #2e5bff;
+  --evidence-lo: #0b31c4;
+  --evidence-w7: #1646f512;
+  --evidence-w12: #1646f51f;
   --on-evidence: #f5f7ff;
+
+  /* -- showcase surfaces: the cyanotype. Cobalt panels carry pale ink;
+     --flag is the one warm mark, and it only ever means "this is the lead". */
+  --cobalt: #1646f5;
+  --cobalt-deep: #0b2fc0;
+  --navy: #07124a;
+  --on-cobalt: #f2f5ff;
+  --on-cobalt-soft: #c3d0ff;
+  --on-cobalt-faint: #8ea4ff;
+  --flag: #ff6a1f;
 
   /* -- verdicts (an analyst's decision, not a severity) --------------- */
   --confirmed: #186b45;
@@ -83,6 +93,7 @@
   --risk-node-critical: #ff7186;
 
   /* -- type ----------------------------------------------------------- */
+  --font-display: "Inter Tight Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -160,18 +171,21 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --paper: #0a0e17;
-  --surface: #111723;
-  --sunk: #070b12;
+  --paper: #060a1c;
+  --surface: #0c1330;
+  --sunk: #050817;
+  --cobalt: #1a3fd8;
+  --cobalt-deep: #0f2a9e;
+  --navy: #040a2b;
   /* --field, --field-* stay as they are: the field is not themed. */
 
-  --ink: #e9edf5;
-  --ink-soft: #e9edf5c4;
-  --ink-muted: #e9edf58f;
-  --ink-faint: #e9edf55c;
+  --ink: #e8edfb;
+  --ink-soft: #e8edfbc4;
+  --ink-muted: #e8edfb8f;
+  --ink-faint: #e8edfb5c;
 
-  --rule: #252e3e;
-  --rule-soft: #1a2230;
+  --rule: #1d2750;
+  --rule-soft: #141c3e;
 
   --evidence: #7e9dff;
   --evidence-hi: #9db4ff;
@@ -204,15 +218,18 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
     color-scheme: dark;
-    --paper: #0a0e17;
-    --surface: #111723;
-    --sunk: #070b12;
-    --ink: #e9edf5;
-    --ink-soft: #e9edf5c4;
-    --ink-muted: #e9edf58f;
-    --ink-faint: #e9edf55c;
-    --rule: #252e3e;
-    --rule-soft: #1a2230;
+    --paper: #060a1c;
+    --surface: #0c1330;
+    --sunk: #050817;
+    --cobalt: #1a3fd8;
+    --cobalt-deep: #0f2a9e;
+    --navy: #040a2b;
+    --ink: #e8edfb;
+    --ink-soft: #e8edfbc4;
+    --ink-muted: #e8edfb8f;
+    --ink-faint: #e8edfb5c;
+    --rule: #1d2750;
+    --rule-soft: #141c3e;
     --evidence: #7e9dff;
     --evidence-hi: #9db4ff;
     --evidence-lo: #5c7ff0;
